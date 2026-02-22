@@ -32,9 +32,14 @@
         let selectedToys = [];
         let inheritedHatPattern = null;
         let inheritedHatStyleClass = 'hat';
+        let inheritedHatSoundConfig = null;
+        let inheritedHatVolumeDb = -25;
         let inheritedSnarePattern = null;
         let inheritedSnareVelocity = null;
         let inheritedSnareStyleClass = 'snare';
+        let inheritedSnareSoundConfig = null;
+        let inheritedSnareVolumeDb = -28;
+        let inheritedSnareBodyVolumeDb = -26;
         let level2TransitionLock = false;
         let toddlerTransitionLock = false;
         let carryHatFilter = null;
@@ -46,6 +51,8 @@
         let inheritedCymbalPattern = null;
         let inheritedCymbalVelocity = null;
         let inheritedCymbalStyleClass = 'cymbal';
+        let inheritedCymbalSoundConfig = null;
+        let inheritedCymbalVolumeDb = -30;
         let inheritedChordProgression = null;
         let childLifeChoice = null;
         let childTransitionLock = false;
@@ -3763,7 +3770,7 @@
                 chordPreviewSynth = new Tone.PolySynth(Tone.Synth, {
                     oscillator: { type: "triangle4" },
                     envelope: { attack: 0.04, decay: 0.5, sustain: 0.25, release: 0.6 },
-                    volume: -8
+                    volume: -14
                 }).toDestination();
             } catch (e) { return; }
             chordPreviewDrop = drop;
@@ -3951,15 +3958,16 @@
             disposeCarryHatLayer();
             const pattern = inheritedHatPattern || (baseRhythmInfo ? baseRhythmInfo.baseHatPattern : null);
             if (!pattern) return;
+            const cfg = inheritedHatSoundConfig || { noise: "white", hp: 7600, q: 0.55, decay: 0.05, release: 0.016 };
             carryHatFilter = new Tone.Filter({
                 type: "highpass",
-                frequency: 7600,
-                Q: 0.55
+                frequency: cfg.hp,
+                Q: cfg.q
             }).toDestination();
             carryHatSynth = new Tone.NoiseSynth({
-                noise: { type: "white" },
-                envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.016 },
-                volume: -25
+                noise: { type: cfg.noise },
+                envelope: { attack: 0.001, decay: cfg.decay, sustain: 0, release: cfg.release },
+                volume: inheritedHatVolumeDb
             }).connect(carryHatFilter);
         }
 
@@ -3981,23 +3989,24 @@
         function initCarrySnareLayer() {
             disposeCarrySnareLayer();
             if (!inheritedSnarePattern) return;
+            const cfg = inheritedSnareSoundConfig || { noise: "white", bp: 1800, q: 0.7, decay: 0.12, release: 0.08, body: true };
             carrySnareFilter = new Tone.Filter({
                 type: "bandpass",
-                frequency: 1800,
-                Q: 0.7
+                frequency: cfg.bp,
+                Q: cfg.q
             }).toDestination();
             carrySnareSynth = new Tone.NoiseSynth({
-                noise: { type: "white" },
-                envelope: { attack: 0.001, decay: 0.12, sustain: 0, release: 0.08 },
-                volume: -28
+                noise: { type: cfg.noise },
+                envelope: { attack: 0.001, decay: cfg.decay, sustain: 0, release: cfg.release },
+                volume: inheritedSnareVolumeDb
             }).connect(carrySnareFilter);
-            carrySnareBody = new Tone.MembraneSynth({
+            carrySnareBody = cfg.body ? new Tone.MembraneSynth({
                 pitchDecay: 0.025,
                 octaves: 2.5,
                 oscillator: { type: "triangle" },
                 envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.06 },
-                volume: -26
-            }).toDestination();
+                volume: inheritedSnareBodyVolumeDb
+            }).toDestination() : null;
         }
 
         function disposeCarryCymbalLayer() {
@@ -4010,13 +4019,14 @@
         function initCarryCymbalLayer() {
             disposeCarryCymbalLayer();
             if (!inheritedCymbalPattern) return;
+            const cfg = inheritedCymbalSoundConfig || { freq: 280, harmonicity: 5.1, modulationIndex: 30, resonance: 4000, decay: 0.8 };
             carryCymbalSynth = new Tone.MetalSynth({
-                frequency: 280,
-                harmonicity: 5.1,
-                modulationIndex: 30,
-                resonance: 4000,
-                envelope: { attack: 0.001, decay: 0.8, release: 0.05 },
-                volume: -30
+                frequency: cfg.freq,
+                harmonicity: cfg.harmonicity,
+                modulationIndex: cfg.modulationIndex,
+                resonance: cfg.resonance,
+                envelope: { attack: 0.001, decay: cfg.decay, release: 0.05 },
+                volume: inheritedCymbalVolumeDb
             }).toDestination();
         }
 
@@ -4370,6 +4380,7 @@
 
             for (let i = 0; i < count; i++) {
                 const timbre = hatTimbres[i % hatTimbres.length];
+                const hatSoundConfig = { noise: timbre.noise, hp: timbre.hp, q: timbre.q, decay: timbre.decay, release: 0.015 };
                 const hatFilter = new Tone.Filter({
                     type: "highpass",
                     frequency: timbre.hp,
@@ -4400,6 +4411,7 @@
                     hatOpenSynth,
                     hatFilter,
                     hatMode: timbre.mode,
+                    hatSoundConfig,
                     instrument: "hat",
                     toy,
                     toySeed: Math.random() * 10000,
@@ -4661,6 +4673,14 @@
                 const bundle = buildSnarePattern(baseRhythmInfo, i);
                 const snareGainBoostDb = (i === 1 || i === 4) ? 6 : 0;
                 const snareBodyBoostDb = (i === 1 || i === 4) ? 5 : 0;
+                const snareSoundConfig = {
+                    noise: timbre.noise,
+                    bp: timbre.bp,
+                    q: timbre.q,
+                    decay: timbre.decay,
+                    release: timbre.release,
+                    body: timbre.body
+                };
                 const snareFilter = new Tone.Filter({
                     type: "bandpass",
                     frequency: timbre.bp,
@@ -4691,6 +4711,7 @@
                     snareSynth,
                     snareFilter,
                     snareBody,
+                    snareSoundConfig,
                     snareGainBoostDb,
                     snareBodyBoostDb,
                     toy,
@@ -4730,6 +4751,13 @@
             for (let i = 0; i < count; i++) {
                 const timbre = timbres[i];
                 const bundle = buildCymbalPattern(baseRhythmInfo, i);
+                const cymbalSoundConfig = {
+                    freq: timbre.freq,
+                    harmonicity: timbre.harmonicity,
+                    modulationIndex: timbre.modulationIndex,
+                    resonance: timbre.resonance,
+                    decay: timbre.decay
+                };
                 const cymbalSynth = new Tone.MetalSynth({
                     frequency: timbre.freq,
                     harmonicity: timbre.harmonicity,
@@ -4749,6 +4777,7 @@
                     overlapAlpha: 0,
                     instrument: "cymbal",
                     cymbalSynth,
+                    cymbalSoundConfig,
                     toy,
                     toySeed: Math.random() * 10000,
                     hudStyleClass: i % 2 === 0 ? "cymbal" : "cymbal-alt",
@@ -4854,7 +4883,7 @@
                             // Chord sound via proximity (non-hover) — original behavior
                             const barSteps2 = STEPS_PER_BEAT * baseRhythmInfo.beatsPerBar;
                             const barIndex = Math.floor(step / barSteps2) % drop.chordProgression.notes.length;
-                            drop.chordSynth.volume.value = baseVol - 2;
+                            drop.chordSynth.volume.value = baseVol - 8;
                             drop.chordSynth.triggerAttackRelease(drop.chordProgression.notes[barIndex], "2n");
                             if (drop.isHovered) drop.ripples.push({ t: 0, accent });
                             return;
@@ -5651,6 +5680,9 @@
             if (clickedDrop.toy) selectedToys.push(clickedDrop.toy);
             inheritedHatPattern = clickedDrop.pattern ? clickedDrop.pattern.slice() : null;
             inheritedHatStyleClass = clickedDrop.hudStyleClass || 'hat';
+            inheritedHatSoundConfig = clickedDrop.hatSoundConfig ? { ...clickedDrop.hatSoundConfig } : null;
+            const hatVolNow = clickedDrop.hatClosedSynth?.volume?.value;
+            inheritedHatVolumeDb = (Number.isFinite(hatVolNow) && hatVolNow > -90) ? hatVolNow : -25;
             const sx = clickedDrop.x - cameraX;
             const sy = clickedDrop.y;
             const ripple = document.createElement('div');
@@ -5741,6 +5773,8 @@
             selectedToys = [];
             inheritedHatPattern = null;
             inheritedHatStyleClass = 'hat';
+            inheritedHatSoundConfig = null;
+            inheritedHatVolumeDb = -25;
             disposeCarryHatLayer();
             initToneDrops();
             buildScoreHud();
@@ -5775,6 +5809,11 @@
             inheritedSnarePattern = clickedDrop.pattern ? clickedDrop.pattern.slice() : null;
             inheritedSnareVelocity = clickedDrop.velocityPattern ? clickedDrop.velocityPattern.slice() : null;
             inheritedSnareStyleClass = clickedDrop.hudStyleClass || 'snare';
+            inheritedSnareSoundConfig = clickedDrop.snareSoundConfig ? { ...clickedDrop.snareSoundConfig } : null;
+            const snareVolNow = clickedDrop.snareSynth?.volume?.value;
+            const snareBodyVolNow = clickedDrop.snareBody?.volume?.value;
+            inheritedSnareVolumeDb = (Number.isFinite(snareVolNow) && snareVolNow > -90) ? snareVolNow : -28;
+            inheritedSnareBodyVolumeDb = (Number.isFinite(snareBodyVolNow) && snareBodyVolNow > -90) ? snareBodyVolNow : -26;
             const sx = clickedDrop.x - cameraX;
             const sy = clickedDrop.y;
             const ripple = document.createElement('div');
@@ -5812,6 +5851,9 @@
             inheritedCymbalPattern = clickedDrop.pattern ? clickedDrop.pattern.slice() : null;
             inheritedCymbalVelocity = clickedDrop.velocityPattern ? clickedDrop.velocityPattern.slice() : null;
             inheritedCymbalStyleClass = clickedDrop.hudStyleClass || 'cymbal';
+            inheritedCymbalSoundConfig = clickedDrop.cymbalSoundConfig ? { ...clickedDrop.cymbalSoundConfig } : null;
+            const cymbalVolNow = clickedDrop.cymbalSynth?.volume?.value;
+            inheritedCymbalVolumeDb = (Number.isFinite(cymbalVolNow) && cymbalVolNow > -90) ? cymbalVolNow : -30;
             if (clickedDrop.toy) selectedToys.push(clickedDrop.toy);
             const sx = clickedDrop.x - cameraX;
             const sy = clickedDrop.y;
@@ -5853,15 +5895,6 @@
             child2TransitionLock = true;
             childLifeChoice = clickedDrop.chordSide;
             inheritedChordProgression = clickedDrop.chordProgression;
-            // Play confirmation chord
-            const confirmSynth = new Tone.PolySynth(Tone.Synth, {
-                volume: -4,
-                envelope: { attack: 0.05, decay: 1.2, sustain: 0.1, release: 2 }
-            }).toDestination();
-            const allNotes = clickedDrop.chordProgression.notes.flat();
-            const uniqueNotes = [...new Set(allNotes)];
-            confirmSynth.triggerAttackRelease(uniqueNotes.slice(0, 6), "1n");
-            setTimeout(() => confirmSynth.dispose(), 4000);
             // Ripple effect
             const sx = clickedDrop.x - cameraX;
             const sy = clickedDrop.y;
@@ -5914,14 +5947,6 @@
                     labels: clickedDrop.activityLabels
                 });
             }
-            // Confirmation sound
-            const confirmSynth = new Tone.MonoSynth({
-                oscillator: { type: "sine" },
-                envelope: { attack: 0.02, decay: 0.8, sustain: 0.1, release: 1 },
-                volume: -6
-            }).toDestination();
-            confirmSynth.triggerAttackRelease("C2", "2n");
-            setTimeout(() => confirmSynth.dispose(), 3000);
             // Ripple effect
             const sx = clickedDrop.x - cameraX;
             const sy = clickedDrop.y;
