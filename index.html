@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Tone.Tone.Life. - Full Experience</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <canvas id="main-canvas"></canvas>
+
+    <div id="ui-layer">
+        <div id="title-group">
+            <div id="title-logo-wrap">
+                <p class="logo-kicker">A LIFE IN SOUND</p>
+                <h1 id="logo-title">Tone.Tone.Life.</h1>
+                <p id="logo-subtitle">Every sound you choose becomes who you are.</p>
+                <div id="logo-ornaments" aria-hidden="true">
+                    <span class="ornament orb-a"></span>
+                    <span class="ornament orb-b"></span>
+                    <span class="ornament line-a"></span>
+                    <span class="ornament line-b"></span>
+                </div>
+            </div>
+            <div id="start-btn-container">
+                <button id="start-btn">tone.</button>
+                <div id="ripple-effect" class="ripple"></div>
+            </div>
+        </div>
+
+        <div id="choice-group">
+            <div id="message-container">
+                <p class="msg-en">A new life begins. Which rhythm will guide your first steps?</p>
+                <p class="msg-jp">新しい命が始まる。最初の一歩を導くリズムはどれ？</p>
+            </div>
+            <div id="choices-btn-container">
+                <div class="choice-col">
+                    <div id="btn-left" class="choice-btn">tone.</div>
+                    <span class="choice-hint">calm</span>
+                </div>
+                <div class="choice-col">
+                    <div id="btn-middle" class="choice-btn">tone.</div>
+                    <span class="choice-hint">steady</span>
+                </div>
+                <div class="choice-col">
+                    <div id="btn-right" class="choice-btn">tone.</div>
+                    <span class="choice-hint">eager</span>
+                </div>
+                <div class="choice-col">
+                    <div id="btn-fast" class="choice-btn">tone.</div>
+                    <span class="choice-hint">rapid</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="score-hud">
+        <div id="score-head">
+            <span id="score-title">Life Rhythm</span>
+            <span id="score-meta"></span>
+        </div>
+        <div id="score-tracks"></div>
+    </div>
+    <div id="scene-fade"></div>
+    <div id="custom-cursor"></div>
+    <div id="tone-hover-info"></div>
+    <button id="score-toggle-btn" type="button">Score: Off</button>
+    <script src="js/toys.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

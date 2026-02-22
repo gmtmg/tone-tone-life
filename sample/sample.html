@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kick/HiHat Sample Patterns</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: "Zen Maru Gothic", "Hiragino Kaku Gothic ProN", sans-serif;
+      background: #f6f7fb;
+      color: #2c2f3a;
+    }
+    h1 { margin: 0 0 10px; font-size: 1.4rem; }
+    p { margin: 0 0 16px; color: #596074; }
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    button, select, input {
+      font: inherit;
+      border-radius: 10px;
+      border: 1px solid #d3d8e6;
+      background: #fff;
+      padding: 8px 12px;
+    }
+    button {
+      cursor: pointer;
+      border: 0;
+      background: #39425e;
+      color: #fff;
+    }
+    button.secondary { background: #7f89a5; }
+    .grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    }
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 6px 14px rgba(33, 40, 66, 0.08);
+    }
+    .card h3 {
+      margin: 0 0 8px;
+      font-size: 1rem;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.8rem;
+      color: #4d5367;
+      white-space: pre-wrap;
+      margin: 0 0 8px;
+      line-height: 1.35;
+    }
+    .playing {
+      outline: 2px solid #4c79ff;
+    }
+  </style>
+</head>
+<body>
+  <h1>Bass Drum / Hi-Hat Sample Pack</h1>
+  <p>A軸ルールで作った 4/4 × 4小節のサンプルです。各カードで個別再生できます。</p>
+
+  <div class="toolbar">
+    <button id="start-audio">Audio Start</button>
+    <button id="stop-all" class="secondary">Stop</button>
+    <label for="bpm">BPM</label>
+    <input id="bpm" type="number" min="40" max="180" value="74">
+  </div>
+
+  <div id="sample-grid" class="grid"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+  <script src="./sample_bass.js"></script>
+</body>
+</html>
