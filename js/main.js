@@ -3392,7 +3392,6 @@
         }
 
         function drawToneDrops() {
-            const now = performance.now() * 0.008;
             const dropColor = (drop) => {
                 if (drop.dropColor) return drop.dropColor;
                 if (drop.instrument === "snare") return "hsl(24, 82%, 58%)";
@@ -3429,85 +3428,55 @@
                 ctx.save();
                 ctx.translate(drop.x, drop.y);
 
-                // Beat-synced ripples
+                // Beat-synced ripples (kept subtle to match choice-button style)
                 if (drop.ripples) {
                     drop.ripples = drop.ripples.filter(r => r.t < 1);
                     drop.ripples.forEach(r => {
                         r.t += 0.02;
-                        const radius = 48 + r.t * 90;
-                        const alpha = (1 - r.t) * 0.75 * (r.accent || 0.7);
-                        ctx.strokeStyle = `rgba(229, 142, 170, ${alpha})`;
-                        ctx.lineWidth = 4 * (1 - r.t * 0.6);
+                        const radius = 52 + r.t * 56;
+                        const alpha = (1 - r.t) * 0.18 * (r.accent || 0.7);
+                        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+                        ctx.lineWidth = 2.2 * (1 - r.t * 0.55);
                         ctx.beginPath();
                         ctx.arc(0, 0, radius, 0, Math.PI * 2);
-                        ctx.stroke();
-                        // Inner glow ring
-                        const alpha2 = (1 - r.t) * 0.3 * (r.accent || 0.7);
-                        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha2})`;
-                        ctx.lineWidth = 1.5 * (1 - r.t);
-                        ctx.beginPath();
-                        ctx.arc(0, 0, radius - 3, 0, Math.PI * 2);
                         ctx.stroke();
                     });
                 }
 
-                const ringA = active ? 0.62 : 0.44;
-                ctx.fillStyle = `rgba(255,255,255,${ringA})`;
+                // Base style: close to initial choice buttons (solid fill + white border + modest shadow)
+                const baseR = 50;
+                ctx.shadowColor = "rgba(0,0,0,0.14)";
+                ctx.shadowBlur = 14;
+                ctx.shadowOffsetY = 8;
+                ctx.fillStyle = toneColor;
                 ctx.beginPath();
-                ctx.arc(0, 0, 58 + glow * 5, 0, Math.PI * 2);
+                ctx.arc(0, 0, baseR, 0, Math.PI * 2);
                 ctx.fill();
-                if (active) {
-                    ctx.strokeStyle = `rgba(255, 255, 255, ${0.12 + glow * 0.24})`;
-                    ctx.lineWidth = 2 + glow * 2.5;
-                    ctx.beginPath();
-                    ctx.arc(0, 0, 58 + glow * 12, 0, Math.PI * 2);
-                    ctx.stroke();
-                }
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetY = 0;
 
-                // Transparent tone shell with dashed stroke.
-                ctx.strokeStyle = fillLevel >= 0.985 ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.88)";
-                ctx.lineWidth = 3;
-                ctx.setLineDash(fillLevel >= 0.985 ? [] : [6, 6]);
+                // Subtle top highlight instead of strong glow
+                const hi = ctx.createRadialGradient(-14, -18, 2, -8, -10, 42);
+                hi.addColorStop(0, "rgba(255,255,255,0.30)");
+                hi.addColorStop(1, "rgba(255,255,255,0)");
+                ctx.fillStyle = hi;
                 ctx.beginPath();
-                ctx.arc(0, 0, 46, 0, Math.PI * 2);
+                ctx.arc(0, 0, baseR - 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                // White border like choice buttons
+                ctx.strokeStyle = "rgba(255,255,255,0.96)";
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(0, 0, baseR, 0, Math.PI * 2);
                 ctx.stroke();
-                ctx.setLineDash([]);
 
-                // Jelly fill from overlap origin, spreading to whole tone.
-                if (fillLevel > 0.001) {
-                    const ox = (typeof drop.fillOriginX === "number") ? drop.fillOriginX : 0;
-                    const oy = (typeof drop.fillOriginY === "number") ? drop.fillOriginY : 0;
-                    const maxR = 72;
-                    const spreadR = maxR * fillLevel;
-                    ctx.save();
+                // Hovered tone gets a restrained accent ring
+                if (active) {
+                    ctx.strokeStyle = `rgba(255,255,255,${0.14 + glow * 0.14})`;
+                    ctx.lineWidth = 2;
                     ctx.beginPath();
-                    ctx.arc(0, 0, 46, 0, Math.PI * 2);
-                    ctx.clip();
-                    const rg = ctx.createRadialGradient(
-                        ox + Math.sin(now) * 1.2,
-                        oy + Math.cos(now * 0.8) * 1.2,
-                        Math.max(1, spreadR * 0.18),
-                        ox,
-                        oy,
-                        Math.max(2, spreadR)
-                    );
-                    rg.addColorStop(0, "rgba(255,255,255,0.82)");
-                    rg.addColorStop(0.36, toneColor);
-                    rg.addColorStop(1, toneColor);
-                    ctx.fillStyle = rg;
-                    ctx.beginPath();
-                    ctx.arc(ox, oy, spreadR, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.restore();
-                }
-
-                if (drop.jellyPulse > 0.01) {
-                    drop.jellyPulse *= 0.86;
-                    const a = drop.jellyPulse * 0.75;
-                    ctx.strokeStyle = drop.jellyDrain ? `rgba(255,255,255,${a})` : `rgba(229,142,170,${a})`;
-                    ctx.lineWidth = 2 + drop.jellyPulse * 5;
-                    ctx.beginPath();
-                    ctx.arc(0, 0, 28 + (1 - drop.jellyPulse) * 22, 0, Math.PI * 2);
+                    ctx.arc(0, 0, baseR + 8 + glow * 2, 0, Math.PI * 2);
                     ctx.stroke();
                 }
 
