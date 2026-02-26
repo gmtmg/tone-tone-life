@@ -300,14 +300,19 @@
         const orbEl = document.getElementById('custom-cursor');
         const hoverInfoEl = document.getElementById('tone-hover-info');
 
-        document.addEventListener('mousemove', e => {
-            mouseX = e.clientX; mouseY = e.clientY;
+        function updatePointer(clientX, clientY) {
+            mouseX = clientX;
+            mouseY = clientY;
             const isGameplay = currentScene >= SCENE.CRAWL;
-            orbWorldX = isGameplay ? e.clientX + cameraX : e.clientX;
-            orbWorldY = e.clientY;
+            orbWorldX = isGameplay ? clientX + cameraX : clientX;
+            orbWorldY = clientY;
             if (orbDragging) {
                 emitOrbParticles(orbWorldX, orbWorldY, 2);
             }
+        }
+
+        document.addEventListener('pointermove', e => {
+            updatePointer(e.clientX, e.clientY);
         });
 
         function getUiToneAtScreenPoint(screenX, screenY) {
@@ -346,14 +351,17 @@
         }
 
         // ドラッグ開始・終了
-        window.addEventListener('mousedown', (e) => {
+        window.addEventListener('pointerdown', (e) => {
+            updatePointer(e.clientX, e.clientY);
             orbDragging = true;
             orbEl.classList.add('dragging');
         });
-        window.addEventListener('mouseup', () => {
+        function stopOrbDrag() {
             orbDragging = false;
             orbEl.classList.remove('dragging');
-        });
+        }
+        window.addEventListener('pointerup', stopOrbDrag);
+        window.addEventListener('pointercancel', stopOrbDrag);
 
         function updateOrbScreenPosition() {
             orbEl.style.left = mouseX + 'px';
