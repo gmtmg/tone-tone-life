@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Lesson Phase Test</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background: #000;
+            font-family: 'Zen Maru Gothic', sans-serif;
+        }
+        canvas { display: block; width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+window.addEventListener('resize', resize);
+resize();
+
+const dustMotes = [];
+for (let i = 0; i < 35; i++) {
+    dustMotes.push({
+        x: Math.random() * 0.5, y: Math.random() * 0.55,
+        size: 1 + Math.random() * 2.5,
+        speed: 0.00008 + Math.random() * 0.00015,
+        drift: (Math.random() - 0.5) * 0.00015,
+        phase: Math.random() * Math.PI * 2,
+        alpha: 0.15 + Math.random() * 0.3
+    });
+}
+
+const startTime = performance.now();
+const ANIM_MS = 5000, FADE_MS = 3000;
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function draw() {
+    const now = performance.now();
+    const elapsed = now - startTime;
+    const t = Math.min(elapsed / ANIM_MS, 1);
+    ctx.clearRect(0, 0, W, H);
+
+    // ============ PERSPECTIVE (Seated eye-level) ============
+    // Eye level is at ~38% from top — same height as other seated students
+    const vpX = W * 0.5;
+    const vpY = H * 0.38;
+
+    // Back wall: extends ABOVE and BELOW the horizon
+    const bwL = W * 0.08, bwR = W * 0.92;
+    const bwTop = H * 0.06;   // ceiling-wall junction (above eye level)
+    const bwBot = H * 0.56;   // wall-floor junction (below eye level)
+    const bwW = bwR - bwL, bwH = bwBot - bwTop;
+
+    // Side walls meet screen edges: top corners → bwTop, bottom → frontBotY
+    const frontBotY = H * 0.72;
+
+    // ============ 1. CEILING ============
+    const ceilG = ctx.createLinearGradient(0, 0, 0, bwTop);
+    ceilG.addColorStop(0, "#ede8df"); ceilG.addColorStop(1, "#e5ddd2");
+    ctx.fillStyle = ceilG;
+    ctx.beginPath();
+    ctx.moveTo(0, 0); ctx.lineTo(W, 0);
+    ctx.lineTo(bwR, bwTop); ctx.lineTo(bwL, bwTop);
+    ctx.closePath(); ctx.fill();
+
+    // Fluorescent lights on ceiling
+    for (let i = 0; i < 2; i++) {
+        const ln = 0.3 + i * 0.4;
+        const lx = lerp(bwL + ln * bwW, ln * W, 0.35);
+        const ly = bwTop * 0.45;
+        const lw = W * 0.09;
+        ctx.fillStyle = "#d4d0c6";
+        ctx.fillRect(lx - lw / 2, ly - 2, lw, 8);
+        ctx.fillStyle = "rgba(255,255,245,0.85)";
+        ctx.fillRect(lx - lw / 2 + 2, ly, lw - 4, 4);
+        ctx.fillStyle = "rgba(255,255,240,0.05)";
+        ctx.beginPath(); ctx.ellipse(lx, ly + 2, lw * 0.7, 16, 0, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // ============ 2. BACK WALL (Wooden Paneling) ============
+    const wallBase = "#d2b48c";
+    const wallDark = "#b89a6a";
+    ctx.fillStyle = wallBase;
+    ctx.fillRect(bwL, bwTop, bwW, bwH);
+
+    // Horizontal wood planks on the wall
+    ctx.strokeStyle = "rgba(0,0,0,0.08)";
+    ctx.lineWidth = 1;
+    const plankH = bwH / 12;
+    for (let i = 0; i <= 12; i++) {
+        const py = bwTop + i * plankH;
+        ctx.beginPath();
+        ctx.moveTo(bwL, py);
+        ctx.lineTo(bwR, py);
+        ctx.stroke();
+        
+        if (i < 12) {
+            // Subtle wood grain / variation
+            ctx.fillStyle = i % 2 === 0 ? "rgba(0,0,0,0.02)" : "rgba(255,255,255,0.03)";
+            ctx.fillRect(bwL, py, bwW, plankH);
+        }
+    }
+
+    // Wainscoting (Bottom part of the wall)
+    const trimH = bwH * 0.12;
+    const trimG = ctx.createLinearGradient(0, bwBot - trimH, 0, bwBot);
+    trimG.addColorStop(0, "#a67c52");
+    trimG.addColorStop(1, "#8b5a2b");
+    ctx.fillStyle = trimG;
+    ctx.fillRect(bwL, bwBot - trimH, bwW, trimH);
+    ctx.strokeStyle = "rgba(0,0,0,0.2)";
+    ctx.beginPath(); ctx.moveTo(bwL, bwBot - trimH); ctx.lineTo(bwR, bwBot - trimH); ctx.stroke();
+
+    // ============ 3. SCHOOL SONG POSTER (above blackboard) ============
+    const posterW = bwW * 0.32, posterH = bwH * 0.07;
+    const posterX = bwL + (bwW - posterW) / 2;
+    const posterY = bwTop + bwH * 0.02;
+    ctx.fillStyle = "#faf5e8";
+    ctx.beginPath(); ctx.roundRect(posterX, posterY, posterW, posterH, 2); ctx.fill();
+    ctx.strokeStyle = "rgba(180,160,120,0.5)"; ctx.lineWidth = 0.8;
+    ctx.strokeRect(posterX, posterY, posterW, posterH);
+    ctx.fillStyle = "rgba(100,80,50,0.7)";
+    ctx.font = `700 ${Math.round(posterH * 0.35)}px 'Zen Maru Gothic'`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("♪ 校 歌 ♪", posterX + posterW / 2, posterY + posterH * 0.35);
+    ctx.font = `400 ${Math.round(posterH * 0.24)}px 'Zen Maru Gothic'`;
+    ctx.fillStyle = "rgba(100,80,50,0.45)";
+    ctx.fillText("青い空の下　みんなの声が響く", posterX + posterW / 2, posterY + posterH * 0.72);
+
+    // ============ 4. BLACKBOARD ============
+    const bbW = bwW * 0.50, bbH = bwH * 0.52;
+    const bbX = bwL + (bwW - bbW) / 2;
+    const bbY = posterY + posterH + bwH * 0.02;
+    const fr = 6;
+
+    // Frame
+    ctx.fillStyle = "#9a8a68";
+    ctx.beginPath(); ctx.roundRect(bbX - fr, bbY - fr, bbW + fr * 2, bbH + fr * 2 + 8, 4); ctx.fill();
+    ctx.fillStyle = "#8a7a58"; ctx.fillRect(bbX - fr, bbY - fr, bbW + fr * 2, 3);
+
+    // Surface
+    const boardG = ctx.createLinearGradient(bbX, bbY, bbX, bbY + bbH);
+    boardG.addColorStop(0, "#2a4f3f"); boardG.addColorStop(0.5, "#2c5040"); boardG.addColorStop(1, "#284a3a");
+    ctx.fillStyle = boardG;
+    ctx.beginPath(); ctx.roundRect(bbX, bbY, bbW, bbH, 2); ctx.fill();
+
+    // Chalk smudges
+    ctx.fillStyle = "rgba(255,255,255,0.025)";
+    for (let i = 0; i < 5; i++) {
+        ctx.beginPath(); ctx.ellipse(bbX + bbW * (0.1 + i * 0.2), bbY + bbH * 0.5, 20 + i * 5, 10, 0.1 * i, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Chalk tray
+    ctx.fillStyle = "#bab098";
+    ctx.beginPath(); ctx.roundRect(bbX - fr, bbY + bbH + fr, bbW + fr * 2, 7, [0, 0, 3, 3]); ctx.fill();
+    ["#fff", "#ffe8aa", "#ffbbbb", "#aaddff"].forEach((c, ci) => {
+        ctx.fillStyle = c; ctx.fillRect(bbX + 8 + ci * 18, bbY + bbH + fr + 1, 10, 3.5);
+    });
+
+    // 日直 (right side of board)
+    const nkX = bbX + bbW * 0.72, nkY = bbY + bbH * 0.06;
+    const nkW = bbW * 0.24, nkH = bbH * 0.38;
+    ctx.strokeStyle = "rgba(255,255,255,0.25)"; ctx.lineWidth = 1;
+    ctx.strokeRect(nkX, nkY, nkW, nkH);
+    const nkA = Math.min(t * 4, 1);
+    ctx.fillStyle = `rgba(255,255,255,${0.6 * nkA})`;
+    ctx.font = `700 ${Math.round(nkH * 0.16)}px 'Zen Maru Gothic'`;
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText("今日の日直", nkX + nkW / 2, nkY + nkH * 0.08);
+    const nmA = Math.max(0, Math.min((t - 0.1) * 5, 1));
+    ctx.font = `400 ${Math.round(nkH * 0.18)}px 'Zen Maru Gothic'`;
+    ctx.fillStyle = `rgba(255,255,200,${0.7 * nmA})`;
+    ctx.fillText("田中 ・ 鈴木", nkX + nkW / 2, nkY + nkH * 0.42);
+    ctx.font = `400 ${Math.round(nkH * 0.14)}px 'Zen Maru Gothic'`;
+    ctx.fillStyle = `rgba(255,255,200,${0.5 * nmA})`;
+    ctx.fillText("2月25日（火）", nkX + nkW / 2, nkY + nkH * 0.72);
+
+    // Chalk writing (left side)
+    ctx.save();
+    ctx.beginPath(); ctx.rect(bbX, bbY, bbW * 0.70, bbH); ctx.clip();
+    const cA = 0.75 * Math.min(t * 3.5, 1);
+    const tp = Math.min(t / 0.2, 1);
+    if (tp > 0) {
+        ctx.fillStyle = `rgba(255,255,255,${cA})`;
+        ctx.font = `700 ${Math.round(bbH * 0.13)}px 'Zen Maru Gothic'`;
+        ctx.textAlign = "left"; ctx.textBaseline = "top";
+        const tt = "本日の授業", tx = bbX + bbW * 0.05, ty = bbY + bbH * 0.08;
+        ctx.fillText(tt.substring(0, Math.ceil(tt.length * tp)), tx, ty);
+        if (tp >= 1) {
+            ctx.strokeStyle = `rgba(255,255,255,${cA * 0.35})`; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(tx, ty + bbH * 0.16); ctx.lineTo(tx + ctx.measureText(tt).width, ty + bbH * 0.16); ctx.stroke();
+        }
+    }
+    const lines = ["1. いのちの音とリズム", "2. 選択の連鎖", "3. 自分だけのメロディー"];
+    ctx.font = `400 ${Math.round(bbH * 0.085)}px 'Zen Maru Gothic'`;
+    for (let li = 0; li < lines.length; li++) {
+        const ls = 0.2 + (li / 3) * 0.5, le = ls + 0.5 / 3;
+        const lt = Math.max(0, Math.min((t - ls) / (le - ls), 1));
+        if (lt > 0) {
+            ctx.fillStyle = `rgba(255,255,255,${cA * 0.85})`;
+            ctx.fillText(lines[li].substring(0, Math.ceil(lines[li].length * lt)), bbX + bbW * 0.07, bbY + bbH * (0.32 + li * 0.17));
+        }
+    }
+    const nt = Math.max(0, Math.min((t - 0.7) / 0.2, 1));
+    if (nt > 0) {
+        ctx.globalAlpha = nt * cA * 0.6;
+        ctx.font = `400 ${Math.round(bbH * 0.13)}px sans-serif`;
+        ctx.fillStyle = "#fff"; ctx.fillText("\u266B", bbX + bbW * 0.55, bbY + bbH * 0.78);
+        ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+
+    // ============ 5. CLOCK (upper right of blackboard) ============
+    const cR = Math.min(bwW, bwH) * 0.042;
+    const cCX = bbX + bbW + bwW * 0.05, cCY = bbY + cR * 0.3;
+    ctx.fillStyle = "#f5f2ec"; ctx.strokeStyle = "#8a7a60"; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(cCX, cCY, cR, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    for (let hi = 0; hi < 12; hi++) {
+        const a = (hi / 12) * Math.PI * 2 - Math.PI / 2;
+        ctx.strokeStyle = "#555"; ctx.lineWidth = hi % 3 === 0 ? 2 : 0.8;
+        ctx.beginPath();
+        ctx.moveTo(cCX + Math.cos(a) * cR * (hi % 3 === 0 ? 0.72 : 0.8), cCY + Math.sin(a) * cR * (hi % 3 === 0 ? 0.72 : 0.8));
+        ctx.lineTo(cCX + Math.cos(a) * cR * 0.88, cCY + Math.sin(a) * cR * 0.88);
+        ctx.stroke();
+    }
+    const hA = ((10 + 25 / 60) / 12) * Math.PI * 2 - Math.PI / 2;
+    const mA2 = (25 / 60) * Math.PI * 2 - Math.PI / 2;
+    ctx.strokeStyle = "#333"; ctx.lineCap = "round";
+    ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(cCX, cCY); ctx.lineTo(cCX + Math.cos(hA) * cR * 0.45, cCY + Math.sin(hA) * cR * 0.45); ctx.stroke();
+    ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(cCX, cCY); ctx.lineTo(cCX + Math.cos(mA2) * cR * 0.68, cCY + Math.sin(mA2) * cR * 0.68); ctx.stroke();
+    ctx.fillStyle = "#c00"; ctx.beginPath(); ctx.arc(cCX, cCY, 2, 0, Math.PI * 2); ctx.fill();
+
+    // ============ 6. 給食メニュー (left of blackboard) ============
+    const mnW = bwW * 0.085, mnH = bwH * 0.38;
+    const mnX = bbX - mnW - bwW * 0.03, mnY = bbY + bbH * 0.02;
+    ctx.fillStyle = "#fefcf4";
+    ctx.beginPath(); ctx.roundRect(mnX, mnY, mnW, mnH, 3); ctx.fill();
+    ctx.strokeStyle = "rgba(180,160,120,0.6)"; ctx.lineWidth = 1; ctx.strokeRect(mnX, mnY, mnW, mnH);
+    ctx.fillStyle = "#e8a060"; ctx.fillRect(mnX, mnY, mnW, mnH * 0.14);
+    ctx.fillStyle = "#fff"; ctx.font = `700 ${Math.round(mnH * 0.07)}px 'Zen Maru Gothic'`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("今日の給食", mnX + mnW / 2, mnY + mnH * 0.07);
+    ctx.fillStyle = "rgba(80,60,40,0.65)"; ctx.font = `400 ${Math.round(mnH * 0.058)}px 'Zen Maru Gothic'`;
+    ["ごはん", "みそしる", "やきざかな", "ほうれんそう", "牛乳"].forEach((item, mi) => {
+        ctx.fillText(item, mnX + mnW / 2, mnY + mnH * (0.24 + mi * 0.14));
+    });
+
+    // ============ 7. LEFT SIDE WALL + WINDOWS ============
+    const lwG = ctx.createLinearGradient(0, H * 0.3, bwL, H * 0.3);
+    lwG.addColorStop(0, "#ddd4c4"); lwG.addColorStop(1, "#e8e0d2");
+    ctx.fillStyle = lwG;
+    ctx.beginPath();
+    ctx.moveTo(0, 0); ctx.lineTo(bwL, bwTop); ctx.lineTo(bwL, bwBot); ctx.lineTo(0, frontBotY);
+    ctx.closePath(); ctx.fill();
+
+    // Wainscoting on left wall
+    ctx.fillStyle = "rgba(195,180,155,0.22)";
+    ctx.beginPath();
+    ctx.moveTo(bwL, bwBot - trimH); ctx.lineTo(bwL, bwBot);
+    ctx.lineTo(0, frontBotY); ctx.lineTo(0, lerp(frontBotY, bwBot - trimH, 0.25));
+    ctx.closePath(); ctx.fill();
+
+    // Windows (2)
+    const winDepths = [0.30, 0.72];
+    for (const wd of winDepths) {
+        const wTB = bwTop, wTF = 0, wBB = bwBot, wBF = frontBotY;
+        const tD = lerp(wTB, wTF, wd), bD = lerp(wBB, wBF, wd);
+        const hD = bD - tD;
+        const wT = tD + hD * 0.08, wB = tD + hD * 0.62;
+        const xD = lerp(bwL, 0, wd);
+
+        const wd2 = Math.max(0, wd - 0.14);
+        const xD2 = lerp(bwL, 0, wd2);
+        const tD2 = lerp(wTB, wTF, wd2), bD2 = lerp(wBB, wBF, wd2);
+        const hD2 = bD2 - tD2;
+        const wT2 = tD2 + hD2 * 0.08, wB2 = tD2 + hD2 * 0.62;
+
+        // Frame
+        ctx.fillStyle = "#c0b49e";
+        ctx.beginPath();
+        ctx.moveTo(xD - 3, wT - 3); ctx.lineTo(xD2 + 3, wT2 - 3);
+        ctx.lineTo(xD2 + 3, wB2 + 3); ctx.lineTo(xD - 3, wB + 3);
+        ctx.closePath(); ctx.fill();
+
+        // Glass
+        const skyG = ctx.createLinearGradient(0, wT, 0, wB);
+        skyG.addColorStop(0, "#a8d0ee"); skyG.addColorStop(0.4, "#bbe0f8"); skyG.addColorStop(1, "#d8eeff");
+        ctx.fillStyle = skyG;
+        ctx.beginPath();
+        ctx.moveTo(xD, wT); ctx.lineTo(xD2, wT2); ctx.lineTo(xD2, wB2); ctx.lineTo(xD, wB);
+        ctx.closePath(); ctx.fill();
+
+        // Tree through far window
+        if (wd < 0.5) {
+            ctx.fillStyle = "rgba(100,160,80,0.25)";
+            ctx.beginPath();
+            ctx.moveTo(xD, wB); ctx.lineTo(xD2, wB2);
+            ctx.lineTo(xD2, lerp(wB2, wT2, 0.3)); ctx.lineTo(xD, lerp(wB, wT, 0.3));
+            ctx.closePath(); ctx.fill();
+        }
+
+        // Cross muntins
+        ctx.strokeStyle = "#c0b49e"; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(xD, (wT + wB) / 2); ctx.lineTo(xD2, (wT2 + wB2) / 2); ctx.stroke();
+        const mx = (xD + xD2) / 2;
+        ctx.beginPath(); ctx.moveTo(mx, (wT + wT2) / 2); ctx.lineTo(mx, (wB + wB2) / 2); ctx.stroke();
+
+        // Curtain
+        ctx.fillStyle = "rgba(210,195,170,0.3)";
+        ctx.beginPath();
+        ctx.moveTo(xD, wT); ctx.lineTo(xD + (xD2 - xD) * 0.18, wT + (wT2 - wT) * 0.18);
+        ctx.lineTo(xD + (xD2 - xD) * 0.18, wB + (wB2 - wB) * 0.18); ctx.lineTo(xD, wB);
+        ctx.closePath(); ctx.fill();
+    }
+
+    // ============ 7b. SUNLIGHT + SHADOWS ============
+    ctx.save(); ctx.globalAlpha = 0.07; ctx.fillStyle = "#fff8d0";
+    ctx.beginPath(); ctx.moveTo(0, H * 0.10); ctx.lineTo(0, H * 0.48); ctx.lineTo(W * 0.38, H * 0.88); ctx.lineTo(W * 0.18, H * 0.88); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 0.04; ctx.beginPath();
+    ctx.moveTo(bwL * 0.65, bwTop * 1.5); ctx.lineTo(bwL * 0.4, bwBot * 0.6); ctx.lineTo(W * 0.28, H * 0.75); ctx.lineTo(W * 0.18, H * 0.75);
+    ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1; ctx.restore();
+
+    // Floor sunlight patch
+    ctx.save(); ctx.globalAlpha = 0.06; ctx.fillStyle = "#fff8d0";
+    ctx.beginPath(); ctx.moveTo(W * 0.03, H * 0.62); ctx.lineTo(W * 0.20, H * 0.62); ctx.lineTo(W * 0.32, H * 0.84); ctx.lineTo(W * 0.08, H * 0.84); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1; ctx.restore();
+
+    // Window-frame shadow on floor
+    ctx.save(); ctx.globalAlpha = 0.035; ctx.fillStyle = "#000";
+    ctx.fillRect(W * 0.04, H * 0.63, W * 0.16, 1.5);
+    ctx.fillRect(W * 0.10, H * 0.57, 1.5, H * 0.12);
+    ctx.globalAlpha = 1; ctx.restore();
+
+    // ============ 8. RIGHT SIDE WALL ============
+    const rwG = ctx.createLinearGradient(W, H * 0.3, bwR, H * 0.3);
+    rwG.addColorStop(0, "#d8d0c0"); rwG.addColorStop(1, "#e4ddd0");
+    ctx.fillStyle = rwG;
+    ctx.beginPath();
+    ctx.moveTo(W, 0); ctx.lineTo(bwR, bwTop); ctx.lineTo(bwR, bwBot); ctx.lineTo(W, frontBotY);
+    ctx.closePath(); ctx.fill();
+
+    // Right wall wainscoting
+    ctx.fillStyle = "rgba(195,180,155,0.22)";
+    ctx.beginPath();
+    ctx.moveTo(bwR, bwBot - trimH); ctx.lineTo(bwR, bwBot); ctx.lineTo(W, frontBotY); ctx.lineTo(W, lerp(frontBotY, bwBot - trimH, 0.25));
+    ctx.closePath(); ctx.fill();
+
+    // 掃除ロッカー on right wall
+    const lkD = 0.40;
+    const lkWallBot = lerp(bwBot, frontBotY, lkD);
+    const lkWallTop = lerp(bwTop, 0, lkD);
+    const lkWallH = lkWallBot - lkWallTop;
+    const lkX = lerp(bwR, W, lkD);
+    const lkH = lkWallH * 0.52, lkW2 = (W - bwR) * 0.13;
+    const lkY = lkWallBot - lkH;
+    ctx.fillStyle = "#8a9a88";
+    ctx.beginPath(); ctx.roundRect(lkX - lkW2 / 2, lkY, lkW2, lkH, [2, 2, 0, 0]); ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.15)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(lkX, lkY + 2); ctx.lineTo(lkX, lkY + lkH); ctx.stroke();
+    ctx.fillStyle = "#c0c0c0";
+    ctx.fillRect(lkX - 3, lkY + lkH * 0.38, 2, lkH * 0.10);
+    ctx.fillRect(lkX + 1, lkY + lkH * 0.38, 2, lkH * 0.10);
+    ctx.strokeStyle = "rgba(0,0,0,0.06)";
+    for (let si = 0; si < 3; si++) {
+        const sy = lkY + lkH * (0.68 + si * 0.07);
+        ctx.beginPath(); ctx.moveTo(lkX - lkW2 * 0.33, sy); ctx.lineTo(lkX - lkW2 * 0.05, sy); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(lkX + lkW2 * 0.05, sy); ctx.lineTo(lkX + lkW2 * 0.33, sy); ctx.stroke();
+    }
+    ctx.strokeStyle = "#b5a070"; ctx.lineWidth = 2.5; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(lkX + lkW2 * 0.28, lkY); ctx.lineTo(lkX + lkW2 * 0.32, lkY - lkH * 0.22); ctx.stroke();
+
+    // ============ 9. FLOOR (minimal — mostly hidden by students) ============
+    const floorG = ctx.createLinearGradient(0, bwBot, 0, H);
+    floorG.addColorStop(0, "#d2c2a0"); floorG.addColorStop(0.3, "#c8b898"); floorG.addColorStop(1, "#bead88");
+    ctx.fillStyle = floorG;
+    ctx.beginPath();
+    ctx.moveTo(bwL, bwBot); ctx.lineTo(bwR, bwBot);
+    ctx.lineTo(W, frontBotY); ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.lineTo(0, frontBotY);
+    ctx.closePath(); ctx.fill();
+
+    // Floor board lines
+    ctx.strokeStyle = "rgba(155,140,110,0.12)"; ctx.lineWidth = 0.8;
+    for (let i = 0; i < 14; i++) {
+        const bx = (i / 13) * W;
+        ctx.beginPath(); ctx.moveTo(bx, H); ctx.lineTo(lerp(bx, vpX, 0.82), bwBot); ctx.stroke();
+    }
+
+    // ============ 10. TEACHER ============
+    const tX = bbX - bwW * 0.04;
+    const tBaseY = bwBot;
+    const tH = bwH * 0.86;
+    const armW2 = Math.sin(elapsed * 0.0018) * 0.3 + 0.2;
+
+    ctx.save(); ctx.translate(tX, tBaseY);
+    // Legs
+    ctx.fillStyle = "#4a4040";
+    ctx.fillRect(-8, -tH * 0.28, 7, tH * 0.28); ctx.fillRect(2, -tH * 0.28, 7, tH * 0.28);
+    ctx.fillStyle = "#3a3030";
+    ctx.beginPath(); ctx.roundRect(-10, -2, 11, 4, 2); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(1, -2, 11, 4, 2); ctx.fill();
+    // Body
+    const tBW = tH * 0.30, tBH = tH * 0.36;
+    ctx.fillStyle = "#5a4848";
+    ctx.beginPath(); ctx.roundRect(-tBW / 2, -tH * 0.66, tBW, tBH, [6, 6, 2, 2]); ctx.fill();
+    // Collar
+    ctx.strokeStyle = "#eee"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(-4, -tH * 0.66); ctx.lineTo(0, -tH * 0.61); ctx.lineTo(4, -tH * 0.66); ctx.stroke();
+    // Head
+    const thR = tH * 0.12, thY = -tH * 0.66 - thR * 0.7;
+    ctx.fillStyle = "#ffe0bd"; ctx.beginPath(); ctx.arc(0, thY, thR, 0, Math.PI * 2); ctx.fill();
+    // Hair
+    ctx.fillStyle = "#3a2a20";
+    ctx.beginPath(); ctx.arc(0, thY - thR * 0.1, thR * 1.08, Math.PI, Math.PI * 2); ctx.fill();
+    ctx.fillRect(-thR * 1.08, thY - thR * 0.1, thR * 0.25, thR * 1.1);
+    ctx.fillRect(thR * 0.83, thY - thR * 0.1, thR * 0.25, thR * 1.1);
+    // Glasses
+    ctx.strokeStyle = "#666"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(-thR * 0.28, thY, thR * 0.20, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(thR * 0.28, thY, thR * 0.20, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-thR * 0.08, thY); ctx.lineTo(thR * 0.08, thY); ctx.stroke();
+    // Eyes
+    ctx.fillStyle = "#333";
+    ctx.beginPath(); ctx.arc(-thR * 0.28, thY, 1.3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(thR * 0.28, thY, 1.3, 0, Math.PI * 2); ctx.fill();
+    // Smile
+    ctx.strokeStyle = "#c08080"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(0, thY + thR * 0.2, thR * 0.16, 0.15, Math.PI - 0.15); ctx.stroke();
+    // Arms
+    ctx.strokeStyle = "#ffe0bd"; ctx.lineWidth = tH * 0.05; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(-tBW / 2, -tH * 0.61); ctx.lineTo(-tBW / 2 - 6, -tH * 0.40); ctx.stroke();
+    const aA = -1.0 + armW2 * 0.4, aL = tH * 0.30;
+    ctx.beginPath(); ctx.moveTo(tBW / 2, -tH * 0.61);
+    ctx.lineTo(tBW / 2 + Math.cos(aA) * aL, -tH * 0.61 + Math.sin(aA) * aL); ctx.stroke();
+    if (t < 0.8) {
+        const hx2 = tBW / 2 + Math.cos(aA) * aL, hy2 = -tH * 0.61 + Math.sin(aA) * aL;
+        ctx.fillStyle = "#fff"; ctx.save(); ctx.translate(hx2, hy2); ctx.rotate(aA + 0.3);
+        ctx.fillRect(-1, -4, 3, 8); ctx.restore();
+    }
+    ctx.restore();
+
+    // ============ 11. STUDENTS — positioned by HEAD CENTER (back-of-head view) ============
+    // In a real classroom, the person in front has their head RIGHT at your eye level.
+    // We place students by where their head center should be on screen.
+
+    function drawStudentBack(sx, headCenterY, headR, hairColor, shirtColor, isGirl) {
+        const shoulderW = headR * 1.35;
+        const neckH = headR * 0.35;
+        const bodyVisH = headR * 2.8;
+        const shoulderTopY = headCenterY + headR * 0.65 + neckH;
+        const bodyBottomY = shoulderTopY + bodyVisH;
+
+        // === Furniture dimensions (proportional to headR) ===
+        // DESK is on the FAR side (between student and blackboard = higher on screen)
+        const deskW = headR * 3.2;
+        const deskH = headR * 0.22;
+        const deskY = shoulderTopY + bodyVisH * 0.20; // desk in front of student (toward blackboard)
+        const deskLegH = headR * 1.6;
+        const deskLegW = headR * 0.12;
+
+        // CHAIR BACKREST is on THIS side (between student and viewer)
+        // Make it wider than the student (shoulderW * 2 is approx headR * 2.7)
+        const chairBackW = headR * 3.2; 
+        const chairBackH = headR * 0.22;
+        const chairBackY = shoulderTopY + bodyVisH * 0.45; // Move up slightly to be visible
+        const chairLegH = headR * 2.2;
+        const chairLegW = headR * 0.10;
+        const chairSeatY = chairBackY - headR * 0.35; // seat just above backrest
+        const chairSeatH = headR * 0.12;
+
+        const metalColor = "#888";
+        const metalDark = "#777";
+        const metalLight = "#999";
+
+        // ---- LAYER 1: Desk legs (farthest from viewer, behind everything) ----
+        ctx.fillStyle = metalColor;
+        ctx.fillRect(sx - deskW * 0.45, deskY + deskH, deskLegW, deskLegH);
+        ctx.fillRect(sx + deskW * 0.45 - deskLegW, deskY + deskH, deskLegW, deskLegH);
+        ctx.fillStyle = metalDark;
+        ctx.fillRect(sx - deskW * 0.42, deskY + deskH, deskLegW * 0.8, deskLegH * 0.7);
+        ctx.fillRect(sx + deskW * 0.42 - deskLegW * 0.8, deskY + deskH, deskLegW * 0.8, deskLegH * 0.7);
+        // Horizontal stability bar
+        ctx.fillStyle = metalColor;
+        ctx.fillRect(sx - deskW * 0.44, deskY + deskH + deskLegH * 0.65, deskW * 0.88, deskLegW * 0.7);
+
+        // ---- LAYER 2: Desk surface (behind student, toward blackboard) ----
+        const deskTopG = ctx.createLinearGradient(0, deskY, 0, deskY + deskH);
+        deskTopG.addColorStop(0, "#c8b898");
+        deskTopG.addColorStop(1, "#b8a888");
+        ctx.fillStyle = deskTopG;
+        ctx.beginPath();
+        ctx.roundRect(sx - deskW * 0.5, deskY, deskW, deskH, 1);
+        ctx.fill();
+        // Desk edge highlight
+        ctx.strokeStyle = "rgba(255,255,255,0.2)"; ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(sx - deskW * 0.5, deskY);
+        ctx.lineTo(sx + deskW * 0.5, deskY);
+        ctx.stroke();
+        // Pencil groove
+        ctx.strokeStyle = "rgba(0,0,0,0.05)"; ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(sx - deskW * 0.38, deskY + deskH * 0.4);
+        ctx.lineTo(sx + deskW * 0.38, deskY + deskH * 0.4);
+        ctx.stroke();
+        // Items on desk
+        if (!isGirl) {
+            ctx.fillStyle = "rgba(180,200,170,0.5)";
+            ctx.fillRect(sx - deskW * 0.15, deskY - headR * 0.08, deskW * 0.28, headR * 0.06);
+        } else {
+            ctx.fillStyle = "rgba(220,160,180,0.5)";
+            ctx.beginPath();
+            ctx.roundRect(sx + deskW * 0.05, deskY - headR * 0.07, deskW * 0.22, headR * 0.05, 2);
+            ctx.fill();
+        }
+
+        // ---- LAYER 3: Chair (BEHIND the student) ----
+        ctx.save();
+        ctx.fillStyle = metalColor;
+        const chairLeftX = sx - chairBackW * 0.48;
+        const chairRightX = sx + chairBackW * 0.48;
+        ctx.fillRect(chairLeftX, chairBackY, chairLegW, chairLegH);
+        ctx.fillRect(chairRightX - chairLegW, chairBackY, chairLegW, chairLegH);
+        ctx.fillRect(chairLeftX + headR * 0.3, chairSeatY, chairLegW, chairLegH * 0.7);
+        ctx.fillRect(chairRightX - chairLegW - headR * 0.3, chairSeatY, chairLegW, chairLegH * 0.7);
+        ctx.fillRect(chairLeftX, chairBackY + chairLegH * 0.55, chairBackW * 0.96, chairLegW * 0.7);
+
+        const woodBoard = "#704214";   
+        const woodEdge = "#4a2a10";    
+        const woodHigh = "#966F33";    
+
+        // Chair backrest — A single solid wooden surface (Haimen board)
+        const drawSchoolPlank = (px, py, pw, ph) => {
+            const totalH = ph * 2.8; 
+            ctx.fillStyle = woodEdge;
+            ctx.beginPath(); ctx.roundRect(px, py, pw, totalH, 3); ctx.fill();
+            const pg = ctx.createLinearGradient(px, py, px, py + totalH);
+            pg.addColorStop(0, woodHigh); pg.addColorStop(0.5, woodBoard); pg.addColorStop(1, woodBoard);
+            ctx.fillStyle = pg;
+            ctx.beginPath(); ctx.roundRect(px, py, pw, totalH - 1.5, 3); ctx.fill();
+            ctx.fillStyle = "rgba(0,0,0,0.4)";
+            const rx = 10, ry = 8;
+            ctx.beginPath(); ctx.arc(px + rx, py + ry, 1.8, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(px + pw - rx, py + ry, 1.8, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(px + rx, py + totalH - ry, 1.8, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(px + pw - rx, py + totalH - ry, 1.8, 0, Math.PI*2); ctx.fill();
+        };
+
+        const widerBackW = headR * 4.2; 
+        drawSchoolPlank(sx - widerBackW * 0.5, chairBackY, widerBackW, chairBackH);
+
+        // Chair seat
+        ctx.fillStyle = woodEdge;
+        ctx.beginPath(); ctx.roundRect(sx - chairBackW * 0.52, chairSeatY + 2, chairBackW * 1.04, chairSeatH, 2); ctx.fill();
+        const seatGradient = ctx.createLinearGradient(sx, chairSeatY, sx, chairSeatY + chairSeatH);
+        seatGradient.addColorStop(0, woodHigh); seatGradient.addColorStop(1, woodBoard);
+        ctx.fillStyle = seatGradient;
+        ctx.beginPath(); ctx.roundRect(sx - chairBackW * 0.52, chairSeatY, chairBackW * 1.04, chairSeatH - 2, 2); ctx.fill();
+        ctx.restore();
+
+        // ---- LAYER 4: Student body (ON TOP of the chair) ----
+        ctx.fillStyle = shirtColor;
+        ctx.beginPath();
+        ctx.roundRect(sx - shoulderW, shoulderTopY, shoulderW * 2, bodyVisH, [headR * 0.3, headR * 0.3, 2, 2]);
+        ctx.fill();
+
+        ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(sx - shoulderW * 0.25, shoulderTopY);
+        ctx.lineTo(sx, shoulderTopY + headR * 0.25);
+        ctx.lineTo(sx + shoulderW * 0.25, shoulderTopY);
+        ctx.stroke();
+
+        ctx.fillStyle = shirtColor;
+        const armW = headR * 0.30;
+        ctx.save(); ctx.translate(sx - shoulderW, shoulderTopY + headR * 0.15); ctx.rotate(0.15);
+        ctx.fillRect(-armW, 0, armW, bodyVisH * 0.45); ctx.restore();
+        ctx.save(); ctx.translate(sx + shoulderW, shoulderTopY + headR * 0.15); ctx.rotate(-0.15);
+        ctx.fillRect(0, 0, armW, bodyVisH * 0.45); ctx.restore();
+
+        ctx.fillStyle = "#ffe0bd";
+        ctx.fillRect(sx - shoulderW - armW * 0.3, deskY - headR * 0.12, shoulderW * 0.5, headR * 0.18);
+        ctx.fillRect(sx + shoulderW * 0.6, deskY - headR * 0.12, shoulderW * 0.5, headR * 0.18);
+        drawSchoolPlank(sx - widerBackW * 0.5, chairBackY + chairBackH + headR * 0.25, widerBackW, chairBackH);
+
+        // Chair seat (bottom plate)
+        ctx.fillStyle = woodEdge;
+        ctx.beginPath();
+        ctx.roundRect(sx - chairBackW * 0.52, chairSeatY + 2, chairBackW * 1.04, chairSeatH, 2);
+        ctx.fill();
+        const seatG = ctx.createLinearGradient(sx, chairSeatY, sx, chairSeatY + chairSeatH);
+        seatG.addColorStop(0, woodHigh);
+        seatG.addColorStop(1, woodBoard);
+        ctx.fillStyle = seatG;
+        ctx.beginPath();
+        ctx.roundRect(sx - chairBackW * 0.52, chairSeatY, chairBackW * 1.04, chairSeatH - 2, 2);
+        ctx.fill();
+        ctx.restore();
+
+        // ---- LAYER 5: Neck + Head (topmost) ----
+        // Neck
+        ctx.fillStyle = "#ffe0bd";
+        const neckW = headR * 0.38;
+        ctx.fillRect(sx - neckW, headCenterY + headR * 0.55, neckW * 2, neckH + 2);
+
+        // Head
+        ctx.fillStyle = "#ffe0bd";
+        ctx.beginPath(); ctx.arc(sx, headCenterY, headR, 0, Math.PI * 2); ctx.fill();
+
+        // Ears
+        ctx.beginPath(); ctx.ellipse(sx - headR * 0.93, headCenterY + headR * 0.08, headR * 0.17, headR * 0.26, -0.1, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(sx + headR * 0.93, headCenterY + headR * 0.08, headR * 0.17, headR * 0.26, 0.1, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#f5ccaa";
+        ctx.beginPath(); ctx.ellipse(sx - headR * 0.93, headCenterY + headR * 0.08, headR * 0.09, headR * 0.14, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(sx + headR * 0.93, headCenterY + headR * 0.08, headR * 0.09, headR * 0.14, 0, 0, Math.PI * 2); ctx.fill();
+
+        // Hair
+        ctx.fillStyle = hairColor;
+        ctx.beginPath(); ctx.arc(sx, headCenterY - headR * 0.05, headR * 1.07, Math.PI * 0.72, Math.PI * 2.28); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(sx, headCenterY + headR * 0.2, headR * 1.02, headR * 0.58, 0, -0.15, Math.PI + 0.15); ctx.fill();
+
+        // Hair texture
+        ctx.strokeStyle = "rgba(0,0,0,0.06)"; ctx.lineWidth = 0.6;
+        for (let hi = 0; hi < 4; hi++) {
+            const ha = -0.6 + hi * 0.4;
+            ctx.beginPath(); ctx.arc(sx, headCenterY - headR * 0.4, headR * (0.5 + hi * 0.15), ha, ha + 0.5); ctx.stroke();
+        }
+        ctx.strokeStyle = "rgba(0,0,0,0.07)"; ctx.lineWidth = 0.7;
+        ctx.beginPath(); ctx.arc(sx + headR * 0.08, headCenterY - headR * 0.25, headR * 0.25, 0.3, 2.8); ctx.stroke();
+
+        // Long hair for girls
+        if (isGirl) {
+            ctx.fillStyle = hairColor;
+            const lockW = headR * 0.26;
+            ctx.beginPath();
+            ctx.moveTo(sx - headR * 0.95, headCenterY - headR * 0.1);
+            ctx.quadraticCurveTo(sx - headR * 1.05, headCenterY + headR * 1.5, sx - headR * 0.75, shoulderTopY + bodyVisH * 0.65);
+            ctx.lineTo(sx - headR * 0.75 + lockW, shoulderTopY + bodyVisH * 0.60);
+            ctx.quadraticCurveTo(sx - headR * 0.80, headCenterY + headR * 1.2, sx - headR * 0.70, headCenterY - headR * 0.1);
+            ctx.closePath(); ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(sx + headR * 0.95, headCenterY - headR * 0.1);
+            ctx.quadraticCurveTo(sx + headR * 1.05, headCenterY + headR * 1.5, sx + headR * 0.75, shoulderTopY + bodyVisH * 0.65);
+            ctx.lineTo(sx + headR * 0.75 - lockW, shoulderTopY + bodyVisH * 0.60);
+            ctx.quadraticCurveTo(sx + headR * 0.80, headCenterY + headR * 1.2, sx + headR * 0.70, headCenterY - headR * 0.1);
+            ctx.closePath(); ctx.fill();
+        }
+    }
+
+    // Row 1 (far row, near blackboard) — heads at ~33% from top
+    const r1HeadY = H * 0.35;
+    const r1HeadR = H * 0.032;
+    const r1Spread = 0.55;
+    for (let si = 0; si < 5; si++) {
+        const sn = (si + 0.5) / 5;
+        const sx = W * 0.5 + (sn - 0.5) * W * r1Spread;
+        const seed = si;
+        const hc = ["#2a1f15", "#3a2a20", "#4a3525", "#1e1e1e", "#352515"][seed % 5];
+        const sc2 = ["#6a8aaa", "#8a6a6a", "#6a8a6a", "#8a7a5a", "#7a6a8a"][(seed + 2) % 5];
+        drawStudentBack(sx, r1HeadY, r1HeadR, hc, sc2, seed % 3 === 0);
+    }
+
+    // Row 2 (directly in front of us) — heads at ~45% from top, BIG
+    const r2HeadY = H * 0.46;
+    const r2HeadR = H * 0.052;
+    const r2Spread = 0.72;
+    for (let si = 0; si < 5; si++) {
+        const sn = (si + 0.5) / 5;
+        const sx = W * 0.5 + (sn - 0.5) * W * r2Spread;
+        const seed = si + 10;
+        const hc = ["#352515", "#2a1f15", "#1e1e1e", "#3a2a20", "#4a3525"][seed % 5];
+        const sc2 = ["#7a6a8a", "#6a8aaa", "#8a7a5a", "#6a8a6a", "#8a6a6a"][(seed + 1) % 5];
+        drawStudentBack(sx, r2HeadY, r2HeadR, hc, sc2, seed % 3 === 1);
+    }
+
+    // ============ 12. PLAYER'S DESK ============
+    const myY = H * 0.78;
+    const myW = W * 0.56;
+
+    // Desk surface
+    ctx.fillStyle = "#c8b48c";
+    ctx.beginPath();
+    ctx.moveTo(vpX - myW * 0.5, myY); ctx.lineTo(vpX + myW * 0.5, myY);
+    ctx.lineTo(vpX + myW * 0.54, myY + 10); ctx.lineTo(vpX - myW * 0.54, myY + 10);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.3)"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(vpX - myW * 0.5, myY); ctx.lineTo(vpX + myW * 0.5, myY); ctx.stroke();
+
+    // Front face
+    ctx.fillStyle = "#b5a078";
+    ctx.beginPath();
+    ctx.moveTo(vpX - myW * 0.54, myY + 10); ctx.lineTo(vpX + myW * 0.54, myY + 10);
+    ctx.lineTo(vpX + myW * 0.58, H); ctx.lineTo(vpX - myW * 0.58, H);
+    ctx.closePath(); ctx.fill();
+
+    // Pencil groove
+    ctx.strokeStyle = "rgba(0,0,0,0.05)"; ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.moveTo(vpX - myW * 0.42, myY + 5); ctx.lineTo(vpX + myW * 0.42, myY + 5); ctx.stroke();
+
+    // Notebook
+    ctx.save(); ctx.translate(vpX - W * 0.05, myY - 26); ctx.rotate(-0.04);
+    ctx.fillStyle = "#f5f0e0";
+    const nbW2 = W * 0.14, nbH2 = H * 0.085;
+    ctx.fillRect(-nbW2 / 2, -nbH2 / 2, nbW2, nbH2);
+    ctx.strokeStyle = "rgba(170,155,125,0.4)"; ctx.lineWidth = 0.8; ctx.strokeRect(-nbW2 / 2, -nbH2 / 2, nbW2, nbH2);
+    ctx.strokeStyle = "rgba(220,80,80,0.25)"; ctx.lineWidth = 0.6;
+    ctx.beginPath(); ctx.moveTo(-nbW2 / 2 + nbW2 * 0.12, -nbH2 / 2); ctx.lineTo(-nbW2 / 2 + nbW2 * 0.12, nbH2 / 2); ctx.stroke();
+    ctx.strokeStyle = "rgba(160,200,220,0.22)";
+    for (let li = 1; li < 6; li++) { const ly = -nbH2 / 2 + li * (nbH2 / 6); ctx.beginPath(); ctx.moveTo(-nbW2 / 2 + 6, ly); ctx.lineTo(nbW2 / 2 - 6, ly); ctx.stroke(); }
+    ctx.restore();
+
+    // Pencil
+    ctx.save(); ctx.translate(vpX + W * 0.08, myY - 20); ctx.rotate(0.06);
+    const pL = W * 0.09;
+    ctx.fillStyle = "#e8c84a"; ctx.fillRect(0, 0, pL, 4);
+    ctx.fillStyle = "#f4d88a"; ctx.fillRect(0, 0, pL, 2);
+    ctx.fillStyle = "#333"; ctx.beginPath(); ctx.moveTo(pL, 0); ctx.lineTo(pL + 6, 2); ctx.lineTo(pL, 4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#e89090"; ctx.fillRect(-8, 0, 8, 4);
+    ctx.fillStyle = "#ccc"; ctx.fillRect(-9, 0, 1.5, 4);
+    ctx.restore();
+
+    // Textbook
+    ctx.save(); ctx.translate(vpX + W * 0.17, myY - 18); ctx.rotate(0.02);
+    ctx.fillStyle = "#88b8d8"; ctx.fillRect(0, 0, W * 0.065, H * 0.055);
+    ctx.strokeStyle = "rgba(0,0,0,0.1)"; ctx.lineWidth = 0.5; ctx.strokeRect(0, 0, W * 0.065, H * 0.055);
+    ctx.fillStyle = "#fff"; ctx.font = `700 ${Math.round(H * 0.011)}px 'Zen Maru Gothic'`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("おんがく", W * 0.0325, H * 0.0275);
+    ctx.restore();
+
+    // ============ 13. ROW 3 NEIGHBORS (our row — very large, partially off-screen) ============
+    // Left neighbor
+    drawStudentBack(W * 0.13, H * 0.50, H * 0.072, "#3a2a20", "#7a8a6a", true);
+    // Right neighbor
+    drawStudentBack(W * 0.87, H * 0.51, H * 0.072, "#1e1e1e", "#8a7070", false);
+
+    // ============ 14. DUST MOTES ============
+    for (const m of dustMotes) {
+        m.x += m.drift; m.y -= m.speed; m.phase += 0.015;
+        if (m.y < -0.05) { m.y = 0.55; m.x = Math.random() * 0.45; }
+        if (m.x < 0 || m.x > 0.5) m.x = Math.random() * 0.45;
+        const mx = m.x * W + Math.sin(m.phase) * 6;
+        const my = m.y * H + Math.cos(m.phase * 0.7) * 3;
+        ctx.fillStyle = `rgba(255,248,215,${m.alpha * (0.5 + 0.5 * Math.sin(m.phase * 1.5))})`;
+        ctx.beginPath(); ctx.arc(mx, my, m.size, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // ============ 15. WHITE FADE-OUT ============
+    if (elapsed > ANIM_MS) {
+        const fadeT = Math.min((elapsed - ANIM_MS) / FADE_MS, 1);
+        const ef = fadeT < 0.5 ? 2 * fadeT * fadeT : 1 - Math.pow(-2 * fadeT + 2, 2) / 2;
+        ctx.fillStyle = `rgba(255,255,255,${ef})`;
+        ctx.fillRect(0, 0, W, H);
+    }
+
+    requestAnimationFrame(draw);
+}
+draw();
+</script>
+</body>
+</html>

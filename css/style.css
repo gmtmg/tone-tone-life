@@ -513,3 +513,108 @@
             transform: translateY(0);
             pointer-events: auto;
         }
+
+        /* --- Minigame Wrapper (Modal) --- */
+        #minigame-wrapper {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(0, 0, 0, 0.45); /* Overlay for main canvas */
+            backdrop-filter: blur(5px); /* Blur for elements behind this wrapper */
+            z-index: 100; /* Ensure it's on top of everything except custom-cursor */
+            opacity: 0;
+            pointer-events: none; /* Invisible initially, no interaction */
+            transition: opacity 0.3s ease;
+        }
+
+        #minigame-wrapper.visible {
+            opacity: 1;
+            pointer-events: auto; /* Enable interaction when visible */
+        }
+
+        #minigame-canvas {
+            width: 700px; /* Match SoccerMinigame.width */
+            height: 440px; /* Match SoccerMinigame.height */
+            background-color: #68b848; /* Same as the field color for continuity */
+            border-radius: 16px;
+            box-shadow: 0 0 0 4px rgba(255,255,255,0.9), /* White border */
+                        0 0 24px rgba(255,255,255,0.7), /* Glow */
+                        0 12px 30px rgba(0,0,0,0.4); /* Shadow */
+        }
+        
+        /* --- Minigame Active State --- */
+        body.minigame-active #main-canvas,
+        body.minigame-active #ui-layer,
+        body.minigame-active #score-hud {
+            filter: blur(4px);
+            transition: filter 0.5s ease;
+        }
+        body.minigame-active #custom-cursor {
+            transform: translate(-50%, -50%) scale(0.6);
+            transition: width 0.2s, height 0.2s, box-shadow 0.2s, border-color 0.2s, transform 0.3s ease;
+        }
+
+        /* Quit Button */
+        #minigame-quit-btn {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 101;
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.9);
+            border: none;
+            border-radius: 20px;
+            font-family: 'Zen Maru Gothic', sans-serif;
+            font-weight: 800;
+            color: #d45b5b;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            transition: all 0.2s;
+        }
+        #minigame-quit-btn:hover {
+            transform: scale(1.05);
+            background: #fff;
+        }
+
+        /* Confirmation Modal */
+        #minigame-modal {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(8px);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 200;
+        }
+        #minigame-modal .modal-content {
+            background: #fff;
+            padding: 30px;
+            border-radius: 24px;
+            text-align: center;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            max-width: 400px;
+        }
+        #minigame-modal .en { font-weight: 800; font-size: 20px; color: #333; margin-bottom: 5px; }
+        #minigame-modal .jp { font-weight: 600; font-size: 16px; color: #666; margin-bottom: 25px; }
+        #minigame-modal .modal-buttons { display: flex; gap: 15px; justify-content: center; }
+        #minigame-modal button {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 12px;
+            font-family: 'Zen Maru Gothic', sans-serif;
+            font-weight: 800;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        #modal-yes { background: #e85050; color: #fff; }
+        #modal-no { background: #f0f0f0; color: #333; }
+        #modal-yes:hover { transform: scale(1.05); background: #f06060; }
+        #modal-no:hover { transform: scale(1.05); background: #e0e0e0; }
+        
+        

@@ -38,8 +38,8 @@
         let inheritedSnareVelocity = null;
         let inheritedSnareStyleClass = 'snare';
         let inheritedSnareSoundConfig = null;
-        let inheritedSnareVolumeDb = -28;
-        let inheritedSnareBodyVolumeDb = -26;
+        let inheritedSnareVolumeDb = -20;
+        let inheritedSnareBodyVolumeDb = -18;
         let level2TransitionLock = false;
         let toddlerTransitionLock = false;
         let carryHatFilter = null;
@@ -63,7 +63,11 @@
         // CHILD2 (中学校の休み時間) variables
         let inheritedBassPattern = null;
         let inheritedBassNotes = null;
+        let inheritedBassAttacks = null;
+        let inheritedBassDurations = null;
+        let inheritedBassSustainType = null;
         let inheritedBassStyleClass = 'bass';
+        let inheritedBassSoundConfig = null;
         let child2TransitionLock = false;
         let child2ActivityChoice = null;
         let carryChordSynth = null;
@@ -71,6 +75,13 @@
         let schoolBgNpcs = null;
         let schoolBgObjects = null;
         let hoveredSchoolActivity = null; // activityId of hovered bass drop
+
+        let activeMinigame = null;
+        let isMinigameActive = false;
+        let minigameMuteGroove = false;
+        let minigameTriggerDrop = null;
+        const inputKeys = { w: false, a: false, s: false, d: false, space: false };
+        let minigameClick = false;
 
         // 12 facility types for CHILD1 scene
         const CHILD_FACILITIES = [
@@ -191,7 +202,7 @@
         const toySystem = window.TTLToyData || { LIFE_LABELS: [], TOY_LIBRARY: [], drawToy: () => {} };
 
         // シーン管理
-        const SCENE = { TITLE: 0, CHOICE: 1, TRANSITION: 2, CRAWL: 3, CRAWL2: 4, TODDLE1: 5, CHILD1: 6, CHILD2: 7 };
+        const SCENE = { TITLE: 0, CHOICE: 1, TRANSITION: 2, CRAWL: 3, CRAWL2: 4, TODDLE1: 5, CHILD1: 6, CHILD2: 7, LESSON: 8, ADULT: 9 };
         let currentScene = SCENE.TITLE;
         const RHYTHM_BARS = 4;
         const STEPS_PER_BEAT = 4;
@@ -231,6 +242,9 @@
         function pickPacifierColor(excludedColors) {
             const candidates = [palette.colors[3], palette.btnColor, palette.bg, "hsl(330, 70%, 62%)"];
             return candidates.find(color => !excludedColors.has(color)) || "hsl(330, 70%, 62%)";
+        }
+        function pickFloorColor() {
+            return palette.colors[Math.floor(Math.random() * palette.colors.length)];
         }
         const babyFaceType = Math.floor(Math.random() * 5);
         const babyIsBoy = Math.random() < 0.5;
@@ -332,12 +346,11 @@
         }
 
         // ドラッグ開始・終了
-        orbEl.addEventListener('mousedown', (e) => {
-            e.preventDefault();
+        window.addEventListener('mousedown', (e) => {
             orbDragging = true;
             orbEl.classList.add('dragging');
         });
-        document.addEventListener('mouseup', () => {
+        window.addEventListener('mouseup', () => {
             orbDragging = false;
             orbEl.classList.remove('dragging');
         });
@@ -444,8 +457,12 @@
             }
         }
 
-        canvas.addEventListener('click', (e) => {
-            void pickToneDropAt(e.clientX, e.clientY);
+        window.addEventListener('click', (e) => {
+            if (isMinigameActive) {
+                minigameClick = true;
+            } else {
+                void pickToneDropAt(e.clientX, e.clientY);
+            }
         });
 
         // パーティクルトレイル
@@ -507,13 +524,7 @@
             }
             ctx.restore();
         }
-
-
-        // ==========================================
         // Visuals: Classes
-        // ==========================================
-
-        // 1. Title/Choice Background Blobs
         class OrganicBlob {
             constructor(color) {
                 this.color = color;
@@ -1368,170 +1379,73 @@
 
                 // Head (radius 21, child proportions)
                 this.drawPart(ctx, 0, -72, headBob, c => {
-                    c.scale(-1, 1); // 顔を進行方向に向ける（体は逆向きのまま）
+                    c.scale(-1, 1); // 顔を進行方向に向ける
                     const HR = 21;
                     c.fillStyle = this.hairColor;
 
-                    // ============================================================
-                    // 1) Hair BACK layer (behind face — face circle will clip it)
-                    // ============================================================
+                    // 1. BACK HAIR
                     if (this.isBoy) {
-                        if (this.hairStyle === 0) {
-                            // Boy 0: ナチュラルショート
-                            c.beginPath(); c.arc(0, -1, HR + 3, Math.PI, 0, false); c.closePath(); c.fill();
-                        } else if (this.hairStyle === 1) {
-                            // Boy 1: マッシュヘア
+                        if (this.hairStyle === 1) {
                             c.beginPath(); c.arc(0, -1, HR + 5, Math.PI * 0.95, Math.PI * 0.05, false); c.closePath(); c.fill();
-                        } else {
-                            // Boy 2: スポーツ刈り
+                        } else if (this.hairStyle === 2) {
                             c.beginPath(); c.arc(0, -1, HR + 2, Math.PI, 0, false); c.closePath(); c.fill();
                         }
                     } else {
                         if (this.hairStyle === 0) {
-                            // Girl 0: おかっぱ — サイドヘアも背面に
                             c.beginPath(); c.arc(0, -1, HR + 4, Math.PI, 0, false); c.closePath(); c.fill();
                             c.beginPath(); c.roundRect(-HR - 5, -6, 9, 22, 4); c.fill();
                             c.beginPath(); c.roundRect(HR - 4, -6, 9, 22, 4); c.fill();
                         } else if (this.hairStyle === 1) {
-                            // Girl 1: ツインテール — 左右の束
                             c.beginPath(); c.arc(0, -1, HR + 3, Math.PI, 0, false); c.closePath(); c.fill();
                             c.beginPath(); c.ellipse(-20, -8, 8, 14, -0.2, 0, Math.PI * 2); c.fill();
                             c.beginPath(); c.ellipse(20, -8, 8, 14, 0.2, 0, Math.PI * 2); c.fill();
                         } else {
-                            // Girl 2: ポニーテール — 後ろ束ね
                             c.beginPath(); c.arc(0, -1, HR + 4, Math.PI, 0, false); c.closePath(); c.fill();
                             c.beginPath(); c.ellipse(-18, -4, 7, 16, 0.25, 0, Math.PI * 2); c.fill();
                         }
                     }
 
-                    // ============================================================
-                    // 2) Face circle (clips hair below hairline)
-                    // ============================================================
+                    // 2. FACE BASE
                     c.fillStyle = this.skinColor;
                     c.beginPath(); c.arc(0, 0, HR, 0, Math.PI * 2); c.fill();
 
-                    // ============================================================
-                    // 3) Ears
-                    // ============================================================
-                    c.fillStyle = this.skinColor;
-                    c.beginPath(); c.arc(-18, 3, 5.5, 0, Math.PI * 2); c.fill();
-                    c.beginPath(); c.arc(18, 3, 5.5, 0, Math.PI * 2); c.fill();
-                    c.fillStyle = this.cheekColor;
-                    c.beginPath(); c.arc(-18, 3, 3, 0, Math.PI * 2); c.fill();
-                    c.beginPath(); c.arc(18, 3, 3, 0, Math.PI * 2); c.fill();
-
-                    // ============================================================
-                    // 4) Hair FRONT layer — 前髪（頭頂の髪キャップと繋がるように描く）
-                    //    顔円の上端 y=-21。キャップ端と前髪を隙間なく接続。
-                    // ============================================================
+                    // 3. FRONT HAIR
                     c.fillStyle = this.hairColor;
-
                     if (this.isBoy) {
-                        if (this.hairStyle === 0) {
-                            // Boy 0: ナチュラルショート — 軽く下ろした前髪
-                            // 上端を頭頂キャップの見える下端(≈-21)から開始
+                        if (this.hairStyle === 1) {
                             c.beginPath();
-                            c.moveTo(-17, -21);
-                            c.lineTo(-17, -13);
-                            c.quadraticCurveTo(-8, -16, 0, -13);
-                            c.quadraticCurveTo(8, -16, 17, -13);
-                            c.lineTo(17, -21);
-                            c.closePath(); c.fill();
-                            c.fillStyle = "rgba(255,255,255,0.1)";
-                            c.beginPath(); c.ellipse(-4, -20, 5, 3, -0.15, 0, Math.PI * 2); c.fill();
-                        } else if (this.hairStyle === 1) {
-                            // Boy 1: マッシュ — おでこを覆う重め前髪
-                            c.beginPath();
-                            c.moveTo(-19, -21);
-                            c.lineTo(-19, -10);
+                            c.moveTo(-19, -21); c.lineTo(-19, -10);
                             c.quadraticCurveTo(-10, -13, 0, -10);
                             c.quadraticCurveTo(10, -13, 19, -10);
-                            c.lineTo(19, -21);
-                            c.closePath(); c.fill();
-                            c.strokeStyle = "rgba(0,0,0,0.05)"; c.lineWidth = 0.6;
-                            [-13, -5, 4, 12].forEach(sx => {
-                                c.beginPath(); c.moveTo(sx, -21); c.lineTo(sx, -10); c.stroke();
-                            });
-                            c.fillStyle = "rgba(255,255,255,0.08)";
-                            c.beginPath(); c.ellipse(2, -20, 6, 3, 0.1, 0, Math.PI * 2); c.fill();
-                        } else {
-                            // Boy 2: スポーツ刈り — 極短の前髪（うっすら）
+                            c.lineTo(19, -21); c.closePath(); c.fill();
+                        } else if (this.hairStyle === 2) {
                             c.globalAlpha = 0.45;
-                            c.beginPath();
-                            c.moveTo(-16, -21); c.lineTo(-16, -17);
-                            c.lineTo(16, -17); c.lineTo(16, -21);
-                            c.closePath(); c.fill();
+                            c.beginPath(); c.moveTo(-16, -21); c.lineTo(-16, -17); c.lineTo(16, -17); c.lineTo(16, -21); c.closePath(); c.fill();
                             c.globalAlpha = 1;
-                            c.fillStyle = "rgba(255,255,255,0.06)";
-                            c.beginPath(); c.ellipse(0, -20, 5, 3, 0, 0, Math.PI * 2); c.fill();
                         }
                     } else {
                         if (this.hairStyle === 0) {
-                            // Girl 0: おかっぱ — ぱっつん前髪
-                            c.beginPath();
-                            c.moveTo(-18, -21); c.lineTo(-18, -11);
-                            c.lineTo(18, -11); c.lineTo(18, -21);
-                            c.closePath(); c.fill();
-                            c.fillStyle = "rgba(0,0,0,0.04)";
-                            c.beginPath(); c.rect(-17, -11, 34, 1); c.fill();
-                            c.fillStyle = "rgba(255,255,255,0.08)";
-                            c.beginPath(); c.ellipse(3, -20, 5, 3, 0.1, 0, Math.PI * 2); c.fill();
+                            c.beginPath(); c.moveTo(-18, -21); c.lineTo(-18, -11); c.lineTo(18, -11); c.lineTo(18, -21); c.closePath(); c.fill();
                         } else if (this.hairStyle === 1) {
-                            // Girl 1: ツインテール — ぱっつん前髪 + リボン
-                            c.beginPath();
-                            c.moveTo(-17, -21); c.lineTo(-17, -11);
-                            c.lineTo(17, -11); c.lineTo(17, -21);
-                            c.closePath(); c.fill();
+                            c.beginPath(); c.moveTo(-17, -21); c.lineTo(-17, -11); c.lineTo(17, -11); c.lineTo(17, -21); c.closePath(); c.fill();
                             c.fillStyle = "hsl(345, 65%, 65%)";
                             [[-20, -14], [20, -14]].forEach(([rx, ry]) => {
                                 c.beginPath(); c.ellipse(rx - 4, ry, 4, 2.5, -0.3, 0, Math.PI * 2); c.fill();
                                 c.beginPath(); c.ellipse(rx + 4, ry, 4, 2.5, 0.3, 0, Math.PI * 2); c.fill();
                                 c.beginPath(); c.arc(rx, ry, 1.5, 0, Math.PI * 2); c.fill();
                             });
-                            c.fillStyle = "rgba(255,255,255,0.08)";
-                            c.beginPath(); c.ellipse(-2, -20, 5, 3, -0.1, 0, Math.PI * 2); c.fill();
                         } else {
-                            // Girl 2: ポニーテール — 斜め流し前髪
-                            c.beginPath();
-                            c.moveTo(-15, -21);
-                            c.lineTo(-15, -12);
-                            c.quadraticCurveTo(0, -10, 17, -13);
-                            c.lineTo(17, -21);
-                            c.closePath(); c.fill();
-                            c.fillStyle = "hsl(210, 55%, 60%)";
-                            c.beginPath(); c.arc(-17, -6, 3, 0, Math.PI * 2); c.fill();
-                            c.fillStyle = "rgba(255,255,255,0.08)";
-                            c.beginPath(); c.ellipse(4, -20, 5, 3, 0.15, 0, Math.PI * 2); c.fill();
+                            c.beginPath(); c.moveTo(-15, -21); c.lineTo(-15, -12);
+                            c.quadraticCurveTo(0, -10, 17, -13); c.lineTo(17, -21); c.closePath(); c.fill();
                         }
                     }
 
-                    // ============================================================
-                    // 5) Face features — 児童用にやや小さめにスケール
-                    // ============================================================
-                    c.save();
-                    c.translate(0, 1); // 少し下にずらして前髪との距離を確保
-                    c.scale(0.82, 0.82);
+                    // 4. FEATURES
                     drawBabyFace(c, this.faceType, this.skinColor, this.cheekColor, null, false);
-                    c.restore();
                 });
 
                 ctx.restore();
             }
-        }
-
-
-        // ==========================================
-        // Data & Logic
-        // ==========================================
-        
-        // Background Objects
-        const blobs = palette.colors.map(c => new OrganicBlob(c));
-        
-        // Game Objects
-        function pickFloorColor() {
-            const usedByBaby = new Set(Object.values(babyColorScheme));
-            const candidates = [palette.colors[2], palette.colors[3], palette.btnColor, palette.bg];
-            return candidates.find(color => !usedByBaby.has(color)) || "hsl(40, 45%, 72%)";
         }
 
         function updateCamera() {
@@ -2452,6 +2366,1327 @@
             });
 
             ctx.restore();
+        }
+
+        // ======== LESSON PHASE (授業フェーズ) ========
+        let lessonStartTime = 0;
+        let lessonDustMotes = [];
+        let lessonChalkProgress = 0;
+        let lessonTeacherArm = 0;
+        let lessonTransitioned = false;
+        const LESSON_ANIM_MS = 5000;
+        const LESSON_FADE_MS = 3000;
+
+        function playSchoolChime() {
+            // キンコンカンコン — classic Japanese school chime (Westminster chime variant)
+            const chimeSynth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "sine" },
+                envelope: { attack: 0.01, decay: 1.2, sustain: 0.15, release: 1.5 },
+                volume: -8
+            }).toDestination();
+            const reverb = new Tone.Reverb({ decay: 2.5, wet: 0.4 }).toDestination();
+            chimeSynth.connect(reverb);
+            // E5 → C5 → D5 → G4 (classic pattern)
+            const notes = ["E5", "C5", "D5", "G4"];
+            const spacing = 0.55; // seconds between each note
+            notes.forEach((note, i) => {
+                chimeSynth.triggerAttackRelease(note, "2n", Tone.now() + i * spacing);
+            });
+            // Dispose after chime finishes
+            setTimeout(() => {
+                chimeSynth.dispose();
+                reverb.dispose();
+            }, (notes.length * spacing + 3) * 1000);
+        }
+
+        function transitionMinigameToLesson() {
+            // Stop groove
+            if (baseGroove && baseGroove.timer) {
+                clearTimeout(baseGroove.timer);
+                baseGroove.timer = null;
+            }
+            // Play school chime
+            playSchoolChime();
+            // 3s white fade IN (minigame → white)
+            fadeScreenTo(1, 3000);
+            setTimeout(() => {
+                // Start lesson scene
+                currentScene = SCENE.LESSON;
+                lessonTransitioned = false;
+                startLessonPhase();
+                // Fade scene-fade away to reveal lesson on canvas
+                fadeScreenTo(0, 800);
+            }, 3000);
+        }
+
+        function startLessonPhase() {
+            currentScene = SCENE.LESSON;
+            lessonStartTime = performance.now();
+            lessonChalkProgress = 0;
+            lessonTeacherArm = 0;
+            lessonDustMotes = [];
+            for (let i = 0; i < 35; i++) {
+                lessonDustMotes.push({
+                    x: Math.random() * width * 0.5,
+                    y: Math.random() * height * 0.55,
+                    size: 1 + Math.random() * 2.5,
+                    speed: 0.08 + Math.random() * 0.15,
+                    drift: (Math.random() - 0.5) * 0.15,
+                    phase: Math.random() * Math.PI * 2,
+                    alpha: 0.15 + Math.random() * 0.3
+                });
+            }
+        }
+
+        function drawLessonScene() {
+            const elapsed = performance.now() - lessonStartTime;
+            const t = Math.min(elapsed / LESSON_ANIM_MS, 1);
+            function lerp(a, b, t2) { return a + (b - a) * t2; }
+
+            // ============ PERSPECTIVE (Seated eye-level) ============
+            const vpX = width * 0.5;
+            const vpY = height * 0.38;
+
+            const bwL = width * 0.08, bwR = width * 0.92;
+            const bwTop = height * 0.06;
+            const bwBot = height * 0.56;
+            const bwW = bwR - bwL, bwH = bwBot - bwTop;
+            const frontBotY = height * 0.72;
+
+            // ============ 1. CEILING ============
+            const ceilG = ctx.createLinearGradient(0, 0, 0, bwTop);
+            ceilG.addColorStop(0, "#ede8df"); ceilG.addColorStop(1, "#e5ddd2");
+            ctx.fillStyle = ceilG;
+            ctx.beginPath();
+            ctx.moveTo(0, 0); ctx.lineTo(width, 0);
+            ctx.lineTo(bwR, bwTop); ctx.lineTo(bwL, bwTop);
+            ctx.closePath(); ctx.fill();
+
+            // Fluorescent lights on ceiling
+            for (let i = 0; i < 2; i++) {
+                const ln = 0.3 + i * 0.4;
+                const lx = lerp(bwL + ln * bwW, ln * width, 0.35);
+                const ly = bwTop * 0.45;
+                const lw = width * 0.09;
+                ctx.fillStyle = "#d4d0c6";
+                ctx.fillRect(lx - lw / 2, ly - 2, lw, 8);
+                ctx.fillStyle = "rgba(255,255,245,0.85)";
+                ctx.fillRect(lx - lw / 2 + 2, ly, lw - 4, 4);
+                ctx.fillStyle = "rgba(255,255,240,0.05)";
+                ctx.beginPath(); ctx.ellipse(lx, ly + 2, lw * 0.7, 16, 0, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // ============ 2. BACK WALL (Wooden Paneling) ============
+            ctx.fillStyle = "#d2b48c";
+            ctx.fillRect(bwL, bwTop, bwW, bwH);
+
+            ctx.strokeStyle = "rgba(0,0,0,0.08)";
+            ctx.lineWidth = 1;
+            const plankH = bwH / 12;
+            for (let i = 0; i <= 12; i++) {
+                const py = bwTop + i * plankH;
+                ctx.beginPath(); ctx.moveTo(bwL, py); ctx.lineTo(bwR, py); ctx.stroke();
+                if (i < 12) {
+                    ctx.fillStyle = i % 2 === 0 ? "rgba(0,0,0,0.02)" : "rgba(255,255,255,0.03)";
+                    ctx.fillRect(bwL, py, bwW, plankH);
+                }
+            }
+
+            // Wainscoting
+            const trimH = bwH * 0.12;
+            const trimG = ctx.createLinearGradient(0, bwBot - trimH, 0, bwBot);
+            trimG.addColorStop(0, "#a67c52"); trimG.addColorStop(1, "#8b5a2b");
+            ctx.fillStyle = trimG;
+            ctx.fillRect(bwL, bwBot - trimH, bwW, trimH);
+            ctx.strokeStyle = "rgba(0,0,0,0.2)";
+            ctx.beginPath(); ctx.moveTo(bwL, bwBot - trimH); ctx.lineTo(bwR, bwBot - trimH); ctx.stroke();
+
+            // ============ 3. SCHOOL SONG POSTER ============
+            const posterW = bwW * 0.32, posterH = bwH * 0.07;
+            const posterX = bwL + (bwW - posterW) / 2;
+            const posterY = bwTop + bwH * 0.02;
+            ctx.fillStyle = "#faf5e8";
+            ctx.beginPath(); ctx.roundRect(posterX, posterY, posterW, posterH, 2); ctx.fill();
+            ctx.strokeStyle = "rgba(180,160,120,0.5)"; ctx.lineWidth = 0.8;
+            ctx.strokeRect(posterX, posterY, posterW, posterH);
+            ctx.fillStyle = "rgba(100,80,50,0.7)";
+            ctx.font = `700 ${Math.round(posterH * 0.35)}px 'Zen Maru Gothic'`;
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText("\u266A \u6821 \u6B4C \u266A", posterX + posterW / 2, posterY + posterH * 0.35);
+            ctx.font = `400 ${Math.round(posterH * 0.24)}px 'Zen Maru Gothic'`;
+            ctx.fillStyle = "rgba(100,80,50,0.45)";
+            ctx.fillText("\u9752\u3044\u7A7A\u306E\u4E0B\u3000\u307F\u3093\u306A\u306E\u58F0\u304C\u97FF\u304F", posterX + posterW / 2, posterY + posterH * 0.72);
+
+            // ============ 4. BLACKBOARD ============
+            const bbW = bwW * 0.50, bbH = bwH * 0.52;
+            const bbX = bwL + (bwW - bbW) / 2;
+            const bbY = posterY + posterH + bwH * 0.02;
+            const fr = 6;
+
+            // Frame
+            ctx.fillStyle = "#9a8a68";
+            ctx.beginPath(); ctx.roundRect(bbX - fr, bbY - fr, bbW + fr * 2, bbH + fr * 2 + 8, 4); ctx.fill();
+            ctx.fillStyle = "#8a7a58"; ctx.fillRect(bbX - fr, bbY - fr, bbW + fr * 2, 3);
+
+            // Surface
+            const boardG = ctx.createLinearGradient(bbX, bbY, bbX, bbY + bbH);
+            boardG.addColorStop(0, "#2a4f3f"); boardG.addColorStop(0.5, "#2c5040"); boardG.addColorStop(1, "#284a3a");
+            ctx.fillStyle = boardG;
+            ctx.beginPath(); ctx.roundRect(bbX, bbY, bbW, bbH, 2); ctx.fill();
+
+            // Chalk smudges
+            ctx.fillStyle = "rgba(255,255,255,0.025)";
+            for (let i = 0; i < 5; i++) {
+                ctx.beginPath(); ctx.ellipse(bbX + bbW * (0.1 + i * 0.2), bbY + bbH * 0.5, 20 + i * 5, 10, 0.1 * i, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // Chalk tray
+            ctx.fillStyle = "#bab098";
+            ctx.beginPath(); ctx.roundRect(bbX - fr, bbY + bbH + fr, bbW + fr * 2, 7, [0, 0, 3, 3]); ctx.fill();
+            ["#fff", "#ffe8aa", "#ffbbbb", "#aaddff"].forEach((c, ci) => {
+                ctx.fillStyle = c; ctx.fillRect(bbX + 8 + ci * 18, bbY + bbH + fr + 1, 10, 3.5);
+            });
+
+            // 日直 (right side of board)
+            const nkX = bbX + bbW * 0.72, nkY = bbY + bbH * 0.06;
+            const nkW = bbW * 0.24, nkH = bbH * 0.38;
+            ctx.strokeStyle = "rgba(255,255,255,0.25)"; ctx.lineWidth = 1;
+            ctx.strokeRect(nkX, nkY, nkW, nkH);
+            const nkA = Math.min(t * 4, 1);
+            ctx.fillStyle = `rgba(255,255,255,${0.6 * nkA})`;
+            ctx.font = `700 ${Math.round(nkH * 0.16)}px 'Zen Maru Gothic'`;
+            ctx.textAlign = "center"; ctx.textBaseline = "top";
+            ctx.fillText("\u4ECA\u65E5\u306E\u65E5\u76F4", nkX + nkW / 2, nkY + nkH * 0.08);
+            const nmA = Math.max(0, Math.min((t - 0.1) * 5, 1));
+            ctx.font = `400 ${Math.round(nkH * 0.18)}px 'Zen Maru Gothic'`;
+            ctx.fillStyle = `rgba(255,255,200,${0.7 * nmA})`;
+            ctx.fillText("\u7530\u4E2D \u30FB \u9234\u6728", nkX + nkW / 2, nkY + nkH * 0.42);
+            ctx.font = `400 ${Math.round(nkH * 0.14)}px 'Zen Maru Gothic'`;
+            ctx.fillStyle = `rgba(255,255,200,${0.5 * nmA})`;
+            ctx.fillText("2\u670825\u65E5\uFF08\u706B\uFF09", nkX + nkW / 2, nkY + nkH * 0.72);
+
+            // Chalk writing (left side)
+            ctx.save();
+            ctx.beginPath(); ctx.rect(bbX, bbY, bbW * 0.70, bbH); ctx.clip();
+            const cA = 0.75 * Math.min(t * 3.5, 1);
+            const tp = Math.min(t / 0.2, 1);
+            if (tp > 0) {
+                ctx.fillStyle = `rgba(255,255,255,${cA})`;
+                ctx.font = `700 ${Math.round(bbH * 0.13)}px 'Zen Maru Gothic'`;
+                ctx.textAlign = "left"; ctx.textBaseline = "top";
+                const tt = "\u672C\u65E5\u306E\u6388\u696D", tx = bbX + bbW * 0.05, ty = bbY + bbH * 0.08;
+                ctx.fillText(tt.substring(0, Math.ceil(tt.length * tp)), tx, ty);
+                if (tp >= 1) {
+                    ctx.strokeStyle = `rgba(255,255,255,${cA * 0.35})`; ctx.lineWidth = 1.5;
+                    ctx.beginPath(); ctx.moveTo(tx, ty + bbH * 0.16); ctx.lineTo(tx + ctx.measureText(tt).width, ty + bbH * 0.16); ctx.stroke();
+                }
+            }
+            const lines = ["1. \u3044\u306E\u3061\u306E\u97F3\u3068\u30EA\u30BA\u30E0", "2. \u9078\u629E\u306E\u9023\u9396", "3. \u81EA\u5206\u3060\u3051\u306E\u30E1\u30ED\u30C7\u30A3\u30FC"];
+            ctx.font = `400 ${Math.round(bbH * 0.085)}px 'Zen Maru Gothic'`;
+            for (let li = 0; li < lines.length; li++) {
+                const ls = 0.2 + (li / 3) * 0.5, le = ls + 0.5 / 3;
+                const lt = Math.max(0, Math.min((t - ls) / (le - ls), 1));
+                if (lt > 0) {
+                    ctx.fillStyle = `rgba(255,255,255,${cA * 0.85})`;
+                    ctx.fillText(lines[li].substring(0, Math.ceil(lines[li].length * lt)), bbX + bbW * 0.07, bbY + bbH * (0.32 + li * 0.17));
+                }
+            }
+            const nt = Math.max(0, Math.min((t - 0.7) / 0.2, 1));
+            if (nt > 0) {
+                ctx.globalAlpha = nt * cA * 0.6;
+                ctx.font = `400 ${Math.round(bbH * 0.13)}px sans-serif`;
+                ctx.fillStyle = "#fff"; ctx.fillText("\u266B", bbX + bbW * 0.55, bbY + bbH * 0.78);
+                ctx.globalAlpha = 1;
+            }
+            ctx.restore();
+
+            // ============ 5. CLOCK ============
+            const cR = Math.min(bwW, bwH) * 0.042;
+            const cCX = bbX + bbW + bwW * 0.05, cCY = bbY + cR * 0.3;
+            ctx.fillStyle = "#f5f2ec"; ctx.strokeStyle = "#8a7a60"; ctx.lineWidth = 2.5;
+            ctx.beginPath(); ctx.arc(cCX, cCY, cR, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+            for (let hi = 0; hi < 12; hi++) {
+                const a = (hi / 12) * Math.PI * 2 - Math.PI / 2;
+                ctx.strokeStyle = "#555"; ctx.lineWidth = hi % 3 === 0 ? 2 : 0.8;
+                ctx.beginPath();
+                ctx.moveTo(cCX + Math.cos(a) * cR * (hi % 3 === 0 ? 0.72 : 0.8), cCY + Math.sin(a) * cR * (hi % 3 === 0 ? 0.72 : 0.8));
+                ctx.lineTo(cCX + Math.cos(a) * cR * 0.88, cCY + Math.sin(a) * cR * 0.88);
+                ctx.stroke();
+            }
+            const hA = ((10 + 25 / 60) / 12) * Math.PI * 2 - Math.PI / 2;
+            const mA2 = (25 / 60) * Math.PI * 2 - Math.PI / 2;
+            ctx.strokeStyle = "#333"; ctx.lineCap = "round";
+            ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(cCX, cCY); ctx.lineTo(cCX + Math.cos(hA) * cR * 0.45, cCY + Math.sin(hA) * cR * 0.45); ctx.stroke();
+            ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(cCX, cCY); ctx.lineTo(cCX + Math.cos(mA2) * cR * 0.68, cCY + Math.sin(mA2) * cR * 0.68); ctx.stroke();
+            ctx.fillStyle = "#c00"; ctx.beginPath(); ctx.arc(cCX, cCY, 2, 0, Math.PI * 2); ctx.fill();
+
+            // ============ 6. 給食メニュー ============
+            const mnW = bwW * 0.085, mnH = bwH * 0.38;
+            const mnX = bbX - mnW - bwW * 0.03, mnY = bbY + bbH * 0.02;
+            ctx.fillStyle = "#fefcf4";
+            ctx.beginPath(); ctx.roundRect(mnX, mnY, mnW, mnH, 3); ctx.fill();
+            ctx.strokeStyle = "rgba(180,160,120,0.6)"; ctx.lineWidth = 1; ctx.strokeRect(mnX, mnY, mnW, mnH);
+            ctx.fillStyle = "#e8a060"; ctx.fillRect(mnX, mnY, mnW, mnH * 0.14);
+            ctx.fillStyle = "#fff"; ctx.font = `700 ${Math.round(mnH * 0.07)}px 'Zen Maru Gothic'`;
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText("\u4ECA\u65E5\u306E\u7D66\u98DF", mnX + mnW / 2, mnY + mnH * 0.07);
+            ctx.fillStyle = "rgba(80,60,40,0.65)"; ctx.font = `400 ${Math.round(mnH * 0.058)}px 'Zen Maru Gothic'`;
+            ["\u3054\u306F\u3093", "\u307F\u305D\u3057\u308B", "\u3084\u304D\u3056\u304B\u306A", "\u307B\u3046\u308C\u3093\u305D\u3046", "\u725B\u4E73"].forEach((item, mi) => {
+                ctx.fillText(item, mnX + mnW / 2, mnY + mnH * (0.24 + mi * 0.14));
+            });
+
+            // ============ 7. LEFT SIDE WALL + WINDOWS ============
+            const lwG = ctx.createLinearGradient(0, height * 0.3, bwL, height * 0.3);
+            lwG.addColorStop(0, "#ddd4c4"); lwG.addColorStop(1, "#e8e0d2");
+            ctx.fillStyle = lwG;
+            ctx.beginPath();
+            ctx.moveTo(0, 0); ctx.lineTo(bwL, bwTop); ctx.lineTo(bwL, bwBot); ctx.lineTo(0, frontBotY);
+            ctx.closePath(); ctx.fill();
+
+            // Wainscoting on left wall
+            ctx.fillStyle = "rgba(195,180,155,0.22)";
+            ctx.beginPath();
+            ctx.moveTo(bwL, bwBot - trimH); ctx.lineTo(bwL, bwBot);
+            ctx.lineTo(0, frontBotY); ctx.lineTo(0, lerp(frontBotY, bwBot - trimH, 0.25));
+            ctx.closePath(); ctx.fill();
+
+            // Windows (2)
+            const winDepths = [0.30, 0.72];
+            for (const wd of winDepths) {
+                const wTB = bwTop, wTF = 0, wBB = bwBot, wBF = frontBotY;
+                const tD = lerp(wTB, wTF, wd), bD = lerp(wBB, wBF, wd);
+                const hD = bD - tD;
+                const wT = tD + hD * 0.08, wB = tD + hD * 0.62;
+                const xD = lerp(bwL, 0, wd);
+
+                const wd2 = Math.max(0, wd - 0.14);
+                const xD2 = lerp(bwL, 0, wd2);
+                const tD2 = lerp(wTB, wTF, wd2), bD2 = lerp(wBB, wBF, wd2);
+                const hD2 = bD2 - tD2;
+                const wT2 = tD2 + hD2 * 0.08, wB2 = tD2 + hD2 * 0.62;
+
+                // Frame
+                ctx.fillStyle = "#c0b49e";
+                ctx.beginPath();
+                ctx.moveTo(xD - 3, wT - 3); ctx.lineTo(xD2 + 3, wT2 - 3);
+                ctx.lineTo(xD2 + 3, wB2 + 3); ctx.lineTo(xD - 3, wB + 3);
+                ctx.closePath(); ctx.fill();
+
+                // Glass
+                const skyG = ctx.createLinearGradient(0, wT, 0, wB);
+                skyG.addColorStop(0, "#a8d0ee"); skyG.addColorStop(0.4, "#bbe0f8"); skyG.addColorStop(1, "#d8eeff");
+                ctx.fillStyle = skyG;
+                ctx.beginPath();
+                ctx.moveTo(xD, wT); ctx.lineTo(xD2, wT2); ctx.lineTo(xD2, wB2); ctx.lineTo(xD, wB);
+                ctx.closePath(); ctx.fill();
+
+                // Tree through far window
+                if (wd < 0.5) {
+                    ctx.fillStyle = "rgba(100,160,80,0.25)";
+                    ctx.beginPath();
+                    ctx.moveTo(xD, wB); ctx.lineTo(xD2, wB2);
+                    ctx.lineTo(xD2, lerp(wB2, wT2, 0.3)); ctx.lineTo(xD, lerp(wB, wT, 0.3));
+                    ctx.closePath(); ctx.fill();
+                }
+
+                // Cross muntins
+                ctx.strokeStyle = "#c0b49e"; ctx.lineWidth = 2.5;
+                ctx.beginPath(); ctx.moveTo(xD, (wT + wB) / 2); ctx.lineTo(xD2, (wT2 + wB2) / 2); ctx.stroke();
+                const mx = (xD + xD2) / 2;
+                ctx.beginPath(); ctx.moveTo(mx, (wT + wT2) / 2); ctx.lineTo(mx, (wB + wB2) / 2); ctx.stroke();
+
+                // Curtain
+                ctx.fillStyle = "rgba(210,195,170,0.3)";
+                ctx.beginPath();
+                ctx.moveTo(xD, wT); ctx.lineTo(xD + (xD2 - xD) * 0.18, wT + (wT2 - wT) * 0.18);
+                ctx.lineTo(xD + (xD2 - xD) * 0.18, wB + (wB2 - wB) * 0.18); ctx.lineTo(xD, wB);
+                ctx.closePath(); ctx.fill();
+            }
+
+            // ============ 7b. SUNLIGHT + SHADOWS ============
+            ctx.save(); ctx.globalAlpha = 0.07; ctx.fillStyle = "#fff8d0";
+            ctx.beginPath(); ctx.moveTo(0, height * 0.10); ctx.lineTo(0, height * 0.48); ctx.lineTo(width * 0.38, height * 0.88); ctx.lineTo(width * 0.18, height * 0.88); ctx.closePath(); ctx.fill();
+            ctx.globalAlpha = 0.04; ctx.beginPath();
+            ctx.moveTo(bwL * 0.65, bwTop * 1.5); ctx.lineTo(bwL * 0.4, bwBot * 0.6); ctx.lineTo(width * 0.28, height * 0.75); ctx.lineTo(width * 0.18, height * 0.75);
+            ctx.closePath(); ctx.fill();
+            ctx.globalAlpha = 1; ctx.restore();
+
+            // Floor sunlight patch
+            ctx.save(); ctx.globalAlpha = 0.06; ctx.fillStyle = "#fff8d0";
+            ctx.beginPath(); ctx.moveTo(width * 0.03, height * 0.62); ctx.lineTo(width * 0.20, height * 0.62); ctx.lineTo(width * 0.32, height * 0.84); ctx.lineTo(width * 0.08, height * 0.84); ctx.closePath(); ctx.fill();
+            ctx.globalAlpha = 1; ctx.restore();
+
+            // Window-frame shadow on floor
+            ctx.save(); ctx.globalAlpha = 0.035; ctx.fillStyle = "#000";
+            ctx.fillRect(width * 0.04, height * 0.63, width * 0.16, 1.5);
+            ctx.fillRect(width * 0.10, height * 0.57, 1.5, height * 0.12);
+            ctx.globalAlpha = 1; ctx.restore();
+
+            // ============ 8. RIGHT SIDE WALL ============
+            const rwG = ctx.createLinearGradient(width, height * 0.3, bwR, height * 0.3);
+            rwG.addColorStop(0, "#d8d0c0"); rwG.addColorStop(1, "#e4ddd0");
+            ctx.fillStyle = rwG;
+            ctx.beginPath();
+            ctx.moveTo(width, 0); ctx.lineTo(bwR, bwTop); ctx.lineTo(bwR, bwBot); ctx.lineTo(width, frontBotY);
+            ctx.closePath(); ctx.fill();
+
+            // Right wall wainscoting
+            ctx.fillStyle = "rgba(195,180,155,0.22)";
+            ctx.beginPath();
+            ctx.moveTo(bwR, bwBot - trimH); ctx.lineTo(bwR, bwBot); ctx.lineTo(width, frontBotY); ctx.lineTo(width, lerp(frontBotY, bwBot - trimH, 0.25));
+            ctx.closePath(); ctx.fill();
+
+            // 掃除ロッカー on right wall
+            const lkD = 0.40;
+            const lkWallBot = lerp(bwBot, frontBotY, lkD);
+            const lkWallTop = lerp(bwTop, 0, lkD);
+            const lkWallH = lkWallBot - lkWallTop;
+            const lkX = lerp(bwR, width, lkD);
+            const lkH = lkWallH * 0.52, lkW2 = (width - bwR) * 0.13;
+            const lkY = lkWallBot - lkH;
+            ctx.fillStyle = "#8a9a88";
+            ctx.beginPath(); ctx.roundRect(lkX - lkW2 / 2, lkY, lkW2, lkH, [2, 2, 0, 0]); ctx.fill();
+            ctx.strokeStyle = "rgba(0,0,0,0.15)"; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(lkX, lkY + 2); ctx.lineTo(lkX, lkY + lkH); ctx.stroke();
+            ctx.fillStyle = "#c0c0c0";
+            ctx.fillRect(lkX - 3, lkY + lkH * 0.38, 2, lkH * 0.10);
+            ctx.fillRect(lkX + 1, lkY + lkH * 0.38, 2, lkH * 0.10);
+            ctx.strokeStyle = "rgba(0,0,0,0.06)";
+            for (let si = 0; si < 3; si++) {
+                const sy = lkY + lkH * (0.68 + si * 0.07);
+                ctx.beginPath(); ctx.moveTo(lkX - lkW2 * 0.33, sy); ctx.lineTo(lkX - lkW2 * 0.05, sy); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(lkX + lkW2 * 0.05, sy); ctx.lineTo(lkX + lkW2 * 0.33, sy); ctx.stroke();
+            }
+            ctx.strokeStyle = "#b5a070"; ctx.lineWidth = 2.5; ctx.lineCap = "round";
+            ctx.beginPath(); ctx.moveTo(lkX + lkW2 * 0.28, lkY); ctx.lineTo(lkX + lkW2 * 0.32, lkY - lkH * 0.22); ctx.stroke();
+
+            // ============ 9. FLOOR ============
+            const floorG = ctx.createLinearGradient(0, bwBot, 0, height);
+            floorG.addColorStop(0, "#d2c2a0"); floorG.addColorStop(0.3, "#c8b898"); floorG.addColorStop(1, "#bead88");
+            ctx.fillStyle = floorG;
+            ctx.beginPath();
+            ctx.moveTo(bwL, bwBot); ctx.lineTo(bwR, bwBot);
+            ctx.lineTo(width, frontBotY); ctx.lineTo(width, height); ctx.lineTo(0, height); ctx.lineTo(0, frontBotY);
+            ctx.closePath(); ctx.fill();
+
+            // Floor board lines
+            ctx.strokeStyle = "rgba(155,140,110,0.12)"; ctx.lineWidth = 0.8;
+            for (let i = 0; i < 14; i++) {
+                const bx = (i / 13) * width;
+                ctx.beginPath(); ctx.moveTo(bx, height); ctx.lineTo(lerp(bx, vpX, 0.82), bwBot); ctx.stroke();
+            }
+
+            // ============ 10. TEACHER ============
+            const tX = bbX - bwW * 0.04;
+            const tBaseY = bwBot;
+            const tH = bwH * 0.86;
+            lessonTeacherArm = Math.sin(elapsed * 0.0018) * 0.3 + 0.2;
+
+            ctx.save(); ctx.translate(tX, tBaseY);
+            // Legs
+            ctx.fillStyle = "#4a4040";
+            ctx.fillRect(-8, -tH * 0.28, 7, tH * 0.28); ctx.fillRect(2, -tH * 0.28, 7, tH * 0.28);
+            ctx.fillStyle = "#3a3030";
+            ctx.beginPath(); ctx.roundRect(-10, -2, 11, 4, 2); ctx.fill();
+            ctx.beginPath(); ctx.roundRect(1, -2, 11, 4, 2); ctx.fill();
+            // Body
+            const tBW = tH * 0.30, tBH = tH * 0.36;
+            ctx.fillStyle = "#5a4848";
+            ctx.beginPath(); ctx.roundRect(-tBW / 2, -tH * 0.66, tBW, tBH, [6, 6, 2, 2]); ctx.fill();
+            // Collar
+            ctx.strokeStyle = "#eee"; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(-4, -tH * 0.66); ctx.lineTo(0, -tH * 0.61); ctx.lineTo(4, -tH * 0.66); ctx.stroke();
+            // Head
+            const thR = tH * 0.12, thY = -tH * 0.66 - thR * 0.7;
+            ctx.fillStyle = "#ffe0bd"; ctx.beginPath(); ctx.arc(0, thY, thR, 0, Math.PI * 2); ctx.fill();
+            // Hair
+            ctx.fillStyle = "#3a2a20";
+            ctx.beginPath(); ctx.arc(0, thY - thR * 0.1, thR * 1.08, Math.PI, Math.PI * 2); ctx.fill();
+            ctx.fillRect(-thR * 1.08, thY - thR * 0.1, thR * 0.25, thR * 1.1);
+            ctx.fillRect(thR * 0.83, thY - thR * 0.1, thR * 0.25, thR * 1.1);
+            // Glasses
+            ctx.strokeStyle = "#666"; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(-thR * 0.28, thY, thR * 0.20, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(thR * 0.28, thY, thR * 0.20, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(-thR * 0.08, thY); ctx.lineTo(thR * 0.08, thY); ctx.stroke();
+            // Eyes
+            ctx.fillStyle = "#333";
+            ctx.beginPath(); ctx.arc(-thR * 0.28, thY, 1.3, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(thR * 0.28, thY, 1.3, 0, Math.PI * 2); ctx.fill();
+            // Smile
+            ctx.strokeStyle = "#c08080"; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(0, thY + thR * 0.2, thR * 0.16, 0.15, Math.PI - 0.15); ctx.stroke();
+            // Arms
+            ctx.strokeStyle = "#ffe0bd"; ctx.lineWidth = tH * 0.05; ctx.lineCap = "round";
+            ctx.beginPath(); ctx.moveTo(-tBW / 2, -tH * 0.61); ctx.lineTo(-tBW / 2 - 6, -tH * 0.40); ctx.stroke();
+            const aA = -1.0 + lessonTeacherArm * 0.4, aL = tH * 0.30;
+            ctx.beginPath(); ctx.moveTo(tBW / 2, -tH * 0.61);
+            ctx.lineTo(tBW / 2 + Math.cos(aA) * aL, -tH * 0.61 + Math.sin(aA) * aL); ctx.stroke();
+            if (t < 0.8) {
+                const hx2 = tBW / 2 + Math.cos(aA) * aL, hy2 = -tH * 0.61 + Math.sin(aA) * aL;
+                ctx.fillStyle = "#fff"; ctx.save(); ctx.translate(hx2, hy2); ctx.rotate(aA + 0.3);
+                ctx.fillRect(-1, -4, 3, 8); ctx.restore();
+            }
+            ctx.restore();
+
+            // ============ 11. STUDENTS (back-of-head view) ============
+            function drawStudentBack(sx, headCenterY, headR, hairColor, shirtColor, isGirl) {
+                const shoulderW = headR * 1.35;
+                const neckH = headR * 0.35;
+                const bodyVisH = headR * 2.8;
+                const shoulderTopY = headCenterY + headR * 0.65 + neckH;
+                const deskW = headR * 3.2, deskH2 = headR * 0.22;
+                const deskY2 = shoulderTopY + bodyVisH * 0.20;
+                const deskLegH = headR * 1.6, deskLegW = headR * 0.12;
+                const chairBackW = headR * 3.2, chairBackH2 = headR * 0.22;
+                const chairBackY = shoulderTopY + bodyVisH * 0.45;
+                const chairLegH = headR * 2.2, chairLegW = headR * 0.10;
+                const chairSeatY = chairBackY - headR * 0.35, chairSeatH = headR * 0.12;
+                const metalColor = "#888", metalDark = "#777";
+
+                // Desk legs
+                ctx.fillStyle = metalColor;
+                ctx.fillRect(sx - deskW * 0.45, deskY2 + deskH2, deskLegW, deskLegH);
+                ctx.fillRect(sx + deskW * 0.45 - deskLegW, deskY2 + deskH2, deskLegW, deskLegH);
+                ctx.fillStyle = metalDark;
+                ctx.fillRect(sx - deskW * 0.42, deskY2 + deskH2, deskLegW * 0.8, deskLegH * 0.7);
+                ctx.fillRect(sx + deskW * 0.42 - deskLegW * 0.8, deskY2 + deskH2, deskLegW * 0.8, deskLegH * 0.7);
+                ctx.fillStyle = metalColor;
+                ctx.fillRect(sx - deskW * 0.44, deskY2 + deskH2 + deskLegH * 0.65, deskW * 0.88, deskLegW * 0.7);
+
+                // Desk surface
+                const deskTopG = ctx.createLinearGradient(0, deskY2, 0, deskY2 + deskH2);
+                deskTopG.addColorStop(0, "#c8b898"); deskTopG.addColorStop(1, "#b8a888");
+                ctx.fillStyle = deskTopG;
+                ctx.beginPath(); ctx.roundRect(sx - deskW * 0.5, deskY2, deskW, deskH2, 1); ctx.fill();
+                ctx.strokeStyle = "rgba(255,255,255,0.2)"; ctx.lineWidth = 0.8;
+                ctx.beginPath(); ctx.moveTo(sx - deskW * 0.5, deskY2); ctx.lineTo(sx + deskW * 0.5, deskY2); ctx.stroke();
+                if (!isGirl) {
+                    ctx.fillStyle = "rgba(180,200,170,0.5)";
+                    ctx.fillRect(sx - deskW * 0.15, deskY2 - headR * 0.08, deskW * 0.28, headR * 0.06);
+                } else {
+                    ctx.fillStyle = "rgba(220,160,180,0.5)";
+                    ctx.beginPath(); ctx.roundRect(sx + deskW * 0.05, deskY2 - headR * 0.07, deskW * 0.22, headR * 0.05, 2); ctx.fill();
+                }
+
+                // Chair
+                ctx.save();
+                ctx.fillStyle = metalColor;
+                const chairLeftX = sx - chairBackW * 0.48, chairRightX = sx + chairBackW * 0.48;
+                ctx.fillRect(chairLeftX, chairBackY, chairLegW, chairLegH);
+                ctx.fillRect(chairRightX - chairLegW, chairBackY, chairLegW, chairLegH);
+                ctx.fillRect(chairLeftX + headR * 0.3, chairSeatY, chairLegW, chairLegH * 0.7);
+                ctx.fillRect(chairRightX - chairLegW - headR * 0.3, chairSeatY, chairLegW, chairLegH * 0.7);
+                ctx.fillRect(chairLeftX, chairBackY + chairLegH * 0.55, chairBackW * 0.96, chairLegW * 0.7);
+
+                const woodBoard = "#704214", woodEdge = "#4a2a10", woodHigh = "#966F33";
+                const drawSchoolPlank = (px, py, pw, ph) => {
+                    const totalH2 = ph * 2.8;
+                    ctx.fillStyle = woodEdge;
+                    ctx.beginPath(); ctx.roundRect(px, py, pw, totalH2, 3); ctx.fill();
+                    const pg = ctx.createLinearGradient(px, py, px, py + totalH2);
+                    pg.addColorStop(0, woodHigh); pg.addColorStop(0.5, woodBoard); pg.addColorStop(1, woodBoard);
+                    ctx.fillStyle = pg;
+                    ctx.beginPath(); ctx.roundRect(px, py, pw, totalH2 - 1.5, 3); ctx.fill();
+                    ctx.fillStyle = "rgba(0,0,0,0.4)";
+                    const rx = 10, ry = 8;
+                    ctx.beginPath(); ctx.arc(px + rx, py + ry, 1.8, 0, Math.PI * 2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(px + pw - rx, py + ry, 1.8, 0, Math.PI * 2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(px + rx, py + totalH2 - ry, 1.8, 0, Math.PI * 2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(px + pw - rx, py + totalH2 - ry, 1.8, 0, Math.PI * 2); ctx.fill();
+                };
+                const widerBackW = headR * 4.2;
+                drawSchoolPlank(sx - widerBackW * 0.5, chairBackY, widerBackW, chairBackH2);
+                // Chair seat
+                ctx.fillStyle = woodEdge;
+                ctx.beginPath(); ctx.roundRect(sx - chairBackW * 0.52, chairSeatY + 2, chairBackW * 1.04, chairSeatH, 2); ctx.fill();
+                const seatGradient = ctx.createLinearGradient(sx, chairSeatY, sx, chairSeatY + chairSeatH);
+                seatGradient.addColorStop(0, woodHigh); seatGradient.addColorStop(1, woodBoard);
+                ctx.fillStyle = seatGradient;
+                ctx.beginPath(); ctx.roundRect(sx - chairBackW * 0.52, chairSeatY, chairBackW * 1.04, chairSeatH - 2, 2); ctx.fill();
+                ctx.restore();
+
+                // Student body
+                ctx.fillStyle = shirtColor;
+                ctx.beginPath();
+                ctx.roundRect(sx - shoulderW, shoulderTopY, shoulderW * 2, bodyVisH, [headR * 0.3, headR * 0.3, 2, 2]);
+                ctx.fill();
+                ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(sx - shoulderW * 0.25, shoulderTopY);
+                ctx.lineTo(sx, shoulderTopY + headR * 0.25);
+                ctx.lineTo(sx + shoulderW * 0.25, shoulderTopY);
+                ctx.stroke();
+                ctx.fillStyle = shirtColor;
+                const armW = headR * 0.30;
+                ctx.save(); ctx.translate(sx - shoulderW, shoulderTopY + headR * 0.15); ctx.rotate(0.15);
+                ctx.fillRect(-armW, 0, armW, bodyVisH * 0.45); ctx.restore();
+                ctx.save(); ctx.translate(sx + shoulderW, shoulderTopY + headR * 0.15); ctx.rotate(-0.15);
+                ctx.fillRect(0, 0, armW, bodyVisH * 0.45); ctx.restore();
+                ctx.fillStyle = "#ffe0bd";
+                ctx.fillRect(sx - shoulderW - armW * 0.3, deskY2 - headR * 0.12, shoulderW * 0.5, headR * 0.18);
+                ctx.fillRect(sx + shoulderW * 0.6, deskY2 - headR * 0.12, shoulderW * 0.5, headR * 0.18);
+                drawSchoolPlank(sx - widerBackW * 0.5, chairBackY + chairBackH2 + headR * 0.25, widerBackW, chairBackH2);
+                // Second chair seat
+                ctx.fillStyle = woodEdge;
+                ctx.beginPath(); ctx.roundRect(sx - chairBackW * 0.52, chairSeatY + 2, chairBackW * 1.04, chairSeatH, 2); ctx.fill();
+                const seatG = ctx.createLinearGradient(sx, chairSeatY, sx, chairSeatY + chairSeatH);
+                seatG.addColorStop(0, woodHigh); seatG.addColorStop(1, woodBoard);
+                ctx.fillStyle = seatG;
+                ctx.beginPath(); ctx.roundRect(sx - chairBackW * 0.52, chairSeatY, chairBackW * 1.04, chairSeatH - 2, 2); ctx.fill();
+
+                // Neck + Head
+                ctx.fillStyle = "#ffe0bd";
+                const neckW = headR * 0.38;
+                ctx.fillRect(sx - neckW, headCenterY + headR * 0.55, neckW * 2, neckH + 2);
+                ctx.beginPath(); ctx.arc(sx, headCenterY, headR, 0, Math.PI * 2); ctx.fill();
+                // Ears
+                ctx.beginPath(); ctx.ellipse(sx - headR * 0.93, headCenterY + headR * 0.08, headR * 0.17, headR * 0.26, -0.1, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.ellipse(sx + headR * 0.93, headCenterY + headR * 0.08, headR * 0.17, headR * 0.26, 0.1, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = "#f5ccaa";
+                ctx.beginPath(); ctx.ellipse(sx - headR * 0.93, headCenterY + headR * 0.08, headR * 0.09, headR * 0.14, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.ellipse(sx + headR * 0.93, headCenterY + headR * 0.08, headR * 0.09, headR * 0.14, 0, 0, Math.PI * 2); ctx.fill();
+                // Hair
+                ctx.fillStyle = hairColor;
+                ctx.beginPath(); ctx.arc(sx, headCenterY - headR * 0.05, headR * 1.07, Math.PI * 0.72, Math.PI * 2.28); ctx.fill();
+                ctx.beginPath(); ctx.ellipse(sx, headCenterY + headR * 0.2, headR * 1.02, headR * 0.58, 0, -0.15, Math.PI + 0.15); ctx.fill();
+                // Hair texture
+                ctx.strokeStyle = "rgba(0,0,0,0.06)"; ctx.lineWidth = 0.6;
+                for (let hi = 0; hi < 4; hi++) {
+                    const ha = -0.6 + hi * 0.4;
+                    ctx.beginPath(); ctx.arc(sx, headCenterY - headR * 0.4, headR * (0.5 + hi * 0.15), ha, ha + 0.5); ctx.stroke();
+                }
+                ctx.strokeStyle = "rgba(0,0,0,0.07)"; ctx.lineWidth = 0.7;
+                ctx.beginPath(); ctx.arc(sx + headR * 0.08, headCenterY - headR * 0.25, headR * 0.25, 0.3, 2.8); ctx.stroke();
+                // Long hair for girls
+                if (isGirl) {
+                    ctx.fillStyle = hairColor;
+                    const lockW = headR * 0.26;
+                    ctx.beginPath();
+                    ctx.moveTo(sx - headR * 0.95, headCenterY - headR * 0.1);
+                    ctx.quadraticCurveTo(sx - headR * 1.05, headCenterY + headR * 1.5, sx - headR * 0.75, shoulderTopY + bodyVisH * 0.65);
+                    ctx.lineTo(sx - headR * 0.75 + lockW, shoulderTopY + bodyVisH * 0.60);
+                    ctx.quadraticCurveTo(sx - headR * 0.80, headCenterY + headR * 1.2, sx - headR * 0.70, headCenterY - headR * 0.1);
+                    ctx.closePath(); ctx.fill();
+                    ctx.beginPath();
+                    ctx.moveTo(sx + headR * 0.95, headCenterY - headR * 0.1);
+                    ctx.quadraticCurveTo(sx + headR * 1.05, headCenterY + headR * 1.5, sx + headR * 0.75, shoulderTopY + bodyVisH * 0.65);
+                    ctx.lineTo(sx + headR * 0.75 - lockW, shoulderTopY + bodyVisH * 0.60);
+                    ctx.quadraticCurveTo(sx + headR * 0.80, headCenterY + headR * 1.2, sx + headR * 0.70, headCenterY - headR * 0.1);
+                    ctx.closePath(); ctx.fill();
+                }
+            }
+
+            // Row 1 (far row)
+            const r1HeadY = height * 0.35, r1HeadR = height * 0.032, r1Spread = 0.55;
+            for (let si = 0; si < 5; si++) {
+                const sn = (si + 0.5) / 5;
+                const sx = width * 0.5 + (sn - 0.5) * width * r1Spread;
+                const seed = si;
+                const hc = ["#2a1f15", "#3a2a20", "#4a3525", "#1e1e1e", "#352515"][seed % 5];
+                const sc2 = ["#6a8aaa", "#8a6a6a", "#6a8a6a", "#8a7a5a", "#7a6a8a"][(seed + 2) % 5];
+                drawStudentBack(sx, r1HeadY, r1HeadR, hc, sc2, seed % 3 === 0);
+            }
+
+            // Row 2 (directly in front)
+            const r2HeadY = height * 0.46, r2HeadR = height * 0.052, r2Spread = 0.72;
+            for (let si = 0; si < 5; si++) {
+                const sn = (si + 0.5) / 5;
+                const sx = width * 0.5 + (sn - 0.5) * width * r2Spread;
+                const seed = si + 10;
+                const hc = ["#352515", "#2a1f15", "#1e1e1e", "#3a2a20", "#4a3525"][seed % 5];
+                const sc2 = ["#7a6a8a", "#6a8aaa", "#8a7a5a", "#6a8a6a", "#8a6a6a"][(seed + 1) % 5];
+                drawStudentBack(sx, r2HeadY, r2HeadR, hc, sc2, seed % 3 === 1);
+            }
+
+            // ============ 12. PLAYER'S DESK ============
+            const myY = height * 0.78;
+            const myW = width * 0.56;
+            // Desk surface
+            ctx.fillStyle = "#c8b48c";
+            ctx.beginPath();
+            ctx.moveTo(vpX - myW * 0.5, myY); ctx.lineTo(vpX + myW * 0.5, myY);
+            ctx.lineTo(vpX + myW * 0.54, myY + 10); ctx.lineTo(vpX - myW * 0.54, myY + 10);
+            ctx.closePath(); ctx.fill();
+            ctx.strokeStyle = "rgba(255,255,255,0.3)"; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(vpX - myW * 0.5, myY); ctx.lineTo(vpX + myW * 0.5, myY); ctx.stroke();
+            // Front face
+            ctx.fillStyle = "#b5a078";
+            ctx.beginPath();
+            ctx.moveTo(vpX - myW * 0.54, myY + 10); ctx.lineTo(vpX + myW * 0.54, myY + 10);
+            ctx.lineTo(vpX + myW * 0.58, height); ctx.lineTo(vpX - myW * 0.58, height);
+            ctx.closePath(); ctx.fill();
+            // Pencil groove
+            ctx.strokeStyle = "rgba(0,0,0,0.05)"; ctx.lineWidth = 0.8;
+            ctx.beginPath(); ctx.moveTo(vpX - myW * 0.42, myY + 5); ctx.lineTo(vpX + myW * 0.42, myY + 5); ctx.stroke();
+            // Notebook
+            ctx.save(); ctx.translate(vpX - width * 0.05, myY - 26); ctx.rotate(-0.04);
+            ctx.fillStyle = "#f5f0e0";
+            const nbW2 = width * 0.14, nbH2 = height * 0.085;
+            ctx.fillRect(-nbW2 / 2, -nbH2 / 2, nbW2, nbH2);
+            ctx.strokeStyle = "rgba(170,155,125,0.4)"; ctx.lineWidth = 0.8; ctx.strokeRect(-nbW2 / 2, -nbH2 / 2, nbW2, nbH2);
+            ctx.strokeStyle = "rgba(220,80,80,0.25)"; ctx.lineWidth = 0.6;
+            ctx.beginPath(); ctx.moveTo(-nbW2 / 2 + nbW2 * 0.12, -nbH2 / 2); ctx.lineTo(-nbW2 / 2 + nbW2 * 0.12, nbH2 / 2); ctx.stroke();
+            ctx.strokeStyle = "rgba(160,200,220,0.22)";
+            for (let li = 1; li < 6; li++) { const ly = -nbH2 / 2 + li * (nbH2 / 6); ctx.beginPath(); ctx.moveTo(-nbW2 / 2 + 6, ly); ctx.lineTo(nbW2 / 2 - 6, ly); ctx.stroke(); }
+            ctx.restore();
+            // Pencil
+            ctx.save(); ctx.translate(vpX + width * 0.08, myY - 20); ctx.rotate(0.06);
+            const pL = width * 0.09;
+            ctx.fillStyle = "#e8c84a"; ctx.fillRect(0, 0, pL, 4);
+            ctx.fillStyle = "#f4d88a"; ctx.fillRect(0, 0, pL, 2);
+            ctx.fillStyle = "#333"; ctx.beginPath(); ctx.moveTo(pL, 0); ctx.lineTo(pL + 6, 2); ctx.lineTo(pL, 4); ctx.closePath(); ctx.fill();
+            ctx.fillStyle = "#e89090"; ctx.fillRect(-8, 0, 8, 4);
+            ctx.fillStyle = "#ccc"; ctx.fillRect(-9, 0, 1.5, 4);
+            ctx.restore();
+            // Textbook
+            ctx.save(); ctx.translate(vpX + width * 0.17, myY - 18); ctx.rotate(0.02);
+            ctx.fillStyle = "#88b8d8"; ctx.fillRect(0, 0, width * 0.065, height * 0.055);
+            ctx.strokeStyle = "rgba(0,0,0,0.1)"; ctx.lineWidth = 0.5; ctx.strokeRect(0, 0, width * 0.065, height * 0.055);
+            ctx.fillStyle = "#fff"; ctx.font = `700 ${Math.round(height * 0.011)}px 'Zen Maru Gothic'`;
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText("\u304A\u3093\u304C\u304F", width * 0.0325, height * 0.0275);
+            ctx.restore();
+
+            // ============ 13. ROW 3 NEIGHBORS ============
+            drawStudentBack(width * 0.13, height * 0.50, height * 0.072, "#3a2a20", "#7a8a6a", true);
+            drawStudentBack(width * 0.87, height * 0.51, height * 0.072, "#1e1e1e", "#8a7070", false);
+
+            // ============ 14. DUST MOTES ============
+            for (const m of lessonDustMotes) {
+                m.x += m.drift; m.y -= m.speed;
+                m.phase += 0.015;
+                if (m.y < -10) { m.y = height * 0.55; m.x = Math.random() * width * 0.45; }
+                if (m.x < 0 || m.x > width * 0.5) m.x = Math.random() * width * 0.45;
+                const mx2 = m.x + Math.sin(m.phase) * 6;
+                const my2 = m.y + Math.cos(m.phase * 0.7) * 3;
+                ctx.fillStyle = `rgba(255,248,215,${m.alpha * (0.5 + 0.5 * Math.sin(m.phase * 1.5))})`;
+                ctx.beginPath(); ctx.arc(mx2, my2, m.size, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // === 12. White fade-out overlay (after 5 seconds, over 3 seconds) ===
+            if (elapsed > LESSON_ANIM_MS) {
+                const fadeT = Math.min((elapsed - LESSON_ANIM_MS) / LESSON_FADE_MS, 1);
+                // Ease-in-out for smooth fade
+                const easedFade = fadeT < 0.5
+                    ? 2 * fadeT * fadeT
+                    : 1 - Math.pow(-2 * fadeT + 2, 2) / 2;
+                ctx.fillStyle = `rgba(255, 255, 255, ${easedFade})`;
+                ctx.fillRect(0, 0, width, height);
+            }
+
+            // === 13. Transition to Adult phase after lesson completes ===
+            if (elapsed >= LESSON_ANIM_MS + LESSON_FADE_MS && !lessonTransitioned) {
+                lessonTransitioned = true;
+                const sceneFade = document.getElementById('scene-fade');
+                sceneFade.style.transition = 'none';
+                sceneFade.style.opacity = '1';
+                requestAnimationFrame(() => {
+                    startAdultPhase();
+                    sceneFade.style.transition = 'opacity 1500ms ease';
+                    sceneFade.style.opacity = '0';
+                });
+            }
+        }
+
+        // ======== ADULT PHASE (大人フェーズ) ========
+        const ADULT_ACTIVITIES = [
+            { id: "university", name: "大学", bassStyle: "contemplative", guitarStyle: "fingerpicking",
+              color: "hsl(220, 55%, 60%)", worldFraction: [0.04, 0.16],
+              labels: { study: 3, curious: 2, focused: 1 } },
+            { id: "parttime", name: "アルバイト", bassStyle: "groovy", guitarStyle: "cutting",
+              color: "hsl(35, 60%, 58%)", worldFraction: [0.20, 0.34],
+              labels: { resilient: 3, social: 2, patient: 1 } },
+            { id: "jobhunt", name: "就活", bassStyle: "soft", guitarStyle: "clean-electric",
+              color: "hsl(0, 0%, 55%)", worldFraction: [0.40, 0.54],
+              labels: { focused: 3, cautious: 2, resilient: 1 } },
+            { id: "travel", name: "旅", bassStyle: "melodic", guitarStyle: "acoustic-arpeggio",
+              color: "hsl(170, 50%, 55%)", worldFraction: [0.60, 0.74],
+              labels: { adventurous: 3, curious: 2, optimistic: 1 } },
+            { id: "startup", name: "起業", bassStyle: "energetic", guitarStyle: "rock",
+              color: "hsl(45, 70%, 55%)", worldFraction: [0.80, 0.94],
+              labels: { creative: 3, adventurous: 2, expressive: 1 } }
+        ];
+
+        let adultBuildingSeeds = [];
+
+        function startAdultPhase() {
+            currentScene = SCENE.ADULT;
+            worldWidth = Math.max(width * 3.2, 2800);
+            baby = new Child(babyColorScheme);
+            baby.x = worldWidth * 0.5;
+
+            // Generate building seeds for consistent cityscape (avoid activity zones)
+            adultBuildingSeeds = [];
+            const actZones = ADULT_ACTIVITIES.map(a => [(a.worldFraction[0] + a.worldFraction[1]) / 2 - (a.worldFraction[1] - a.worldFraction[0]) * 0.42,
+                                                         (a.worldFraction[0] + a.worldFraction[1]) / 2 + (a.worldFraction[1] - a.worldFraction[0]) * 0.42]);
+            for (let i = 0; i < 40; i++) {
+                const xf = i / 40 + (Math.random() - 0.5) * 0.01;
+                const inActivityZone = actZones.some(z => xf >= z[0] && xf <= z[1]);
+                adultBuildingSeeds.push({
+                    xFrac: xf,
+                    w: 0.015 + Math.random() * 0.025,
+                    h: inActivityZone ? 0.08 + Math.random() * 0.15 : 0.15 + Math.random() * 0.35,
+                    color: `hsl(${210 + Math.random() * 30}, ${10 + Math.random() * 15}%, ${55 + Math.random() * 20}%)`,
+                    windowRows: 3 + Math.floor(Math.random() * 8),
+                    windowCols: 2 + Math.floor(Math.random() * 3),
+                    windowLit: Array.from({ length: 30 }, () => Math.random() > 0.35)
+                });
+            }
+
+            initAdultDrops();
+            initCarryHatLayer();
+            initCarrySnareLayer();
+            initCarryCymbalLayer();
+            disposeCarryChordLayer();
+            initCarryBassLayer();
+            startBaseGroove();
+            buildScoreHud();
+            updateScoreToggleUi();
+            orbWorldX = baby.x;
+            orbWorldY = height * ROOM_WALL_RATIO + TONE_FLOOR_OFFSET;
+            orbParticles = [];
+        }
+
+        function initAdultDrops() {
+            disposeToneDrops();
+            toneDrops = [];
+            if (!baseRhythmInfo || !inheritedChordProgression) return;
+
+            const floorY = height * ROOM_WALL_RATIO + TONE_FLOOR_OFFSET;
+            const BASS_TIMBRES = {
+                energetic:     { osc: "sawtooth", attack: 0.01, decay: 0.15, sustain: 0.35, release: 0.25, filterBase: 150, filterOct: 3 },
+                soft:          { osc: "sine",     attack: 0.06, decay: 0.5,  sustain: 0.5,  release: 0.8,  filterBase: 80,  filterOct: 1.5 },
+                contemplative: { osc: "sine",     attack: 0.08, decay: 0.6,  sustain: 0.6,  release: 1.2,  filterBase: 60,  filterOct: 1.2 },
+                groovy:        { osc: "triangle", attack: 0.01, decay: 0.2,  sustain: 0.3,  release: 0.3,  filterBase: 130, filterOct: 2.5 },
+                melodic:       { osc: "sine",     attack: 0.03, decay: 0.35, sustain: 0.45, release: 0.6,  filterBase: 100, filterOct: 2 }
+            };
+
+            for (let i = 0; i < ADULT_ACTIVITIES.length; i++) {
+                const act = ADULT_ACTIVITIES[i];
+                const bassVariant = randInt(0, 1);
+                const bassBundle = buildBassLine(baseRhythmInfo, act.bassStyle, inheritedChordProgression, bassVariant);
+
+                const timbre = BASS_TIMBRES[act.bassStyle] || BASS_TIMBRES.soft;
+                const bassSynth = new Tone.MonoSynth({
+                    oscillator: { type: timbre.osc },
+                    envelope: { attack: timbre.attack, decay: timbre.decay, sustain: timbre.sustain, release: timbre.release },
+                    filterEnvelope: {
+                        attack: timbre.attack * 0.5, decay: timbre.decay, sustain: timbre.sustain, release: timbre.release,
+                        baseFrequency: timbre.filterBase, octaves: timbre.filterOct
+                    },
+                    volume: -100
+                }).toDestination();
+
+                // Guitar layer
+                const guitarVariant = randInt(0, 1);
+                const guitarBundle = act.guitarStyle
+                    ? buildGuitarLine(baseRhythmInfo, act.guitarStyle, inheritedChordProgression, guitarVariant)
+                    : null;
+                const guitar = act.guitarStyle ? createGuitarSynth(act.guitarStyle) : { synth: null, effects: [] };
+
+                const minX = worldWidth * act.worldFraction[0];
+                const maxX = worldWidth * act.worldFraction[1];
+                const cx = minX + (maxX - minX) * 0.5;
+
+                // Merge bass + guitar patterns so tick loop processes guitar-only steps too
+                const mergedPattern = bassBundle.pattern.slice();
+                if (guitarBundle) {
+                    for (let s = 0; s < mergedPattern.length; s++) {
+                        if (guitarBundle.pattern[s]) mergedPattern[s] = true;
+                    }
+                }
+
+                toneDrops.push({
+                    x: cx,
+                    y: floorY + (i % 2 === 0 ? -8 : 8),
+                    pattern: mergedPattern,
+                    bassNotes: bassBundle.notes,
+                    bassAttacks: bassBundle.attacks,
+                    bassDurations: bassBundle.durations,
+                    bassSustainType: bassBundle.sustainType,
+                    velocityPattern: null,
+                    proximityVol: -100,
+                    isHovered: false,
+                    overlapAlpha: 0,
+                    instrument: "bass",
+                    bassSynth,
+                    bassStyle: act.bassStyle,
+                    bassVariant,
+                    guitarSynth: guitar.synth,
+                    guitarEffects: guitar.effects,
+                    guitarNotes: guitarBundle ? guitarBundle.notes : null,
+                    guitarAttacks: guitarBundle ? guitarBundle.attacks : null,
+                    guitarDurations: guitarBundle ? guitarBundle.durations : null,
+                    activityId: act.id,
+                    activityName: act.name,
+                    dropColor: act.color,
+                    activityLabels: act.labels,
+                    ripples: []
+                });
+            }
+            primeToneDrops();
+        }
+
+        function drawActivityBuildings(wallH) {
+            for (let i = 0; i < ADULT_ACTIVITIES.length; i++) {
+                const act = ADULT_ACTIVITIES[i];
+                const cx = worldWidth * (act.worldFraction[0] + act.worldFraction[1]) / 2;
+                const zoneW = worldWidth * (act.worldFraction[1] - act.worldFraction[0]);
+                const bw = zoneW * 0.80;
+                const bx = cx - bw / 2;
+
+                if (act.id === "university") {
+                    // Large campus building: wide 2-story with columns, triangular pediment, clock
+                    const bh = wallH * 0.55;
+                    const by = wallH - bh;
+                    // Main body
+                    ctx.fillStyle = "#d4c9a8";
+                    ctx.fillRect(bx, by, bw, bh);
+                    // Darker base
+                    ctx.fillStyle = "#b8ad8e";
+                    ctx.fillRect(bx, by + bh * 0.6, bw, bh * 0.4);
+                    // Triangular pediment
+                    ctx.fillStyle = "#c4b998";
+                    ctx.beginPath();
+                    ctx.moveTo(bx + bw * 0.15, by);
+                    ctx.lineTo(cx, by - bh * 0.18);
+                    ctx.lineTo(bx + bw * 0.85, by);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.strokeStyle = "#a09070";
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                    // Columns
+                    const colCount = 6;
+                    for (let c = 0; c < colCount; c++) {
+                        const colX = bx + bw * 0.18 + (c / (colCount - 1)) * bw * 0.64;
+                        ctx.fillStyle = "#e8e0cc";
+                        ctx.fillRect(colX - 3, by, 6, bh * 0.6);
+                        ctx.fillStyle = "#c0b090";
+                        ctx.fillRect(colX - 5, by, 10, 4);
+                        ctx.fillRect(colX - 5, by + bh * 0.6 - 4, 10, 4);
+                    }
+                    // Clock
+                    ctx.fillStyle = "#fff";
+                    ctx.beginPath(); ctx.arc(cx, by + bh * 0.12, 12, 0, Math.PI * 2); ctx.fill();
+                    ctx.strokeStyle = "#555";
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath(); ctx.arc(cx, by + bh * 0.12, 12, 0, Math.PI * 2); ctx.stroke();
+                    ctx.strokeStyle = "#333";
+                    ctx.lineWidth = 1.2;
+                    ctx.beginPath(); ctx.moveTo(cx, by + bh * 0.12); ctx.lineTo(cx, by + bh * 0.12 - 8); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(cx, by + bh * 0.12); ctx.lineTo(cx + 5, by + bh * 0.12); ctx.stroke();
+                    // Windows (rows)
+                    for (let r = 0; r < 2; r++) {
+                        for (let c = 0; c < 8; c++) {
+                            const wx = bx + bw * 0.1 + c * (bw * 0.8 / 8) + 4;
+                            const wy = by + bh * 0.25 + r * bh * 0.28;
+                            ctx.fillStyle = "rgba(140,180,210,0.5)";
+                            ctx.fillRect(wx, wy, bw * 0.07, bh * 0.15);
+                            ctx.strokeStyle = "#a09070";
+                            ctx.lineWidth = 0.8;
+                            ctx.strokeRect(wx, wy, bw * 0.07, bh * 0.15);
+                        }
+                    }
+                    // 「大学」 sign
+                    ctx.fillStyle = "rgba(80,60,40,0.8)";
+                    ctx.beginPath(); ctx.roundRect(cx - 30, by + bh * 0.02, 60, 18, 3); ctx.fill();
+                    ctx.fillStyle = "#fff";
+                    ctx.font = "bold 11px 'Zen Maru Gothic'";
+                    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                    ctx.fillText("大学", cx, by + bh * 0.02 + 9);
+                    // Trees
+                    for (const tx of [bx + 12, bx + bw - 12]) {
+                        ctx.fillStyle = "#5a3a20";
+                        ctx.fillRect(tx - 2, wallH - 20, 4, 20);
+                        ctx.fillStyle = "#4a9a4a";
+                        ctx.beginPath(); ctx.arc(tx, wallH - 28, 12, 0, Math.PI * 2); ctx.fill();
+                        ctx.fillStyle = "#3a8a3a";
+                        ctx.beginPath(); ctx.arc(tx - 3, wallH - 25, 8, 0, Math.PI * 2); ctx.fill();
+                    }
+
+                } else if (act.id === "parttime") {
+                    // Convenience store / cafe: glass storefront, awning
+                    const bh = wallH * 0.38;
+                    const by = wallH - bh;
+                    // Main body
+                    ctx.fillStyle = "#e8e0d0";
+                    ctx.fillRect(bx, by, bw, bh);
+                    // Awning
+                    ctx.fillStyle = "#d45050";
+                    ctx.beginPath();
+                    ctx.moveTo(bx, by + bh * 0.3);
+                    ctx.lineTo(bx - 8, by + bh * 0.38);
+                    ctx.lineTo(bx + bw + 8, by + bh * 0.38);
+                    ctx.lineTo(bx + bw, by + bh * 0.3);
+                    ctx.closePath();
+                    ctx.fill();
+                    // Awning stripes
+                    ctx.fillStyle = "#fff";
+                    for (let s = 0; s < 8; s += 2) {
+                        const sx1 = bx + (s / 8) * bw;
+                        const sx2 = bx + ((s + 1) / 8) * bw;
+                        ctx.beginPath();
+                        ctx.moveTo(sx1, by + bh * 0.3);
+                        ctx.lineTo(sx1 - 1, by + bh * 0.38);
+                        ctx.lineTo(sx2 + 1, by + bh * 0.38);
+                        ctx.lineTo(sx2, by + bh * 0.3);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                    // Large glass storefront
+                    ctx.fillStyle = "rgba(160,210,230,0.6)";
+                    ctx.fillRect(bx + bw * 0.08, by + bh * 0.42, bw * 0.55, bh * 0.5);
+                    ctx.strokeStyle = "#888";
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(bx + bw * 0.08, by + bh * 0.42, bw * 0.55, bh * 0.5);
+                    // Door
+                    ctx.fillStyle = "rgba(140,190,210,0.7)";
+                    ctx.fillRect(bx + bw * 0.68, by + bh * 0.42, bw * 0.18, bh * 0.5);
+                    ctx.strokeStyle = "#888";
+                    ctx.strokeRect(bx + bw * 0.68, by + bh * 0.42, bw * 0.18, bh * 0.5);
+                    // 「OPEN」 sign
+                    ctx.fillStyle = "#2a8a2a";
+                    ctx.beginPath(); ctx.roundRect(cx - 18, by + bh * 0.12, 36, 14, 3); ctx.fill();
+                    ctx.fillStyle = "#fff";
+                    ctx.font = "bold 9px sans-serif";
+                    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                    ctx.fillText("OPEN", cx, by + bh * 0.12 + 7);
+                    // Vending machine
+                    const vmx = bx + bw * 0.9;
+                    ctx.fillStyle = "#3060c0";
+                    ctx.fillRect(vmx, wallH - bh * 0.45, bw * 0.08, bh * 0.45);
+                    ctx.fillStyle = "rgba(200,230,255,0.5)";
+                    ctx.fillRect(vmx + 2, wallH - bh * 0.4, bw * 0.08 - 4, bh * 0.25);
+                    // Bike rack
+                    ctx.strokeStyle = "#888";
+                    ctx.lineWidth = 1.5;
+                    for (let b2 = 0; b2 < 3; b2++) {
+                        const bkx = bx - 15 + b2 * 10;
+                        ctx.beginPath(); ctx.arc(bkx, wallH - 8, 6, 0, Math.PI * 2); ctx.stroke();
+                    }
+
+                } else if (act.id === "jobhunt") {
+                    // Corporate office tower: tall glass skyscraper
+                    const bh = wallH * 0.78;
+                    const by = wallH - bh;
+                    const towerW = bw * 0.5;
+                    const towerX = cx - towerW / 2;
+                    // Main tower
+                    ctx.fillStyle = "#8aa8c0";
+                    ctx.fillRect(towerX, by, towerW, bh);
+                    // Glass panels
+                    for (let r = 0; r < 12; r++) {
+                        for (let c = 0; c < 4; c++) {
+                            const px = towerX + 4 + c * (towerW - 8) / 4;
+                            const py = by + 6 + r * (bh - 12) / 12;
+                            const pw = (towerW - 16) / 4;
+                            const ph = (bh - 24) / 12 - 2;
+                            ctx.fillStyle = `rgba(170,210,240,${0.4 + (r % 3) * 0.1})`;
+                            ctx.fillRect(px, py, pw, ph);
+                            ctx.strokeStyle = "rgba(100,140,170,0.4)";
+                            ctx.lineWidth = 0.5;
+                            ctx.strokeRect(px, py, pw, ph);
+                        }
+                    }
+                    // Left reflection highlight
+                    ctx.fillStyle = "rgba(255,255,255,0.08)";
+                    ctx.fillRect(towerX, by, towerW * 0.2, bh);
+                    // Entrance
+                    ctx.fillStyle = "#556";
+                    ctx.fillRect(cx - 12, wallH - 20, 24, 20);
+                    ctx.fillStyle = "rgba(180,210,230,0.6)";
+                    ctx.fillRect(cx - 10, wallH - 18, 9, 18);
+                    ctx.fillRect(cx + 1, wallH - 18, 9, 18);
+                    // 「株式会社」 sign
+                    ctx.fillStyle = "rgba(40,50,70,0.85)";
+                    ctx.beginPath(); ctx.roundRect(cx - 32, by + 12, 64, 16, 2); ctx.fill();
+                    ctx.fillStyle = "#dde";
+                    ctx.font = "bold 9px 'Zen Maru Gothic'";
+                    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                    ctx.fillText("株式会社", cx, by + 20);
+                    // Side wings
+                    ctx.fillStyle = "#97b0c4";
+                    ctx.fillRect(towerX - bw * 0.18, wallH - bh * 0.35, bw * 0.18, bh * 0.35);
+                    ctx.fillRect(towerX + towerW, wallH - bh * 0.35, bw * 0.18, bh * 0.35);
+
+                } else if (act.id === "travel") {
+                    // Train station / terminal: arched roof, large windows
+                    const bh = wallH * 0.52;
+                    const by = wallH - bh;
+                    // Main body
+                    ctx.fillStyle = "#c8bfb0";
+                    ctx.fillRect(bx, by + bh * 0.15, bw, bh * 0.85);
+                    // Arched roof
+                    ctx.fillStyle = "#7a8a7a";
+                    ctx.beginPath();
+                    ctx.moveTo(bx, by + bh * 0.15);
+                    ctx.quadraticCurveTo(cx, by - bh * 0.1, bx + bw, by + bh * 0.15);
+                    ctx.lineTo(bx + bw, by + bh * 0.2);
+                    ctx.quadraticCurveTo(cx, by - bh * 0.03, bx, by + bh * 0.2);
+                    ctx.closePath();
+                    ctx.fill();
+                    // Large windows
+                    for (let w = 0; w < 5; w++) {
+                        const wx = bx + bw * 0.08 + w * (bw * 0.84 / 5);
+                        const ww2 = bw * 0.13;
+                        const wh2 = bh * 0.4;
+                        const wy = by + bh * 0.25;
+                        ctx.fillStyle = "rgba(170,210,230,0.55)";
+                        ctx.beginPath();
+                        ctx.moveTo(wx, wy + wh2);
+                        ctx.lineTo(wx, wy + wh2 * 0.3);
+                        ctx.quadraticCurveTo(wx + ww2 / 2, wy, wx + ww2, wy + wh2 * 0.3);
+                        ctx.lineTo(wx + ww2, wy + wh2);
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.strokeStyle = "#8a8a7a";
+                        ctx.lineWidth = 0.8;
+                        ctx.stroke();
+                    }
+                    // Entrance
+                    ctx.fillStyle = "#8a7a6a";
+                    ctx.fillRect(cx - 18, wallH - 22, 36, 22);
+                    ctx.fillStyle = "rgba(160,190,210,0.6)";
+                    ctx.fillRect(cx - 15, wallH - 20, 14, 20);
+                    ctx.fillRect(cx + 1, wallH - 20, 14, 20);
+                    // Departure board
+                    ctx.fillStyle = "#222";
+                    ctx.fillRect(cx - 22, by + bh * 0.28, 44, 14);
+                    ctx.fillStyle = "#ff8";
+                    ctx.font = "7px monospace";
+                    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                    ctx.fillText("14:05 東京", cx, by + bh * 0.28 + 7);
+                    // 「駅」 sign
+                    ctx.fillStyle = "rgba(50,60,50,0.85)";
+                    ctx.beginPath(); ctx.roundRect(cx - 16, by + bh * 0.08, 32, 16, 2); ctx.fill();
+                    ctx.fillStyle = "#fff";
+                    ctx.font = "bold 10px 'Zen Maru Gothic'";
+                    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                    ctx.fillText("駅", cx, by + bh * 0.08 + 8);
+                    // Clock on facade
+                    ctx.fillStyle = "#fff";
+                    ctx.beginPath(); ctx.arc(cx, by + bh * 0.5, 8, 0, Math.PI * 2); ctx.fill();
+                    ctx.strokeStyle = "#555";
+                    ctx.lineWidth = 1;
+                    ctx.beginPath(); ctx.arc(cx, by + bh * 0.5, 8, 0, Math.PI * 2); ctx.stroke();
+
+                } else if (act.id === "startup") {
+                    // Modern co-working space: contemporary design, large windows, rooftop garden
+                    const bh = wallH * 0.50;
+                    const by = wallH - bh;
+                    // Main body (exposed brick look)
+                    ctx.fillStyle = "#b85a3a";
+                    ctx.fillRect(bx, by, bw, bh);
+                    // Brick pattern
+                    ctx.strokeStyle = "rgba(80,30,15,0.25)";
+                    ctx.lineWidth = 0.5;
+                    for (let r = 0; r < Math.floor(bh / 6); r++) {
+                        const ry = by + r * 6;
+                        ctx.beginPath(); ctx.moveTo(bx, ry); ctx.lineTo(bx + bw, ry); ctx.stroke();
+                        const off = (r % 2) * 8;
+                        for (let c = off; c < bw; c += 16) {
+                            ctx.beginPath(); ctx.moveTo(bx + c, ry); ctx.lineTo(bx + c, ry + 6); ctx.stroke();
+                        }
+                    }
+                    // Large modern windows
+                    for (let r = 0; r < 3; r++) {
+                        for (let c = 0; c < 4; c++) {
+                            const wx = bx + bw * 0.06 + c * (bw * 0.88 / 4);
+                            const wy = by + bh * 0.12 + r * bh * 0.28;
+                            const ww2 = bw * 0.18;
+                            const wh2 = bh * 0.2;
+                            ctx.fillStyle = "rgba(160,210,230,0.55)";
+                            ctx.fillRect(wx, wy, ww2, wh2);
+                            ctx.strokeStyle = "#333";
+                            ctx.lineWidth = 1;
+                            ctx.strokeRect(wx, wy, ww2, wh2);
+                        }
+                    }
+                    // Rooftop garden
+                    ctx.fillStyle = "#5a9a5a";
+                    ctx.fillRect(bx + 4, by - 4, bw - 8, 6);
+                    for (let p = 0; p < 6; p++) {
+                        const px = bx + 10 + p * (bw - 20) / 5;
+                        ctx.fillStyle = "#4a8a3a";
+                        ctx.beginPath(); ctx.arc(px, by - 6, 5 + Math.random() * 3, 0, Math.PI * 2); ctx.fill();
+                    }
+                    // Neon 「STARTUP」 sign
+                    ctx.fillStyle = "rgba(0,0,0,0.5)";
+                    ctx.beginPath(); ctx.roundRect(cx - 36, by + bh * 0.04, 72, 16, 3); ctx.fill();
+                    ctx.fillStyle = "#ff6af0";
+                    ctx.font = "bold 10px sans-serif";
+                    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                    ctx.fillText("STARTUP", cx, by + bh * 0.04 + 8);
+                    // Glow effect on sign
+                    ctx.save();
+                    ctx.shadowColor = "#ff6af0";
+                    ctx.shadowBlur = 8;
+                    ctx.fillStyle = "#ff6af0";
+                    ctx.fillText("STARTUP", cx, by + bh * 0.04 + 8);
+                    ctx.restore();
+                    // Entrance
+                    ctx.fillStyle = "#444";
+                    ctx.fillRect(cx - 14, wallH - 18, 28, 18);
+                    ctx.fillStyle = "rgba(170,200,220,0.6)";
+                    ctx.fillRect(cx - 12, wallH - 16, 11, 16);
+                    ctx.fillRect(cx + 1, wallH - 16, 11, 16);
+                }
+            }
+        }
+
+        function drawAdultBackground() {
+            const wallH = height * ROOM_WALL_RATIO;
+
+            // === Sky gradient (bright daytime) ===
+            const skyG = ctx.createLinearGradient(0, 0, 0, wallH);
+            skyG.addColorStop(0, "#4a90d9");
+            skyG.addColorStop(0.4, "#7ec8e3");
+            skyG.addColorStop(0.7, "#b5e0f0");
+            skyG.addColorStop(1, "#e8f4f8");
+            ctx.fillStyle = skyG;
+            ctx.fillRect(0, 0, worldWidth, wallH);
+
+            // === Clouds ===
+            ctx.fillStyle = "rgba(255,255,255,0.7)";
+            const clouds = [
+                { x: worldWidth * 0.08, y: wallH * 0.12, r: 22 },
+                { x: worldWidth * 0.25, y: wallH * 0.08, r: 28 },
+                { x: worldWidth * 0.45, y: wallH * 0.15, r: 20 },
+                { x: worldWidth * 0.62, y: wallH * 0.06, r: 25 },
+                { x: worldWidth * 0.78, y: wallH * 0.13, r: 22 },
+                { x: worldWidth * 0.92, y: wallH * 0.09, r: 18 },
+            ];
+            for (const cl of clouds) {
+                ctx.beginPath();
+                ctx.arc(cl.x, cl.y, cl.r, 0, Math.PI * 2); ctx.fill();
+                ctx.arc(cl.x - cl.r * 0.7, cl.y + 3, cl.r * 0.7, 0, Math.PI * 2); ctx.fill();
+                ctx.arc(cl.x + cl.r * 0.8, cl.y + 2, cl.r * 0.65, 0, Math.PI * 2); ctx.fill();
+                ctx.arc(cl.x + cl.r * 0.2, cl.y - cl.r * 0.3, cl.r * 0.55, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // === Activity-specific buildings (behind generic cityscape) ===
+            drawActivityBuildings(wallH);
+
+            // === City buildings (generic skyline) ===
+            for (const b of adultBuildingSeeds) {
+                const bx = b.xFrac * worldWidth;
+                const bw = b.w * worldWidth;
+                const bh = b.h * wallH;
+                const by = wallH - bh;
+
+                // Building body (daytime palette)
+                ctx.fillStyle = b.color;
+                ctx.fillRect(bx, by, bw, bh);
+
+                // Building edge highlights
+                ctx.fillStyle = "rgba(255,255,255,0.08)";
+                ctx.fillRect(bx, by, bw * 0.15, bh);
+                ctx.fillStyle = "rgba(0,0,0,0.06)";
+                ctx.fillRect(bx + bw * 0.85, by, bw * 0.15, bh);
+
+                // Roof edge
+                ctx.fillStyle = "rgba(0,0,0,0.12)";
+                ctx.fillRect(bx, by, bw, 3);
+
+                // Windows (reflective glass)
+                const winMarginX = bw * 0.12;
+                const winMarginY = bh * 0.06;
+                const winAreaW = bw - winMarginX * 2;
+                const winAreaH = bh - winMarginY * 2;
+                const rows = b.windowRows;
+                const cols = b.windowCols;
+                const ww = winAreaW / cols * 0.55;
+                const wh = winAreaH / rows * 0.45;
+
+                for (let r = 0; r < rows; r++) {
+                    for (let c = 0; c < cols; c++) {
+                        const wx = bx + winMarginX + (c / cols) * winAreaW + (winAreaW / cols - ww) / 2;
+                        const wy = by + winMarginY + (r / rows) * winAreaH + (winAreaH / rows - wh) / 2;
+                        const litIdx = r * cols + c;
+                        if (b.windowLit[litIdx % b.windowLit.length]) {
+                            ctx.fillStyle = `rgba(140,190,220,${0.35 + Math.random() * 0.2})`;
+                        } else {
+                            ctx.fillStyle = "rgba(120,160,190,0.25)";
+                        }
+                        ctx.fillRect(wx, wy, ww, wh);
+                    }
+                }
+            }
+
+            // === Ground / Street ===
+            const groundY = wallH;
+            const groundH = height - wallH;
+
+            // Sidewalk (lighter daytime)
+            const sidewalkG = ctx.createLinearGradient(0, groundY, 0, groundY + groundH);
+            sidewalkG.addColorStop(0, "#a0a0a0");
+            sidewalkG.addColorStop(0.15, "#b0b0b0");
+            sidewalkG.addColorStop(0.3, "#a8a8a8");
+            sidewalkG.addColorStop(1, "#959595");
+            ctx.fillStyle = sidewalkG;
+            ctx.fillRect(0, groundY, worldWidth, groundH);
+
+            // Road lane line
+            ctx.strokeStyle = "rgba(255,255,255,0.25)";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([20, 15]);
+            ctx.beginPath();
+            ctx.moveTo(0, groundY + groundH * 0.5);
+            ctx.lineTo(worldWidth, groundY + groundH * 0.5);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Sidewalk edge / curb
+            ctx.fillStyle = "rgba(180,180,180,0.35)";
+            ctx.fillRect(0, groundY, worldWidth, 4);
+
+            // === Street lamps (no glow in daytime) ===
+            const lampSpacing = worldWidth / 10;
+            for (let i = 0; i < 10; i++) {
+                const lx = lampSpacing * (i + 0.5);
+                const poleH = wallH * 0.25;
+
+                // Pole
+                ctx.fillStyle = "#666";
+                ctx.fillRect(lx - 2, groundY - poleH, 4, poleH);
+
+                // Arm
+                ctx.fillStyle = "#666";
+                ctx.fillRect(lx - 1, groundY - poleH, 14, 3);
+
+                // Lamp head (no glow)
+                ctx.fillStyle = "#bbb";
+                ctx.beginPath(); ctx.arc(lx + 12, groundY - poleH + 2, 4, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // === Activity signs ===
+            for (let i = 0; i < ADULT_ACTIVITIES.length; i++) {
+                const act = ADULT_ACTIVITIES[i];
+                const signX = worldWidth * (act.worldFraction[0] + act.worldFraction[1]) / 2;
+                const signY = groundY - 30;
+                const signW = 70;
+                const signH = 24;
+
+                // Sign background
+                ctx.fillStyle = "rgba(40,40,60,0.7)";
+                ctx.beginPath(); ctx.roundRect(signX - signW / 2, signY - signH / 2, signW, signH, 4); ctx.fill();
+                ctx.strokeStyle = act.color;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.roundRect(signX - signW / 2, signY - signH / 2, signW, signH, 4); ctx.stroke();
+
+                // Sign text
+                ctx.fillStyle = "#fff";
+                ctx.font = "700 11px 'Zen Maru Gothic'";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(act.name, signX, signY);
+
+                // Sign pole
+                ctx.fillStyle = "#666";
+                ctx.fillRect(signX - 1.5, signY + signH / 2, 3, 30 - signH / 2);
+            }
         }
 
         function drawSchoolBackground() {
@@ -3808,9 +5043,31 @@
         }
 
         function updateToneDropProximity() {
-            if ((currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2) || !toneDrops.length) {
+            if ((currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.ADULT) || !toneDrops.length) {
                 return;
             }
+
+            if (isMinigameActive && minigameTriggerDrop) {
+                toneDrops.forEach(drop => {
+                    const isTrigger = (drop === minigameTriggerDrop);
+                    drop.isHovered = isTrigger;
+                    const targetAlpha = isTrigger ? 1 : 0;
+                    drop.overlapAlpha += (targetAlpha - drop.overlapAlpha) * 0.18;
+
+                    if (drop.instrument === "chord") {
+                        if (isTrigger && !chordPreviewDrop) {
+                            startChordPreview(drop);
+                        } else if (!isTrigger && chordPreviewDrop === drop) {
+                            stopChordPreview();
+                        }
+                    }
+                });
+                if (currentScene === SCENE.CHILD2) {
+                    hoveredSchoolActivity = minigameTriggerDrop.activityId;
+                }
+                return;
+            }
+
             toneDrops.forEach(drop => {
                 const dist = Math.hypot(orbWorldX - drop.x, orbWorldY - drop.y);
                 const hoverR = (drop.instrument === "chord" || drop.instrument === "bass") ? 60 : 50;
@@ -3940,6 +5197,8 @@
                 if (d.cymbalSynth) d.cymbalSynth.dispose();
                 if (d.chordSynth) d.chordSynth.dispose();
                 if (d.bassSynth) d.bassSynth.dispose();
+                if (d.guitarSynth) d.guitarSynth.dispose();
+                if (d.guitarEffects) d.guitarEffects.forEach(e => e.dispose());
             });
         }
 
@@ -4050,6 +5309,39 @@
             }).toDestination();
             // Store chord notes for playback in tick
             carryChordPattern = inheritedChordProgression.notes;
+        }
+
+        let carryBassSynth = null;
+        let carryBassFilter = null;
+        const inheritedBassVolumeDb = -16;
+
+        function disposeCarryBassLayer() {
+            if (carryBassSynth) { carryBassSynth.dispose(); carryBassSynth = null; }
+            if (carryBassFilter) { carryBassFilter.dispose(); carryBassFilter = null; }
+        }
+
+        function initCarryBassLayer() {
+            disposeCarryBassLayer();
+            if (!inheritedBassPattern || !inheritedBassNotes) return;
+            const BASS_TIMBRES = {
+                energetic:     { osc: "sawtooth", attack: 0.01, decay: 0.15, sustain: 0.35, release: 0.25, filterBase: 150, filterOct: 3 },
+                soft:          { osc: "sine",     attack: 0.06, decay: 0.5,  sustain: 0.5,  release: 0.8,  filterBase: 80,  filterOct: 1.5 },
+                quirky:        { osc: "square",   attack: 0.01, decay: 0.2,  sustain: 0.25, release: 0.3,  filterBase: 120, filterOct: 2.8 },
+                contemplative: { osc: "sine",     attack: 0.08, decay: 0.6,  sustain: 0.6,  release: 1.2,  filterBase: 60,  filterOct: 1.2 },
+                groovy:        { osc: "triangle", attack: 0.01, decay: 0.2,  sustain: 0.3,  release: 0.3,  filterBase: 130, filterOct: 2.5 },
+                playful:       { osc: "triangle", attack: 0.01, decay: 0.12, sustain: 0.2,  release: 0.2,  filterBase: 160, filterOct: 3.2 },
+                melodic:       { osc: "sine",     attack: 0.03, decay: 0.35, sustain: 0.45, release: 0.6,  filterBase: 100, filterOct: 2 }
+            };
+            const timbre = BASS_TIMBRES[inheritedBassSoundConfig] || BASS_TIMBRES.soft;
+            carryBassSynth = new Tone.MonoSynth({
+                oscillator: { type: timbre.osc },
+                envelope: { attack: timbre.attack, decay: timbre.decay, sustain: timbre.sustain, release: timbre.release },
+                filterEnvelope: {
+                    attack: timbre.attack * 0.5, decay: timbre.decay, sustain: timbre.sustain, release: timbre.release,
+                    baseFrequency: timbre.filterBase, octaves: timbre.filterOct
+                },
+                volume: inheritedBassVolumeDb
+            }).toDestination();
         }
 
         function initChordDrops() {
@@ -4291,6 +5583,211 @@
             });
 
             return { pattern, notes, attacks, durations, sustainType };
+        }
+
+        // Guitar timbres — all PolySynth (chords) only (no PluckSynth/Reverb/Chorus — AudioWorklet breaks on file://)
+        const GUITAR_TIMBRES = {
+            "fingerpicking": { type: "poly",  wave: "triangle", attack: 0.003, decay: 0.5,  sustain: 0.08, release: 0.4 },
+            "cutting":       { type: "poly",  wave: "square",   attack: 0.001, decay: 0.08, sustain: 0.0,  release: 0.05, filterFreq: 2000, filterType: "bandpass" },
+            "clean-electric":{ type: "poly",  wave: "triangle", attack: 0.01,  decay: 0.6,  sustain: 0.4,  release: 0.8, vibratoFreq: 1.5, vibratoDepth: 0.08 },
+            "acoustic-arpeggio": { type: "poly", wave: "triangle", attack: 0.002, decay: 0.4, sustain: 0.1, release: 0.35 },
+            "rock":          { type: "polyDist", wave: "sawtooth", attack: 0.003, decay: 0.2, sustain: 0.35, release: 0.3, distortion: 0.5 }
+        };
+
+        function buildGuitarLine(baseInfo, style, chordProg, variant) {
+            const totalSteps = baseInfo.beatsPerBar * baseInfo.bars * STEPS_PER_BEAT;
+            const barSteps = baseInfo.beatsPerBar * STEPS_PER_BEAT;
+            const S = STEPS_PER_BEAT; // 4
+
+            // Extract chord tones — all chords in octave 4 (clearly audible guitar range)
+            const chordRoots = chordProg.notes.map(triad => triad[0].replace(/\d+$/, ''));
+            const chordThirds = chordProg.notes.map(triad => triad[1].replace(/\d+$/, ''));
+            const chordFifths = chordProg.notes.map(triad => triad[2].replace(/\d+$/, ''));
+
+            const events = []; // { step, note, len }  note is always an array (chord)
+            const add = (si, note, len) => {
+                if (si >= 0 && si < totalSteps && note) {
+                    events.push({ step: si, note, len: Math.min(len, totalSteps - si) });
+                }
+            };
+
+            for (let bar = 0; bar < baseInfo.bars; bar++) {
+                const b = bar * barSteps;
+                const R = chordRoots[bar % chordRoots.length];
+                const T = chordThirds[bar % chordThirds.length];
+                const F = chordFifths[bar % chordFifths.length];
+                // Full triad chord in octave 4
+                const chord4 = [R + "4", T + "4", F + "4"];
+                // Wider voicing: root3 + third4 + fifth4
+                const chordWide = [R + "3", T + "4", F + "4"];
+
+                if (style === "fingerpicking") {
+                    // Gentle arpeggiated chords — strum-like with slight spread
+                    // Beat 1: full chord, Beat 3: root+fifth, occasional fills
+                    if (variant === 0) {
+                        add(b, chord4, 3);
+                        if (baseInfo.beatsPerBar >= 3) add(b + 2 * S, [R + "4", F + "4"], 3);
+                        if (baseInfo.beatsPerBar >= 4 && Math.random() > 0.3) {
+                            add(b + 3 * S, [T + "4", F + "4"], 2);
+                        }
+                    } else {
+                        // Every other beat gets a chord
+                        for (let beat = 0; beat < baseInfo.beatsPerBar; beat += 2) {
+                            add(b + beat * S, beat === 0 ? chord4 : [R + "4", F + "4"], 3);
+                        }
+                        if (baseInfo.beatsPerBar >= 4 && Math.random() > 0.4) {
+                            add(b + 3 * S + 2, [T + "4", F + "4", R + "5"], 1);
+                        }
+                    }
+
+                } else if (style === "cutting") {
+                    // カッティング — staccato chord stabs on offbeats, funky rhythm
+                    const offbeats = variant === 0 ? [2, 6, 10, 14] : [2, 6, 10];
+                    for (const step of offbeats) {
+                        if (step < barSteps) {
+                            add(b + step, chord4, 1); // very short stab
+                        }
+                    }
+                    // Accent hit on beat 1 every other bar
+                    if (bar % 2 === 0) {
+                        add(b, chord4, 1);
+                    }
+                    // Variant: extra syncopated ghost stab
+                    if (variant === 1 && baseInfo.beatsPerBar >= 3 && Math.random() > 0.3) {
+                        add(b + 2 * S + 3, [R + "4", F + "4"], 1);
+                    }
+
+                } else if (style === "clean-electric") {
+                    // しっとり — sustained smooth chord, held across the bar
+                    if (variant === 0) {
+                        add(b, chordWide, barSteps);  // hold full bar
+                    } else {
+                        add(b, chordWide, Math.floor(barSteps * 0.6));
+                        if (baseInfo.beatsPerBar >= 3) {
+                            // Re-strum on beat 3
+                            add(b + 2 * S, chord4, Math.floor(barSteps * 0.4));
+                        }
+                    }
+
+                } else if (style === "acoustic-arpeggio") {
+                    // Flowing chord arpeggios — chord hit then broken chord fills
+                    if (variant === 0) {
+                        add(b, chord4, 2);
+                        if (baseInfo.beatsPerBar >= 2) add(b + S, [T + "4", F + "4"], 2);
+                        if (baseInfo.beatsPerBar >= 3) add(b + 2 * S, [R + "4", F + "4", R + "5"], 2);
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S, chordWide, 2);
+                    } else {
+                        // 8th-note chord rhythm
+                        for (let beat = 0; beat < baseInfo.beatsPerBar; beat++) {
+                            const ch = beat % 2 === 0 ? chord4 : [R + "4", F + "4"];
+                            add(b + beat * S, ch, 2);
+                            if (Math.random() > 0.4) {
+                                add(b + beat * S + 2, [T + "4", F + "4"], 2);
+                            }
+                        }
+                    }
+
+                } else if (style === "rock") {
+                    // パワーコード — driving power chords (root+5th+octave)
+                    const power = [R + "4", F + "4", R + "5"];
+                    if (variant === 0) {
+                        add(b, power, 3);
+                        if (baseInfo.beatsPerBar >= 3) add(b + 2 * S, power, 3);
+                        if (baseInfo.beatsPerBar >= 4 && Math.random() > 0.4) {
+                            add(b + 3 * S + 2, [R + "4", F + "4"], 1);
+                            add(b + 3 * S + 3, power, 1);
+                        }
+                    } else {
+                        // Heavy 8th note chug
+                        for (let beat = 0; beat < baseInfo.beatsPerBar; beat++) {
+                            add(b + beat * S, power, 2);
+                            if (Math.random() > 0.25) {
+                                add(b + beat * S + 2, [R + "4", F + "4"], 2);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Convert events into arrays
+            const pattern = new Array(totalSteps).fill(false);
+            const notes = new Array(totalSteps).fill(null);
+            const attacks = new Array(totalSteps).fill(false);
+            const durations = new Array(totalSteps).fill(null);
+
+            const stepToDur = (len) => {
+                if (len <= 1) return "16n";
+                if (len <= 2) return "8n";
+                if (len <= 3) return "8n.";
+                if (len <= 4) return "4n";
+                if (len <= 6) return "4n.";
+                if (len <= 8) return "2n";
+                return "1n";
+            };
+
+            events.forEach(ev => {
+                attacks[ev.step] = true;
+                notes[ev.step] = ev.note;
+                durations[ev.step] = stepToDur(ev.len);
+                for (let s = ev.step; s < ev.step + ev.len && s < totalSteps; s++) {
+                    pattern[s] = true;
+                    if (!notes[s]) notes[s] = ev.note;
+                }
+            });
+
+            return { pattern, notes, attacks, durations };
+        }
+
+        function createGuitarSynth(style) {
+            const cfg = GUITAR_TIMBRES[style];
+            if (!cfg) return { synth: null, effects: [] };
+
+            const effects = [];
+            let synth;
+
+            if (cfg.type === "mono") {
+                // Pluck-like guitar via MonoSynth (no AudioWorklet)
+                synth = new Tone.MonoSynth({
+                    oscillator: { type: cfg.wave },
+                    envelope: { attack: cfg.attack, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release },
+                    filterEnvelope: {
+                        attack: cfg.attack, decay: cfg.decay * 0.8,
+                        sustain: 0.1, release: cfg.release,
+                        baseFrequency: cfg.filterBase, octaves: cfg.filterOct
+                    },
+                    volume: -100
+                }).toDestination();
+
+            } else if (cfg.type === "poly") {
+                synth = new Tone.PolySynth(Tone.Synth, {
+                    oscillator: { type: cfg.wave },
+                    envelope: { attack: 0.005, decay: 0.25, sustain: 0.15, release: 0.4 },
+                    volume: -100
+                });
+                if (cfg.filterType) {
+                    const filter = new Tone.Filter({ type: cfg.filterType, frequency: cfg.filterFreq, Q: 1.5 });
+                    effects.push(filter);
+                    synth.chain(filter, Tone.Destination);
+                } else if (cfg.vibratoFreq) {
+                    const vibrato = new Tone.Vibrato({ frequency: cfg.vibratoFreq, depth: cfg.vibratoDepth });
+                    effects.push(vibrato);
+                    synth.chain(vibrato, Tone.Destination);
+                } else {
+                    synth.toDestination();
+                }
+
+            } else if (cfg.type === "polyDist") {
+                synth = new Tone.PolySynth(Tone.Synth, {
+                    oscillator: { type: cfg.wave },
+                    envelope: { attack: 0.005, decay: 0.2, sustain: 0.3, release: 0.3 },
+                    volume: -100
+                });
+                const dist = new Tone.Distortion(cfg.distortion);
+                effects.push(dist);
+                synth.chain(dist, Tone.Destination);
+            }
+
+            return { synth, effects };
         }
 
         function initBassDrops() {
@@ -4823,7 +6320,7 @@
             };
 
             const tick = () => {
-                if (!baseGroove) return;
+                if (!baseGroove || minigameMuteGroove) return;
                 const now = performance.now();
                 while (baseGroove.nextTick <= now + 4) {
                     const step = baseGroove.step;
@@ -4831,7 +6328,7 @@
                         baseGroove.kickSynth.triggerAttackRelease("C1", "8n");
                     }
                     if (
-                        (currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2) &&
+                        (currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT) &&
                         carryHatSynth &&
                         carryHatFilter &&
                         inheritedHatPattern &&
@@ -4841,7 +6338,7 @@
                         carryHatSynth.triggerAttackRelease("32n");
                     }
                     if (
-                        (currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2) &&
+                        (currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT) &&
                         carrySnareSynth &&
                         carrySnareFilter &&
                         inheritedSnarePattern &&
@@ -4855,12 +6352,26 @@
                         }
                     }
                     if (
-                        (currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2) &&
+                        (currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT) &&
                         carryCymbalSynth &&
                         inheritedCymbalPattern &&
                         inheritedCymbalPattern[step]
                     ) {
                         carryCymbalSynth.triggerAttackRelease("16n");
+                    }
+                    // Carry chord playback removed from ADULT (bass + guitar only)
+                    // Carry bass playback (ADULT: play inherited bass line)
+                    if (
+                        currentScene === SCENE.ADULT &&
+                        carryBassSynth &&
+                        inheritedBassAttacks &&
+                        inheritedBassAttacks[step]
+                    ) {
+                        const note = inheritedBassNotes ? inheritedBassNotes[step] : null;
+                        const dur = inheritedBassDurations ? inheritedBassDurations[step] : "8n";
+                        if (note) {
+                            try { carryBassSynth.triggerAttackRelease(note, dur); } catch (e) { /* ignore */ }
+                        }
                     }
                     updateScoreHudPlayhead(step);
 
@@ -4889,18 +6400,33 @@
                             return;
                         }
                         if (drop.instrument === "bass") {
-                            // Only trigger on attack steps (sustained notes don't re-trigger)
+                            // Bass: supporting role (quieter)
                             if (drop.bassAttacks && drop.bassAttacks[step]) {
                                 const note = drop.bassNotes ? drop.bassNotes[step] : null;
                                 const dur = drop.bassDurations ? drop.bassDurations[step] : "8n";
                                 if (note && drop.bassSynth) {
-                                    drop.bassSynth.volume.value = baseVol + 8;
+                                    drop.bassSynth.volume.value = drop.guitarSynth ? baseVol - 2 : baseVol + 8;
                                     try {
                                         drop.bassSynth.triggerAttackRelease(note, dur);
                                     } catch (e) { /* ignore */ }
                                 }
                             }
-                            if (drop.isHovered && drop.bassAttacks && drop.bassAttacks[step]) {
+                            // Guitar trigger (primary instrument in ADULT)
+                            if (drop.guitarAttacks && drop.guitarAttacks[step] && drop.guitarSynth) {
+                                const gNote = drop.guitarNotes[step];
+                                const gDur = drop.guitarDurations[step];
+                                if (gNote) {
+                                    drop.guitarSynth.volume.value = baseVol + 10;
+                                    try {
+                                        if (Array.isArray(gNote)) {
+                                            drop.guitarSynth.triggerAttackRelease(gNote, gDur);
+                                        } else {
+                                            drop.guitarSynth.triggerAttackRelease(gNote, gDur);
+                                        }
+                                    } catch (e) { /* ignore */ }
+                                }
+                            }
+                            if (drop.isHovered && ((drop.bassAttacks && drop.bassAttacks[step]) || (drop.guitarAttacks && drop.guitarAttacks[step]))) {
                                 drop.ripples.push({ t: 0, accent });
                             }
                             return;
@@ -4918,11 +6444,11 @@
                             // Beat-position boost: louder on beat 1 & 3
                             const beatInBar = Math.floor((step % (baseRhythmInfo.beatsPerBar * STEPS_PER_BEAT)) / STEPS_PER_BEAT);
                             const beatBoostDb = (beatInBar === 0 || beatInBar === 2) ? 7 : 0;
-                            drop.snareSynth.volume.value = baseVol - 1 + (drop.snareGainBoostDb || 0) + beatBoostDb;
+                            drop.snareSynth.volume.value = baseVol + 6 + (drop.snareGainBoostDb || 0) + beatBoostDb;
                             const jitter = (Math.random() * 0.008).toFixed(3);
                             drop.snareSynth.triggerAttackRelease("16n", `+${jitter}`);
                             if (drop.snareBody && (accent >= 0.85 || beatBoostDb > 0)) {
-                                drop.snareBody.volume.value = baseVol - 10 + (drop.snareBodyBoostDb || 0) + beatBoostDb;
+                                drop.snareBody.volume.value = baseVol - 2 + (drop.snareBodyBoostDb || 0) + beatBoostDb;
                                 drop.snareBody.triggerAttackRelease("G2", "32n");
                             }
                             if (drop.isHovered) drop.ripples.push({ t: 0, accent });
@@ -4975,16 +6501,25 @@
             updateScoreToggleUi();
 
             // 1. Draw Background (Different per scene)
-            if (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2) {
+            if (currentScene === SCENE.LESSON) {
+                // 授業フェーズ: toneなし、選択肢なし、HUDなし
+                drawLessonScene();
+            } else if (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT) {
                 updateToneDropProximity();
                 updateScoreHudPreviewRow();
+
                 if (baby) {
-                    baby.update(orbWorldX);
+                    if (!isMinigameActive) {
+                        baby.update(orbWorldX);
+                    }
                     updateCamera();
                 }
+
                 ctx.save();
                 ctx.translate(-cameraX, 0);
-                if (currentScene === SCENE.CHILD2) {
+                if (currentScene === SCENE.ADULT) {
+                    drawAdultBackground();
+                } else if (currentScene === SCENE.CHILD2) {
                     drawSchoolBackground();
                 } else if (currentScene === SCENE.CHILD1) {
                     drawChildBackground();
@@ -4994,6 +6529,7 @@
                 drawToneDrops();
                 if (baby) baby.draw(ctx);
                 ctx.restore();
+
                 drawToyStatsHud();
                 drawCumulativeStatsHud();
             } else {
@@ -5003,22 +6539,35 @@
                 blobs.forEach(b => { b.update(); b.draw(ctx); });
             }
 
-            // 2b. Orb particles (after tone drops, inside camera transform already restored)
-            updateAndDrawOrbParticles();
-
-            // 2c. Orb screen position
-            updateOrbScreenPosition();
-
-            // 2d. Hover info (temporarily hidden)
-            if (hoverInfoEl) hoverInfoEl.classList.remove('visible');
+            // 2b-2d: Skip orb/particles/hover during lesson phase
+            if (currentScene === SCENE.LESSON) {
+                orbEl.style.opacity = '0';
+            } else {
+                updateAndDrawOrbParticles();
+                updateOrbScreenPosition();
+                if (hoverInfoEl) hoverInfoEl.classList.remove('visible');
+            }
 
             // 3. Update Audio (Proximity)
             if (currentScene === SCENE.CHOICE) {
                 updateProximityAudio();
             }
-
+            if (activeMinigame) {
+                const rect = minigameCanvas.getBoundingClientRect();
+                // 表示サイズと内部解像度の比率を計算（ズレを完全に解消）
+                const scaleX = minigameCanvas.width / rect.width;
+                const scaleY = minigameCanvas.height / rect.height;
+                const minigameMouseX = (mouseX - rect.left) * scaleX;
+                const minigameMouseY = (mouseY - rect.top) * scaleY;
+                
+                activeMinigame.update(minigameMouseX, minigameMouseY);
+                if (activeMinigame) {
+                    activeMinigame.draw();
+                }
+            }
             requestAnimationFrame(animate);
         }
+
         // ==========================================
         // Interactions & Audio Logic
         // ==========================================
@@ -5035,6 +6584,9 @@
         const scoreTracks = document.getElementById('score-tracks');
         const scoreMeta = document.getElementById('score-meta');
         const scoreToggleBtn = document.getElementById('score-toggle-btn');
+        const minigameWrapper = document.getElementById('minigame-wrapper');
+        const minigameCanvas = document.getElementById('minigame-canvas');
+        const minigameCtx = minigameCanvas ? minigameCanvas.getContext('2d') : null;
 
         function fadeScreenTo(opacity, durationMs) {
             sceneFade.style.transition = `opacity ${durationMs}ms ease`;
@@ -5058,7 +6610,7 @@
         }
 
         function updateScoreToggleUi() {
-            const available = (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2) && !!baseRhythmInfo;
+            const available = (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT) && !!baseRhythmInfo;
             scoreToggleBtn.classList.remove('visible');
             setScoreHudVisible(available);
         }
@@ -5086,6 +6638,7 @@
             if (!baseRhythmInfo) return;
             const isChild = currentScene === SCENE.CHILD1;
             const isChild2 = currentScene === SCENE.CHILD2;
+            const isAdult = currentScene === SCENE.ADULT;
             const rows = [];
             let chordRow = null;
 
@@ -5099,8 +6652,8 @@
             }
             // CHILD2: chord names shown as bar labels, not as a scored row
 
-            // Bass preview row (CHILD2 hover)
-            if (isChild2 && previewDropIndex !== null && toneDrops[previewDropIndex] && toneDrops[previewDropIndex].instrument === "bass") {
+            // Bass preview row (CHILD2/ADULT hover)
+            if ((isChild2 || isAdult) && previewDropIndex !== null && toneDrops[previewDropIndex] && toneDrops[previewDropIndex].instrument === "bass") {
                 const preview = toneDrops[previewDropIndex];
                 rows.push({
                     label: 'Bass',
@@ -5127,21 +6680,30 @@
                     });
                 }
             }
-            if ((isChild || isChild2) && inheritedCymbalPattern) {
+            // ADULT: always show inherited bass row
+            if (isAdult && inheritedBassPattern) {
+                rows.push({
+                    label: 'Bass',
+                    pattern: inheritedBassPattern,
+                    styleClass: inheritedBassStyleClass || 'bass',
+                    sustainType: inheritedBassSustainType || null
+                });
+            }
+            if ((isChild || isChild2 || isAdult) && inheritedCymbalPattern) {
                 rows.push({
                     label: 'Cymbal',
                     pattern: inheritedCymbalPattern,
                     styleClass: inheritedCymbalStyleClass || 'cymbal'
                 });
             }
-            if ((currentScene === SCENE.TODDLE1 || isChild || isChild2) && inheritedSnarePattern) {
+            if ((currentScene === SCENE.TODDLE1 || isChild || isChild2 || isAdult) && inheritedSnarePattern) {
                 rows.push({
                     label: 'Snare',
                     pattern: inheritedSnarePattern,
                     styleClass: inheritedSnareStyleClass || 'snare'
                 });
             }
-            if (currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || isChild || isChild2) {
+            if (currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || isChild || isChild2 || isAdult) {
                 const carryPattern = inheritedHatPattern || baseRhythmInfo.baseHatPattern;
                 if (carryPattern) {
                     rows.push({
@@ -5196,8 +6758,8 @@
                 scoreHudState.chordCells = chordCells;
             }
 
-            // Chord name bar labels (CHILD2+: show chord names above each bar, no sound)
-            if (isChild2 && inheritedChordProgression) {
+            // Chord name bar labels (CHILD2+/ADULT: show chord names above each bar)
+            if ((isChild2 || isAdult) && inheritedChordProgression) {
                 const barLabelRow = document.createElement('div');
                 barLabelRow.className = 'score-bar-labels';
                 const barLabelLeft = document.createElement('div');
@@ -5221,8 +6783,8 @@
                 scoreHudState.barLabelCells = barLabelCells;
             }
 
-            // Drum rows (wrapped in drum-block for CHILD1/CHILD2)
-            const drumBlock = (isChild || isChild2) ? document.createElement('div') : null;
+            // Drum rows (wrapped in drum-block for CHILD1/CHILD2/ADULT)
+            const drumBlock = (isChild || isChild2 || isAdult) ? document.createElement('div') : null;
             if (drumBlock) drumBlock.className = 'drum-block';
 
             rows.forEach(row => {
@@ -5322,6 +6884,9 @@
             }
             scoreHudState.currentStep = step;
         }
+
+        const blobs = [];
+        palette.colors.forEach(c => blobs.push(new OrganicBlob(c)));
 
         animate();
         initOrbPosition();
@@ -5812,8 +7377,8 @@
             inheritedSnareSoundConfig = clickedDrop.snareSoundConfig ? { ...clickedDrop.snareSoundConfig } : null;
             const snareVolNow = clickedDrop.snareSynth?.volume?.value;
             const snareBodyVolNow = clickedDrop.snareBody?.volume?.value;
-            inheritedSnareVolumeDb = (Number.isFinite(snareVolNow) && snareVolNow > -90) ? snareVolNow : -28;
-            inheritedSnareBodyVolumeDb = (Number.isFinite(snareBodyVolNow) && snareBodyVolNow > -90) ? snareBodyVolNow : -26;
+            inheritedSnareVolumeDb = (Number.isFinite(snareVolNow) && snareVolNow > -90) ? snareVolNow : -20;
+            inheritedSnareBodyVolumeDb = (Number.isFinite(snareBodyVolNow) && snareBodyVolNow > -90) ? snareBodyVolNow : -18;
             const sx = clickedDrop.x - cameraX;
             const sy = clickedDrop.y;
             const ripple = document.createElement('div');
@@ -5938,8 +7503,12 @@
             child2ActivityChoice = clickedDrop.activityId;
             inheritedBassPattern = clickedDrop.pattern ? clickedDrop.pattern.slice() : null;
             inheritedBassNotes = clickedDrop.bassNotes ? clickedDrop.bassNotes.slice() : null;
+            inheritedBassAttacks = clickedDrop.bassAttacks ? clickedDrop.bassAttacks.slice() : null;
+            inheritedBassDurations = clickedDrop.bassDurations ? clickedDrop.bassDurations.slice() : null;
+            inheritedBassSustainType = clickedDrop.bassSustainType ? clickedDrop.bassSustainType.slice() : null;
+            inheritedBassSoundConfig = clickedDrop.bassStyle || null;
             inheritedBassStyleClass = 'bass';
-            // Add activity labels to selectedToys
+
             if (clickedDrop.activityLabels) {
                 selectedToys.push({
                     id: clickedDrop.activityId,
@@ -5947,7 +7516,11 @@
                     labels: clickedDrop.activityLabels
                 });
             }
-            // Ripple effect
+
+            // Dispose all CHILD2 tone drops before launching minigame
+            disposeToneDrops();
+            toneDrops = [];
+
             const sx = clickedDrop.x - cameraX;
             const sy = clickedDrop.y;
             const ripple = document.createElement('div');
@@ -5956,7 +7529,2088 @@
             ripple.style.left = (sx - 40) + 'px';
             ripple.style.top = (sy - 40) + 'px';
             document.body.appendChild(ripple);
-            setTimeout(() => ripple.remove(), 2200);
+            setTimeout(() => ripple.remove(), 1200);
+
+            if (child2ActivityChoice === 'sports_field') {
+                isMinigameActive = true;
+                minigameTriggerDrop = clickedDrop;
+                document.body.classList.add('minigame-active');
+                minigameWrapper.classList.add('visible');
+                minigameCanvas.style.backgroundColor = '#68b848'; // Soccer Green
+                
+                let minigamePlayer = new Child(babyColorScheme);
+                minigamePlayer.faceType = baby.faceType;
+                minigamePlayer.isBoy = baby.isBoy;
+                minigamePlayer.hairStyle = baby.hairStyle;
+                
+                activeMinigame = new SoccerMinigame(minigamePlayer, minigameCtx);
+            } else if (child2ActivityChoice === 'library') {
+                isMinigameActive = true;
+                minigameTriggerDrop = clickedDrop;
+                document.body.classList.add('minigame-active');
+                minigameWrapper.classList.add('visible');
+                minigameCanvas.style.backgroundColor = '#f0ece4'; // Library Floor Color
+                
+                let minigamePlayer = new Child(babyColorScheme);
+                minigamePlayer.faceType = baby.faceType;
+                minigamePlayer.isBoy = baby.isBoy;
+                minigamePlayer.hairStyle = baby.hairStyle;
+                
+                activeMinigame = new LibraryMinigame(minigamePlayer, minigameCtx);
+            } else if (child2ActivityChoice === 'science_room') {
+                isMinigameActive = true;
+                minigameTriggerDrop = clickedDrop;
+                document.body.classList.add('minigame-active');
+                minigameWrapper.classList.add('visible');
+                minigameCanvas.style.backgroundColor = '#e0e4e8'; // Science Lab Gray
+                
+                let minigamePlayer = new Child(babyColorScheme);
+                minigamePlayer.faceType = baby.faceType;
+                minigamePlayer.isBoy = baby.isBoy;
+                minigamePlayer.hairStyle = baby.hairStyle;
+                
+                activeMinigame = new ScienceMinigame(minigamePlayer, minigameCtx);
+            } else if (child2ActivityChoice === 'reading') {
+                isMinigameActive = true;
+                minigameTriggerDrop = clickedDrop;
+                document.body.classList.add('minigame-active');
+                minigameWrapper.classList.add('visible');
+                minigameCanvas.style.backgroundColor = '#fdfaf0'; // Warm Parchment
+                
+                let minigamePlayer = new Child(babyColorScheme);
+                minigamePlayer.faceType = baby.faceType;
+                minigamePlayer.isBoy = baby.isBoy;
+                minigamePlayer.hairStyle = baby.hairStyle;
+                
+                activeMinigame = new ReadingMinigame(minigamePlayer, minigameCtx);
+            } else if (child2ActivityChoice === 'chatting') {
+                isMinigameActive = true;
+                minigameTriggerDrop = clickedDrop;
+                document.body.classList.add('minigame-active');
+                minigameWrapper.classList.add('visible');
+                minigameCanvas.style.backgroundColor = '#fce4ec'; // Soft Pink Chat Room
+                
+                let minigamePlayer = new Child(babyColorScheme);
+                minigamePlayer.faceType = baby.faceType;
+                minigamePlayer.isBoy = baby.isBoy;
+                minigamePlayer.hairStyle = baby.hairStyle;
+                
+                activeMinigame = new ChattingMinigame(minigamePlayer, minigameCtx);
+            } else if (child2ActivityChoice === 'doodle') {
+                isMinigameActive = true;
+                minigameTriggerDrop = clickedDrop;
+                document.body.classList.add('minigame-active');
+                minigameWrapper.classList.add('visible');
+                minigameCanvas.style.backgroundColor = '#2c5040'; // Blackboard Green
+                
+                let minigamePlayer = new Child(babyColorScheme);
+                minigamePlayer.faceType = baby.faceType;
+                minigamePlayer.isBoy = baby.isBoy;
+                minigamePlayer.hairStyle = baby.hairStyle;
+                
+                activeMinigame = new DoodleMinigame(minigamePlayer, minigameCtx);
+            } else if (child2ActivityChoice === 'organ') {
+                isMinigameActive = true;
+                minigameTriggerDrop = clickedDrop;
+                document.body.classList.add('minigame-active');
+                minigameWrapper.classList.add('visible');
+                minigameCanvas.style.backgroundColor = '#4e342e'; // Deep Organ Wood
+                
+                let minigamePlayer = new Child(babyColorScheme);
+                minigamePlayer.faceType = baby.faceType;
+                minigamePlayer.isBoy = baby.isBoy;
+                minigamePlayer.hairStyle = baby.hairStyle;
+                
+                activeMinigame = new OrganMinigame(minigamePlayer, minigameCtx);
+            }
         }
 
+// ==========================================
+// Minigame: Library (Sorting & Focus)
+// ==========================================
+class LibraryMinigame {
+    constructor(playerChar, ctx) {
+        this.ctx = ctx;
+        this.width = ctx.canvas.width;
+        this.height = ctx.canvas.height;
+        this.alpha = 0;
+        this.state = 'intro';
+        this.timer = 0;
+        this.bookCounter = 0;
+
+        const getStat = (key) => selectedToys.reduce((sum, t) => sum + (t.labels && t.labels[key] ? t.labels[key] : 0), 0);
+        const studyPts = getStat('study');
+        const focusedPts = getStat('focused');
+        const patientPts = getStat('patient');
+        const organizedPts = getStat('organized');
+
+        this.player = {
+            char: playerChar,
+            x: this.width / 2,
+            y: this.height - 80,
+            noiseResistance: 1 + (focusedPts * 0.25),
+            scoreBonus: organizedPts * 0.1,
+            hasGuide: studyPts >= 4
+        };
+
+        this.timeRemaining = 45 + (patientPts * 3); // Slightly more time
+        this.noise = 0;
+        this.maxNoise = 100;
+        this.isStunned = false;
+        this.stunTimer = 0;
+        
+        this.books = [];
+        this.shelves = [
+            { id: 0, color: "hsl(210, 65%, 70%)", label: "A", x: 150, y: 120, w: 100, h: 140 },
+            { id: 1, color: "hsl(30, 70%, 75%)", label: "B", x: 350, y: 120, w: 100, h: 140 },
+            { id: 2, color: "hsl(330, 65%, 75%)", label: "C", x: 550, y: 120, w: 100, h: 140 }
+        ];
+        
+        this.heldBook = null;
+        this.score = 0;
+        this.targetScore = 8;
+        this.isPaused = false;
+        this.frameCount = 0;
+        this.spawnBook();
+    }
+
+    spawnBook() {
+        this.bookCounter++;
+        const shelfIdx = Math.floor(Math.random() * 3);
+        const targetShelf = this.shelves[shelfIdx];
+        this.books = [{
+            id: this.bookCounter,
+            x: this.width / 2 + (Math.random() - 0.5) * 200,
+            y: this.height - 120,
+            targetIdx: shelfIdx,
+            color: targetShelf.color,
+            w: 30,
+            h: 45,
+            isDragging: false
+        }];
+    }
+
+    closeMinigame(resultLabel) {
+        if (!baby.minigameResults) baby.minigameResults = [];
+        baby.minigameResults.push({ toy: "library", result: resultLabel, timestamp: Date.now() });
+
+        if (resultLabel === "勝利") {
+            selectedToys.push({
+                id: "library_victory",
+                name: "Perfect Sorting",
+                labels: { study: 3, organized: 3 }
+            });
+        } else if (resultLabel === "引き分け") {
+            selectedToys.push({
+                id: "library_draw",
+                name: "Quiet Effort",
+                labels: { focused: 1, patient: 1 }
+            });
+        }
+
+        activeMinigame = null;
+        isMinigameActive = false;
+        minigameTriggerDrop = null;
+        document.body.classList.remove('minigame-active');
+        minigameWrapper.classList.remove('visible');
+        const btn = document.getElementById('minigame-quit-btn');
+        if (btn) btn.remove();
+        transitionMinigameToLesson();
+    }
+
+    showQuitConfirmation() {
+        if (this.isPaused) return;
+        this.isPaused = true;
+        const isFinished = this.state === 'finished';
+        const modal = document.createElement('div');
+        modal.id = 'minigame-modal';
+        const enText = isFinished ? "Return to the classroom?" : "Do you want to stop organizing?";
+        const jpText = isFinished ? "教室に戻りますか？" : "片付けをやめて戻りますか？";
+        modal.innerHTML = `<div class="modal-content"><p class="en">${enText}</p><p class="jp">${jpText}</p><div class="modal-buttons"><button id="modal-yes">YES</button><button id="modal-no">NO</button></div></div>`;
+        document.body.appendChild(modal);
+        document.getElementById('modal-yes').onclick = () => {
+            modal.remove();
+            let label = this.score >= this.targetScore ? "勝利" : (this.score > 0 ? "引き分け" : "友達を置いて放棄");
+            this.closeMinigame(label);
+        };
+        document.getElementById('modal-no').onclick = () => { modal.remove(); this.isPaused = false; };
+    }
+
+    update(mouseX, mouseY) {
+        if (this.isPaused) return;
+        this.frameCount++;
+        if (this.alpha < 1) this.alpha += 0.05;
+
+        if (this.state === 'intro') {
+            this.timer++;
+            if (this.timer > 480) { this.state = 'playing'; this.timer = 0; }
+            return;
+        }
+
+        if (this.state === 'finished') {
+            this.timer++;
+            if (this.timer > 180) { this.alpha -= 0.05; if (this.alpha <= 0) this.closeMinigame(this.score >= this.targetScore ? "勝利" : "引き分け"); }
+            return;
+        }
+
+        if (this.state === 'playing') {
+            if (this.frameCount % 60 === 0 && this.timeRemaining > 0) {
+                this.timeRemaining--;
+                if (this.timeRemaining <= 0) {
+                    this.timeRemaining = 0;
+                    this.state = 'finished';
+                }
+            }
+
+            if (this.isStunned) {
+                this.stunTimer--;
+                if (this.stunTimer <= 0) this.isStunned = false;
+                this.noise *= 0.92;
+                return;
+            }
+
+            let dx = mouseX - this.player.x;
+            if (Math.abs(dx) > 10) {
+                this.player.x += dx * 0.1;
+                this.player.char.direction = dx < 0 ? -1 : 1;
+                this.player.char.walkCycle += 0.15;
+            }
+
+            if (orbDragging && !this.heldBook) {
+                const book = this.books.find(b => Math.hypot(mouseX - b.x, mouseY - b.y) < 40);
+                if (book) { this.heldBook = book; book.isDragging = true; }
+            } else if (!orbDragging && this.heldBook) {
+                const shelf = this.shelves.find(s => mouseX > s.x - s.w/2 && mouseX < s.x + s.w/2 && mouseY > s.y - s.h/2 && mouseY < s.y + s.h/2);
+                if (shelf && shelf.id === this.heldBook.targetIdx) {
+                    this.score++;
+                    this.books = [];
+                    if (this.score < this.targetScore) this.spawnBook();
+                    else this.state = 'finished';
+                }
+                if (this.heldBook) {
+                    this.heldBook.isDragging = false;
+                    this.heldBook = null;
+                }
+            }
+
+            if (this.heldBook) {
+                let dmx = mouseX - this.heldBook.x;
+                let dmy = mouseY - this.heldBook.y;
+                let speed = Math.hypot(dmx, dmy);
+                this.heldBook.x = mouseX;
+                this.heldBook.y = mouseY;
+                
+                // --- BALANCED NOISE LOGIC ---
+                if (speed > 1.8) {
+                    this.noise += (speed - 1.8) * (2.2 / this.player.noiseResistance);
+                } else {
+                    this.noise = Math.max(0, this.noise - 0.15);
+                }
+
+                if (this.noise >= this.maxNoise) {
+                    this.isStunned = true;
+                    this.stunTimer = 240; 
+                    this.heldBook.isDragging = false;
+                    this.heldBook = null;
+                }
+            } else {
+                this.noise = Math.max(0, this.noise - 0.5);
+            }
+        }
+    }
+
+    draw() {
+        const c = this.ctx;
+        c.clearRect(0, 0, this.width, this.height);
+        c.save();
+        c.globalAlpha = Math.max(0, this.alpha);
+
+        c.fillStyle = "#f0ece4";
+        c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+
+        this.shelves.forEach(s => {
+            c.fillStyle = "#9a8a68";
+            c.beginPath(); c.roundRect(s.x - s.w/2 - 5, s.y - s.h/2 - 5, s.w + 10, s.h + 10, 8); c.fill();
+            c.fillStyle = "#ede5da";
+            c.beginPath(); c.roundRect(s.x - s.w/2, s.y - s.h/2, s.w, s.h, 4); c.fill();
+            c.fillStyle = s.color;
+            c.beginPath(); c.arc(s.x, s.y - s.h/2 + 30, 20, 0, Math.PI*2); c.fill();
+            c.fillStyle = "#fff";
+            c.font = "800 18px 'Zen Maru Gothic'";
+            c.textAlign = "center";
+            c.textBaseline = "middle";
+            c.fillText(s.label, s.x, s.y - s.h/2 + 31);
+
+            if (this.player.hasGuide && this.heldBook && this.heldBook.targetIdx === s.id) {
+                c.strokeStyle = s.color;
+                c.lineWidth = 4;
+                c.setLineDash([5, 5]);
+                c.strokeRect(s.x - s.w/2 - 10, s.y - s.h/2 - 10, s.w + 20, s.h + 20);
+                c.setLineDash([]);
+            }
+        });
+
+        this.books.forEach(b => {
+            c.fillStyle = b.color;
+            c.beginPath(); c.roundRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h, 3); c.fill();
+            c.strokeStyle = "rgba(255,255,255,0.5)";
+            c.lineWidth = 2;
+            c.stroke();
+            c.fillStyle = "rgba(0,0,0,0.1)";
+            c.fillRect(b.x - b.w/2, b.y - b.h/2, 6, b.h);
+        });
+
+        c.save();
+        c.translate(this.player.x, this.player.y);
+        c.scale(0.6, 0.6);
+        this.player.char.draw(c);
+        c.restore();
+
+        const meterW = 200, meterH = 12;
+        const mx = this.width/2 - meterW/2, my = this.height - 40;
+        c.fillStyle = "rgba(0,0,0,0.1)";
+        c.beginPath(); c.roundRect(mx, my, meterW, meterH, 6); c.fill();
+        const noiseFill = (this.noise / this.maxNoise) * meterW;
+        c.fillStyle = this.noise > 80 ? "#e85050" : "#907858";
+        c.beginPath(); c.roundRect(mx, my, noiseFill, meterH, 6); c.fill();
+        c.fillStyle = "#5a4a3e";
+        c.font = "700 10px 'Zen Maru Gothic'";
+        c.textAlign = "center";
+        c.fillText("SILENCE", this.width/2, my - 5);
+
+        c.fillStyle = "#5a4a3e";
+        c.font = "800 20px 'Zen Maru Gothic'";
+        c.textAlign = "left";
+        c.fillText(`BOOKS: ${this.score}/${this.targetScore}`, 40, 40);
+        c.textAlign = "right";
+        c.fillText(`TIME: ${this.timeRemaining}`, this.width - 40, 40);
+
+        if (this.isStunned) {
+            c.fillStyle = "rgba(255,255,255,0.75)";
+            c.fillRect(0, 0, this.width, this.height);
+            c.fillStyle = "#e85050";
+            c.font = "900 72px 'Zen Maru Gothic'";
+            c.textAlign = "center";
+            c.fillText("SHH!", this.width/2, this.height/2 - 10);
+            c.font = "800 24px 'Zen Maru Gothic'";
+            c.fillText("（シーッ！）", this.width/2, this.height/2 + 40);
+        }
+
+        if (this.state === 'intro') {
+            c.fillStyle = "rgba(0,0,0,0.65)";
+            c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+            const totalIntroFrames = 480, countdownStartFrame = 300;
+            if (this.timer < countdownStartFrame) {
+                c.fillStyle = "#fff";
+                c.font = "800 42px 'Zen Maru Gothic'";
+                c.textAlign = "center";
+                c.fillText("QUIET TIME", this.width/2, this.height/2 - 40);
+                c.font = "600 18px 'Zen Maru Gothic'";
+                c.fillText("マウスで本を掴んで（長押し）、同じ色の棚まで静かに運ぼう", this.width/2, this.height/2 + 10);
+                c.fillStyle = "#ffdf00";
+                c.font = "700 16px 'Zen Maru Gothic'";
+                c.fillText("※素早く動かすと図書委員に怒られて中断されます！", this.width/2, this.height/2 + 45);
+            } else {
+                const countdownTime = Math.ceil((totalIntroFrames - this.timer) / 60);
+                const progressInSecond = (this.timer % 60) / 60;
+                c.fillStyle = "#fff";
+                c.textAlign = "center";
+                c.textBaseline = "middle";
+                const size = 80 + (progressInSecond * 40);
+                c.font = `900 ${size}px 'Zen Maru Gothic'`;
+                c.globalAlpha = Math.max(0, 1 - progressInSecond);
+                if (countdownTime >= 1) c.fillText(countdownTime.toString(), this.width/2, this.height/2);
+                c.globalAlpha = 1.0;
+            }
+            if (!document.getElementById('minigame-quit-btn')) {
+                const btn = document.createElement('button'); btn.id = 'minigame-quit-btn'; btn.innerText = "教室に戻る"; btn.onclick = () => this.showQuitConfirmation(); document.body.appendChild(btn);
+            }
+        }
+
+        if (this.state === 'finished') {
+            c.fillStyle = "rgba(0,0,0,0.8)";
+            c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+            c.fillStyle = "#ffdf00";
+            c.font = "900 64px 'Zen Maru Gothic'";
+            c.textAlign = "center";
+            c.fillText(this.score >= this.targetScore ? "PERFECT!" : "TIME UP", this.width/2, this.height/2);
+        }
+        c.restore();
+    }
+}
+
+
+window.addEventListener('keyup', e => {
+    if (!activeMinigame) return;
+    // Input for minigame removed as player movement is mouse-based.
+    // Keeping this listener for potential future use or debugging.
+});
+
+canvas.addEventListener('mousedown', e => {
+    if (activeMinigame) { /* Removed click-to-shoot logic */ }
+});
+canvas.addEventListener('mouseup', e => {
+    if (activeMinigame) { /* Removed click-to-shoot logic */ }
+});
+
+// ==========================================
+// Minigame: Soccer (Table Hockey Style)
+// ==========================================
+class SoccerMinigame {
+    constructor(playerChar, ctx) {
+        this.ctx = ctx;
+        this.width = ctx.canvas.width;
+        this.height = ctx.canvas.height;
+        this.alpha = 0;
+        this.state = 'intro';
+        this.timer = 0;
+
+        const activePts = selectedToys.reduce((sum, t) => sum + (t.labels && t.labels.active ? t.labels.active : 0), 0);
+        const hasSoccerFacility = childFacilities.some(f => f.id === 'soccer');
+
+        this.player = {
+            x: 100, y: this.height / 2, vx: 0, vy: 0,
+            speed: 3.5 + (activePts >= 5 ? 1.5 : 0) + (hasSoccerFacility ? 1.0 : 0),
+            shootPower: 12 + (activePts >= 5 ? 3 : 0) + (hasSoccerFacility ? 3 : 0),
+            radius: 25,
+            score: 0,
+            char: playerChar
+        };
+
+        this.enemy = {
+            x: this.width - 100, y: this.height / 2, vx: 0, vy: 0,
+            speed: 3.4,
+            shootPower: 11,
+            radius: 25,
+            score: 0,
+            char: this.createEnemyChar(),
+            targetX: this.width - 100,
+            targetY: this.height / 2,
+            state: 'chase'
+        };
+
+        this.ball = { x: this.width / 2, y: this.height / 2, vx: 0, vy: 0, radius: 10 };
+        this.goalWidth = 160; // 広くなったゴール
+        this.timeRemaining = 120; // 2 minutes in seconds
+        this.isPaused = false;
+        this.resultTimer = 0;
+        this.frameCount = 0;
+    }
+
+    closeMinigame(resultLabel) {
+        // 1. Store results before clearing the instance
+        if (!baby.minigameResults) baby.minigameResults = [];
+        baby.minigameResults.push({ toy: "soccer", result: resultLabel, timestamp: Date.now() });
+
+        // 2. Apply penalties or bonuses based on performance
+        if (resultLabel === "友達を置いて放棄") {
+            const statsToPenalty = ['social', 'empathetic', 'expressive', 'cooperative'];
+            statsToPenalty.forEach(stat => {
+                if (baby.affinity && baby.affinity[stat] !== undefined) {
+                    baby.affinity[stat] = Math.max(0, baby.affinity[stat] - 3);
+                }
+            });
+        } else if (resultLabel === "勝利") {
+            selectedToys.push({
+                id: "soccer_victory",
+                name: "Soccer Victory",
+                labels: { resilient: 3, optimistic: 3 }
+            });
+        } else if (resultLabel === "引き分け") {
+            selectedToys.push({
+                id: "soccer_draw",
+                name: "Soccer Effort",
+                labels: { resilient: 1, optimistic: 1 }
+            });
+        }
+
+        // 3. Clear minigame state
+        activeMinigame = null;
+        isMinigameActive = false;
+        minigameTriggerDrop = null;
+        document.body.classList.remove('minigame-active');
+        minigameWrapper.classList.remove('visible');
+
+        // Remove the return button if it exists
+        const btn = document.getElementById('minigame-quit-btn');
+        if (btn) btn.remove();
+
+        // 4. Transition to lesson phase
+        transitionMinigameToLesson();
+    }
+
+    showQuitConfirmation() {
+        if (this.isPaused) return;
+        this.isPaused = true;
+        
+        const isFinished = this.state === 'finished';
+        const modal = document.createElement('div');
+        modal.id = 'minigame-modal';
+        
+        const enText = isFinished ? "Return to the classroom?" : "Do you want to leave your friends behind?";
+        const jpText = isFinished ? "教室に戻りますか？" : "友達を置いて戻りますか？";
+
+        modal.innerHTML = `
+            <div class="modal-content">
+                <p class="en">${enText}</p>
+                <p class="jp">${jpText}</p>
+                <div class="modal-buttons">
+                    <button id="modal-yes">YES</button>
+                    <button id="modal-no">NO</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        
+        document.getElementById('modal-yes').onclick = () => {
+            modal.remove();
+            let label = "友達を置いて放棄";
+            if (isFinished) {
+                label = "引き分け";
+                if (this.player.score > this.enemy.score) label = "勝利";
+                else if (this.player.score < this.enemy.score) label = "敗北";
+            }
+            this.closeMinigame(label);
+        };
+        document.getElementById('modal-no').onclick = () => {
+            modal.remove();
+            this.isPaused = false;
+        };
+    }
+
+    createEnemyChar() {
+        const enemyColors = {
+            body: "hsl(210, 65%, 60%)", limb: "hsl(210, 50%, 40%)",
+            head: "hsl(30, 60%, 80%)", skin: "hsl(30, 60%, 80%)",
+            cheek: "hsl(350, 60%, 80%)", hair: "hsl(30, 20%, 30%)"
+        };
+        let enemy = new Child(enemyColors);
+        enemy.isBoy = true;
+        enemy.hairStyle = 2;
+        return enemy;
+    }
+
+    resetPositions() {
+        this.player.x = 100; this.player.y = this.height / 2;
+        this.enemy.x = this.width - 100; this.enemy.y = this.height / 2;
+        this.ball.x = this.width / 2; this.ball.y = this.height / 2;
+        this.ball.vx = 0; this.ball.vy = 0;
+    }
+
+    update(mouseX, mouseY) {
+        if (this.isPaused) return;
+        this.frameCount++;
+
+        if (this.alpha < 1) this.alpha += 0.05;
+
+        if (this.state === 'playing') {
+            if (this.frameCount % 60 === 0) {
+                this.timeRemaining--;
+                if (this.timeRemaining <= 0) {
+                    this.timeRemaining = 0;
+                    this.state = 'finished';
+                    this.timer = 0;
+                }
+            }
+        }
+
+        if (this.state === 'goal') {
+            this.timer++;
+            if (this.timer > 90) {
+                if (this.player.score >= 3 || this.enemy.score >= 3) {
+                    this.state = 'finished';
+                    this.timer = 0;
+                } else {
+                    this.resetPositions();
+                    this.state = 'playing';
+                }
+            }
+            return;
+        }
+
+        if (this.state === 'finished') {
+            this.timer++;
+            if (this.timer > 300) {
+                this.alpha -= 0.05;
+                if (this.alpha <= 0.01) {
+                    let label = "引き分け";
+                    if (this.player.score > this.enemy.score) label = "勝利";
+                    else if (this.player.score < this.enemy.score) label = "敗北";
+                    this.closeMinigame(label);
+                }
+            }
+            return;
+        }
+        
+        if (this.state === 'intro') {
+            this.timer++;
+            if (this.timer > 360) {
+                this.state = 'playing';
+                this.timer = 0;
+            }
+            return;
+        }
+
+        if (mouseX !== undefined && mouseY !== undefined) {
+            let dx = mouseX - this.player.x;
+            let dy = mouseY - this.player.y;
+            let len = Math.hypot(dx, dy);
+            
+            if (len > this.player.radius * 0.5) {
+                this.player.x += (dx / len) * this.player.speed;
+                this.player.y += (dy / len) * (this.player.speed * 0.9);
+                this.player.char.walkCycle += 0.25;
+                this.player.char.direction = dx < 0 ? -1 : 1;
+            }
+        }
+
+        const lagFactor = 0.1;
+        const ball = this.ball;
+        const enemy = this.enemy;
+        let targetX = ball.x;
+        let targetY = ball.y;
+        enemy.targetX += (targetX - enemy.targetX) * lagFactor;
+        enemy.targetY += (targetY - enemy.targetY) * lagFactor;
+        let edx = enemy.targetX - enemy.x;
+        let edy = enemy.targetY - enemy.y;
+        let elen = Math.hypot(edx, edy);
+        if (elen > 0.5) {
+            enemy.x += (edx / elen) * enemy.speed;
+            enemy.y += (edy / elen) * enemy.speed;
+            enemy.char.walkCycle += 0.25;
+            enemy.char.direction = edx < 0 ? -1 : 1;
+        }
+
+        const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
+        this.player.x = clamp(this.player.x, this.player.radius, this.width - this.player.radius);
+        this.player.y = clamp(this.player.y, this.player.radius, this.height - this.player.radius);
+        enemy.x = clamp(enemy.x, enemy.radius, this.width - enemy.radius);
+        enemy.y = clamp(enemy.y, enemy.radius, this.height - enemy.radius);
+
+        ball.x += ball.vx;
+        ball.y += ball.vy;
+        ball.vx *= 0.95;
+        ball.vy *= 0.95;
+
+        const goalTop = this.height / 2 - this.goalWidth / 2;
+        const goalBottom = this.height / 2 + this.goalWidth / 2;
+        const cornerRadius = 80;
+        const bounceStrength = 0.8;
+
+        let collided = false;
+        if (ball.x - ball.radius < 0 && ball.y > goalTop && ball.y < goalBottom) {
+            enemy.score++; this.state = 'goal'; this.timer = 0;
+        } else if (ball.x + ball.radius > this.width && ball.y > goalTop && ball.y < goalBottom) {
+            this.player.score++; this.state = 'goal'; this.timer = 0;
+        }
+
+        if (this.state !== 'goal') {
+            const innerL = cornerRadius;
+            const innerR = this.width - cornerRadius;
+            const innerT = cornerRadius;
+            const innerB = this.height - cornerRadius;
+            let nx = 0, ny = 0;
+
+            if (ball.x < innerL && ball.y < innerT) {
+                const dx = ball.x - innerL, dy = ball.y - innerT;
+                const dist = Math.hypot(dx, dy);
+                if (dist > cornerRadius - ball.radius) {
+                    nx = dx / dist; ny = dy / dist;
+                    ball.x = innerL + nx * (cornerRadius - ball.radius);
+                    ball.y = innerT + ny * (cornerRadius - ball.radius);
+                    collided = true;
+                }
+            } else if (ball.x > innerR && ball.y < innerT) {
+                const dx = ball.x - innerR, dy = ball.y - innerT;
+                const dist = Math.hypot(dx, dy);
+                if (dist > cornerRadius - ball.radius) {
+                    nx = dx / dist; ny = dy / dist;
+                    ball.x = innerR + nx * (cornerRadius - ball.radius);
+                    ball.y = innerT + ny * (cornerRadius - ball.radius);
+                    collided = true;
+                }
+            } else if (ball.x < innerL && ball.y > innerB) {
+                const dx = ball.x - innerL, dy = ball.y - innerB;
+                const dist = Math.hypot(dx, dy);
+                if (dist > cornerRadius - ball.radius) {
+                    nx = dx / dist; ny = dy / dist;
+                    ball.x = innerL + nx * (cornerRadius - ball.radius);
+                    ball.y = innerB + ny * (cornerRadius - ball.radius);
+                    collided = true;
+                }
+            } else if (ball.x > innerR && ball.y > innerB) {
+                const dx = ball.x - innerR, dy = ball.y - innerB;
+                const dist = Math.hypot(dx, dy);
+                if (dist > cornerRadius - ball.radius) {
+                    nx = dx / dist; ny = dy / dist;
+                    ball.x = innerR + nx * (cornerRadius - ball.radius);
+                    ball.y = innerB + ny * (cornerRadius - ball.radius);
+                    collided = true;
+                }
+            } else {
+                if (ball.y - ball.radius < 0) { ball.y = ball.radius; ball.vy *= -bounceStrength; }
+                else if (ball.y + ball.radius > this.height) { ball.y = this.height - ball.radius; ball.vy *= -bounceStrength; }
+                if (ball.x - ball.radius < 0) { ball.x = ball.radius; ball.vx *= -bounceStrength; }
+                else if (ball.x + ball.radius > this.width) { ball.x = this.width - ball.radius; ball.vx *= -bounceStrength; }
+            }
+
+            if (collided) {
+                const dot = ball.vx * nx + ball.vy * ny;
+                if (dot > 0) {
+                    ball.vx -= (1 + bounceStrength) * dot * nx;
+                    ball.vy -= (1 + bounceStrength) * dot * ny;
+                }
+            }
+        }
+
+        const checkCollision = (charInfo, isPlayer) => {
+            let dist = Math.hypot(ball.x - charInfo.x, ball.y - charInfo.y);
+            if (dist < charInfo.radius + ball.radius) {
+                let nx = (ball.x - charInfo.x) / dist;
+                let ny = (ball.y - charInfo.y) / dist;
+                ball.x = charInfo.x + nx * (charInfo.radius + ball.radius);
+                ball.y = charInfo.y + ny * (charInfo.radius + ball.radius);
+                const forwardX = isPlayer ? 1 : -1;
+                const biasStrength = 0.3;
+                let finalNx = (nx * (1 - biasStrength)) + (forwardX * biasStrength);
+                let finalNy = ny;
+                const isAttacking = isPlayer ? (ball.x > this.width * 0.6) : (ball.x < this.width * 0.4);
+                if (isAttacking) {
+                    const attractionStrength = 0.4;
+                    const gx = isPlayer ? this.width : 0;
+                    const gy = this.height / 2;
+                    const gdx = gx - ball.x, gdy = gy - ball.y;
+                    const glen = Math.hypot(gdx, gdy);
+                    if (glen > 0) {
+                        finalNx = (finalNx * (1 - attractionStrength)) + ((gdx / glen) * attractionStrength);
+                        finalNy = (finalNy * (1 - attractionStrength)) + ((gdy / glen) * attractionStrength);
+                    }
+                }
+                const len = Math.hypot(finalNx, finalNy);
+                ball.vx = (finalNx / len) * charInfo.speed * 1.6;
+                ball.vy = (finalNy / len) * charInfo.speed * 1.6;
+            }
+        };
+        checkCollision(this.player, true);
+        checkCollision(enemy, false);
+    }
+
+    draw() {
+        this.ctx.clearRect(0, 0, this.width, this.height);
+        this.ctx.save();
+        this.ctx.globalAlpha = Math.max(0, this.alpha);
+        this.ctx.fillStyle = "#68b848";
+        this.ctx.beginPath(); this.ctx.roundRect(0, 0, this.width, this.height, 80); this.ctx.fill();
+        const gTop = this.height / 2 - this.goalWidth / 2;
+        const gBottom = this.height / 2 + this.goalWidth / 2;
+        const goalDepth = 15;
+        this.ctx.strokeStyle = "rgba(255,255,255,0.9)";
+        this.ctx.lineWidth = 4;
+        this.ctx.beginPath(); this.ctx.moveTo(goalDepth, gTop); this.ctx.lineTo(0, gTop); this.ctx.lineTo(0, gBottom); this.ctx.lineTo(goalDepth, gBottom); this.ctx.stroke();
+        this.ctx.beginPath(); this.ctx.moveTo(this.width - goalDepth, gTop); this.ctx.lineTo(this.width, gTop); this.ctx.lineTo(this.width, gBottom); this.ctx.lineTo(this.width - goalDepth, gBottom); this.ctx.stroke();
+        this.ctx.strokeStyle = "rgba(255,255,255,0.8)"; this.ctx.lineWidth = 3;
+        this.ctx.beginPath(); this.ctx.moveTo(this.width / 2, 0); this.ctx.lineTo(this.width / 2, this.height); this.ctx.stroke();
+        this.ctx.beginPath(); this.ctx.arc(this.width / 2, this.height / 2, 60, 0, Math.PI * 2); this.ctx.stroke();
+        this.ctx.fillStyle = "#fff"; this.ctx.beginPath(); this.ctx.arc(this.ball.x, this.ball.y, this.ball.radius, 0, Math.PI*2); this.ctx.fill();
+        this.ctx.strokeStyle = "#333"; this.ctx.lineWidth = 1.5; this.ctx.beginPath(); this.ctx.arc(this.ball.x, this.ball.y, this.ball.radius, 0, Math.PI*2); this.ctx.stroke();
+                this.ctx.fillStyle = "#333";
+                this.ctx.beginPath(); this.ctx.arc(this.ball.x, this.ball.y, this.ball.radius * 0.4, 0, Math.PI*2); this.ctx.fill();
+        
+                // 内部座標のリセット（二重翻訳防止）
+                this.player.char.x = 0; this.player.char.y = 0;
+                this.enemy.char.x = 0; this.enemy.char.y = 0;
+        
+                this.ctx.save();
+                this.ctx.translate(this.player.x, this.player.y);
+                this.ctx.scale(0.55, 0.55);
+                this.player.char.draw(this.ctx);
+                this.ctx.restore();
+        
+                this.ctx.save();
+                this.ctx.translate(this.enemy.x, this.enemy.y);
+                this.ctx.scale(0.55, 0.55);
+                this.enemy.char.draw(this.ctx);
+                this.ctx.restore();
+        this.ctx.globalAlpha = 0.15; this.ctx.fillStyle = "#fff";
+        this.ctx.beginPath(); this.ctx.arc(this.player.x, this.player.y, this.player.radius, 0, Math.PI * 2); this.ctx.fill();
+        this.ctx.beginPath(); this.ctx.arc(this.enemy.x, this.enemy.y, this.enemy.radius, 0, Math.PI * 2); this.ctx.fill();
+        this.ctx.globalAlpha = Math.max(0, this.alpha);
+        this.ctx.restore();
+        this.ctx.save();
+        this.ctx.globalAlpha = Math.max(0, this.alpha);
+        const mins = Math.floor(this.timeRemaining / 60), secs = this.timeRemaining % 60;
+        this.ctx.fillStyle = "#fff"; this.ctx.font = "800 24px 'Zen Maru Gothic', sans-serif"; this.ctx.textAlign = "right"; this.ctx.textBaseline = "top"; this.ctx.shadowColor = "rgba(0,0,0,0.5)"; this.ctx.shadowBlur = 4;
+        this.ctx.fillText(`TIME: ${mins}:${secs.toString().padStart(2, '0')}`, this.width - 20, 15);
+        this.ctx.textAlign = "center"; this.ctx.font = "800 36px 'Zen Maru Gothic', sans-serif"; this.ctx.fillText(`${this.player.score} - ${this.enemy.score}`, this.width / 2, 15);
+        if (this.player.score === 2 || this.enemy.score === 2) {
+            this.ctx.fillStyle = "#ffdf00"; this.ctx.font = "800 18px 'Zen Maru Gothic', sans-serif";
+            const labelX = this.player.score === 2 ? this.width / 2 - 110 : this.width / 2 + 110;
+            this.ctx.fillText("Match Point", labelX, 15);
+        }
+        this.ctx.shadowBlur = 0; this.ctx.textBaseline = "middle";
+        if (this.state === 'intro' || this.state === 'goal' || this.state === 'finished') {
+            this.ctx.fillStyle = `rgba(0,0,0,${this.state === 'finished' ? 0.85 : 0.6})`;
+            this.ctx.beginPath(); this.ctx.roundRect(0, 0, this.width, this.height, 80); this.ctx.fill();
+            if (this.state === 'intro') {
+                if (!document.getElementById('minigame-quit-btn')) {
+                    const btn = document.createElement('button'); btn.id = 'minigame-quit-btn'; btn.innerText = "教室に戻る"; btn.onclick = () => this.showQuitConfirmation(); document.body.appendChild(btn);
+                }
+                const totalIntroFrames = 360, countdownStartFrame = 180;
+                if (this.timer < countdownStartFrame) {
+                    this.ctx.fillStyle = "#fff"; this.ctx.font = "800 52px 'Zen Maru Gothic', sans-serif"; this.ctx.fillText("READY?", this.width / 2, this.height / 2 - 65);
+                    this.ctx.fillStyle = "#ffdf00"; this.ctx.font = "800 22px 'Zen Maru Gothic', sans-serif"; this.ctx.fillText("First to 3 points wins!", this.width / 2, this.height / 2);
+                    this.ctx.font = "800 32px 'Zen Maru Gothic', sans-serif"; this.ctx.fillText("3点先取で勝ち！", this.width / 2, this.height / 2 + 40);
+                    this.ctx.fillStyle = "#fff"; this.ctx.font = "600 18px 'Zen Maru Gothic', sans-serif"; this.ctx.fillText("マウスで移動してボールをゴールに入れよう", this.width / 2, this.height / 2 + 85);
+                } else {
+                    const countdownTime = Math.ceil((totalIntroFrames - this.timer) / 60), progressInSecond = (this.timer % 60) / 60;
+                    this.ctx.fillStyle = "#fff";
+                    this.ctx.textAlign = "center";
+                    this.ctx.textBaseline = "middle";
+                    const size = 80 + (progressInSecond * 40); this.ctx.font = `900 ${size}px 'Zen Maru Gothic', sans-serif`; this.ctx.globalAlpha = Math.max(0, 1 - progressInSecond);
+                    if (countdownTime >= 1) this.ctx.fillText(countdownTime.toString(), this.width / 2, this.height / 2);
+                    this.ctx.globalAlpha = 1.0;
+                }
+            } else if (this.state === 'goal') {
+                this.ctx.fillStyle = "#ffdf00"; this.ctx.font = "800 72px 'Zen Maru Gothic', sans-serif"; this.ctx.fillText("GOAL!", this.width / 2, this.height / 2);
+            } else {
+                const isWin = this.player.score > this.enemy.score, isDraw = this.player.score === this.enemy.score;
+                this.ctx.shadowColor = "rgba(0,0,0,0.5)"; this.ctx.shadowBlur = 10;
+                if (isDraw) {
+                    this.ctx.fillStyle = "#fff"; this.ctx.font = "800 72px 'Zen Maru Gothic', sans-serif"; this.ctx.fillText("DRAW", this.width / 2, this.height / 2);
+                } else if (isWin) {
+                    this.ctx.fillStyle = "#ffdf00"; this.ctx.font = "900 84px 'Zen Maru Gothic', sans-serif"; this.ctx.fillText("YOU WIN!", this.width / 2, this.height / 2);
+                    this.ctx.font = "800 24px 'Zen Maru Gothic', sans-serif"; this.ctx.fillStyle = "#fff"; this.ctx.fillText("最高の結果だね！", this.width / 2, this.height / 2 + 70);
+                } else {
+                    this.ctx.fillStyle = "#50a8e0"; this.ctx.font = "900 84px 'Zen Maru Gothic', sans-serif"; this.ctx.fillText("YOU LOSE...", this.width / 2, this.height / 2);
+                    this.ctx.font = "800 24px 'Zen Maru Gothic', sans-serif"; this.ctx.fillStyle = "#fff"; this.ctx.fillText("次は勝てるよ！", this.width / 2, this.height / 2 + 70);
+                }
+                this.ctx.shadowBlur = 0;
+            }
+        }
+        this.ctx.restore();
+    }
+}
+
+
         // Choice/tone selection is now handled by "filled tone only" click gating.
+
+// ==========================================
+// Minigame: Science (Color Alchemy)
+// ==========================================
+class ScienceMinigame {
+    constructor(playerChar, ctx) {
+        this.ctx = ctx;
+        this.width = ctx.canvas.width;
+        this.height = ctx.canvas.height;
+        this.alpha = 0;
+        this.state = 'intro';
+        this.timer = 0;
+
+        const getStat = (key) => selectedToys.reduce((sum, t) => sum + (t.labels && t.labels[key] ? t.labels[key] : 0), 0);
+        const curiousPts = getStat('curious');
+        const focusedPts = getStat('focused');
+        const cautiousPts = getStat('cautious');
+
+        this.targetRGB = {
+            r: 50 + Math.random() * 180,
+            g: 50 + Math.random() * 180,
+            b: 50 + Math.random() * 180
+        };
+        this.currentRGB = { r: 245, g: 245, b: 245 };
+        this.player = {
+            char: playerChar,
+            x: 120,
+            y: this.height - 80,
+            dropPrecision: 1 + (focusedPts * 0.25),
+            showAnalysis: curiousPts >= 4,
+            successThreshold: 0.96 - (cautiousPts * 0.005)
+        };
+        this.beakers = [
+            { id: 'r', color: "#ff5050", x: 480, y: this.height - 100, w: 55, h: 90, rgb: {r:28, g:-12, b:-12} },
+            { id: 'g', color: "#50ff50", x: 570, y: this.height - 100, w: 55, h: 90, rgb: {r:-12, g:28, b:-12} },
+            { id: 'b', color: "#5050ff", x: 660, y: this.height - 100, w: 55, h: 90, rgb: {r:-12, g:-12, b:28} }
+        ];
+        this.timeRemaining = 45;
+        this.score = 0;
+        this.isPaused = false;
+        this.bubbles = [];
+        this.frameCount = 0;
+    }
+
+    closeMinigame(resultLabel) {
+        if (!baby.minigameResults) baby.minigameResults = [];
+        baby.minigameResults.push({ toy: "science", result: resultLabel, timestamp: Date.now() });
+        if (resultLabel === "勝利") {
+            selectedToys.push({ id: "science_victory", name: "Master Alchemist", labels: { curious: 3, creative: 3 } });
+        } else if (resultLabel === "引き分け") {
+            selectedToys.push({ id: "science_draw", name: "Junior Chemist", labels: { focused: 1, cautious: 1 } });
+        } else if (resultLabel === "友達を置いて放棄") {
+            const stats = ['curious', 'cautious'];
+            stats.forEach(s => { if (baby.affinity && baby.affinity[s] !== undefined) baby.affinity[s] = Math.max(0, baby.affinity[s] - 2); });
+        }
+        activeMinigame = null;
+        isMinigameActive = false;
+        minigameTriggerDrop = null;
+        document.body.classList.remove('minigame-active');
+        minigameWrapper.classList.remove('visible');
+        const btn = document.getElementById('minigame-quit-btn');
+        if (btn) btn.remove();
+        transitionMinigameToLesson();
+    }
+
+    showQuitConfirmation() {
+        if (this.isPaused) return;
+        this.isPaused = true;
+        const isFinished = this.state === 'finished';
+        const modal = document.createElement('div');
+        modal.id = 'minigame-modal';
+        const enText = isFinished ? "Return to the classroom?" : "Do you want to stop the experiment?";
+        const jpText = isFinished ? "教室に戻りますか？" : "実験をやめて戻りますか？";
+        modal.innerHTML = `<div class="modal-content"><p class="en">${enText}</p><p class="jp">${jpText}</p><div class="modal-buttons"><button id="modal-yes">YES</button><button id="modal-no">NO</button></div></div>`;
+        document.body.appendChild(modal);
+        document.getElementById('modal-yes').onclick = () => {
+            modal.remove();
+            let label = this.score >= this.player.successThreshold ? "勝利" : (this.score > 0.8 ? "引き分け" : "友達を置いて放棄");
+            this.closeMinigame(label);
+        };
+        document.getElementById('modal-no').onclick = () => { modal.remove(); this.isPaused = false; };
+    }
+
+    addDrop(beaker) {
+        const amount = 1.0 / this.player.dropPrecision;
+        this.currentRGB.r = Math.max(0, Math.min(255, this.currentRGB.r + beaker.rgb.r * amount));
+        this.currentRGB.g = Math.max(0, Math.min(255, this.currentRGB.g + beaker.rgb.g * amount));
+        this.currentRGB.b = Math.max(0, Math.min(255, this.currentRGB.b + beaker.rgb.b * amount));
+        for(let i=0; i<5; i++) {
+            this.bubbles.push({
+                x: 300 + (Math.random()-0.5) * 60, y: 220 + Math.random() * 40,
+                vx: (Math.random()-0.5) * 2, vy: -Math.random() * 3 - 1,
+                size: 3 + Math.random() * 6, life: 1.0
+            });
+        }
+    }
+
+    update(mouseX, mouseY) {
+        if (this.isPaused) return;
+        this.frameCount++;
+        if (this.alpha < 1) this.alpha += 0.05;
+        if (this.state === 'intro') {
+            this.timer++;
+            if (this.timer > 480) { this.state = 'playing'; this.timer = 0; }
+            return;
+        }
+        if (this.state === 'finished') {
+            this.timer++;
+            if (this.timer > 180) { this.alpha -= 0.05; if (this.alpha <= 0) this.closeMinigame(this.score >= this.player.successThreshold ? "勝利" : "引き分け"); }
+            return;
+        }
+        if (this.state === 'playing') {
+            if (this.frameCount % 60 === 0 && this.timeRemaining > 0) {
+                this.timeRemaining--;
+                if (this.timeRemaining <= 0) this.state = 'finished';
+            }
+            const dr = this.targetRGB.r - this.currentRGB.r, dg = this.targetRGB.g - this.currentRGB.g, db = this.targetRGB.b - this.currentRGB.b;
+            const maxDist = Math.sqrt(255*255 * 3), dist = Math.sqrt(dr*dr + dg*dg + db*db);
+            this.score = 1.0 - (dist / maxDist);
+            if (orbDragging && this.frameCount % 8 === 0) {
+                const b = this.beakers.find(bk => Math.hypot(mouseX - bk.x, mouseY - bk.y) < 40);
+                if (b) this.addDrop(b);
+            }
+            this.bubbles.forEach(b => { b.x += b.vx; b.y += b.vy; b.life -= 0.02; });
+            this.bubbles = this.bubbles.filter(b => b.life > 0);
+            let dx = mouseX - this.player.x;
+            if (Math.abs(dx) > 10) { this.player.x += dx * 0.1; this.player.char.direction = dx < 0 ? -1 : 1; this.player.char.walkCycle += 0.15; }
+        }
+    }
+
+    draw() {
+        const c = this.ctx;
+        c.clearRect(0, 0, this.width, this.height);
+        c.save();
+        c.globalAlpha = Math.max(0, this.alpha);
+        c.fillStyle = "#ced4d8";
+        c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+        c.fillStyle = "#9ba4a8";
+        c.fillRect(0, this.height - 120, this.width, 120);
+        c.fillStyle = "#fff";
+        c.beginPath(); c.roundRect(40, 40, 120, 120, 10); c.fill();
+        c.fillStyle = `rgb(${this.targetRGB.r}, ${this.targetRGB.g}, ${this.targetRGB.b})`;
+        c.beginPath(); c.roundRect(50, 50, 100, 100, 5); c.fill();
+        c.fillStyle = "#5a4a3e";
+        c.font = "bold 12px 'Zen Maru Gothic'"; c.textAlign = "center"; c.fillText("TARGET", 100, 165);
+        const fx = 300, fy = 200;
+        c.fillStyle = "rgba(255,255,255,0.4)";
+        c.beginPath(); c.moveTo(fx-20, fy-80); c.lineTo(fx+20, fy-80); c.lineTo(fx+20, fy-40); c.quadraticCurveTo(fx+80, fy+80, fx, fy+80); c.quadraticCurveTo(fx-80, fy+80, fx-20, fy-40); c.closePath(); c.fill();
+        c.save(); c.clip();
+        c.fillStyle = `rgb(${this.currentRGB.r}, ${this.currentRGB.g}, ${this.currentRGB.b})`;
+        c.fillRect(fx-80, fy-20, 160, 120);
+        this.bubbles.forEach(b => { c.fillStyle = `rgba(255,255,255,${b.life * 0.5})`; c.beginPath(); c.arc(b.x, b.y, b.size, 0, Math.PI*2); c.fill(); });
+        c.restore();
+        c.strokeStyle = "rgba(255,255,255,0.8)"; c.lineWidth = 3; c.stroke();
+        this.beakers.forEach(b => {
+            c.fillStyle = "rgba(255,255,255,0.3)"; c.beginPath(); c.roundRect(b.x-b.w/2, b.y-b.h/2, b.w, b.h, 5); c.fill();
+            c.fillStyle = b.color; c.beginPath(); c.roundRect(b.x-b.w/2+5, b.y+10, b.w-10, b.h/2-5, 2); c.fill();
+            c.strokeStyle = "#fff"; c.lineWidth = 2; c.stroke();
+            if (this.player.showAnalysis && this.state === 'playing') {
+                const diff = (b.id==='r'? (this.targetRGB.r-this.currentRGB.r) : (b.id==='g'? (this.targetRGB.g-this.currentRGB.g) : (this.targetRGB.b-this.currentRGB.b)));
+                if (Math.abs(diff) > 15) { c.fillStyle = diff > 0 ? "#ffdf00" : "#888"; c.font = "bold 20px sans-serif"; c.fillText(diff > 0 ? "↑" : "↓", b.x, b.y - 50); }
+            }
+        });
+        const smW = 300, smH = 20, smx = this.width/2 - smW/2, smy = 40;
+        c.fillStyle = "rgba(0,0,0,0.1)"; c.beginPath(); c.roundRect(smx, smy, smW, smH, 10); c.fill();
+        const scoreFill = Math.max(0, this.score) * smW;
+        const color = this.score > this.player.successThreshold ? "#50ff50" : (this.score > 0.8 ? "#ffdf00" : "#ff5050");
+        c.fillStyle = color;
+        c.beginPath(); c.roundRect(smx, smy, scoreFill, smH, 10); c.fill();
+        c.fillStyle = "#5a4a3e"; c.font = "bold 14px 'Zen Maru Gothic'"; c.textAlign = "center"; c.fillText(`HARMONY: ${Math.floor(this.score * 100)}%`, this.width/2, smy + 40);
+        c.textAlign = "right"; c.fillText(`TIME: ${this.timeRemaining}`, this.width - 40, 40);
+        c.save(); c.translate(this.player.x, this.player.y); c.scale(0.6, 0.6); this.player.char.draw(c); c.restore();
+        if (this.state === 'intro') {
+            c.fillStyle = "rgba(0,0,0,0.65)"; c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+            const totalIntroFrames = 480, countdownStartFrame = 300;
+            if (this.timer < countdownStartFrame) {
+                c.fillStyle = "#fff"; 
+                c.textAlign = "center";
+                c.textBaseline = "middle";
+                c.font = "800 42px 'Zen Maru Gothic'"; c.fillText("SOUND ALCHEMY", this.width/2, this.height/2-40);
+                c.font = "600 18px 'Zen Maru Gothic'"; c.fillText("原液を混ぜて、左上のターゲットと同じ色を作ろう", this.width/2, this.height/2+10);
+                c.fillStyle = "#ffdf00"; c.font = "700 16px 'Zen Maru Gothic'"; c.fillText("※精度96%以上で完璧な調合です。慎重に、かつ大胆に！", this.width/2, this.height/2+45);
+            } else {
+                const ct = Math.ceil((totalIntroFrames - this.timer) / 60), pr = (this.timer % 60) / 60;
+                c.fillStyle = "#fff";
+                c.textAlign = "center";
+                c.textBaseline = "middle";
+                c.font = `900 ${80+(pr*40)}px 'Zen Maru Gothic'`; c.globalAlpha = Math.max(0, 1-pr); if (ct >= 1) c.fillText(ct.toString(), this.width/2, this.height/2);
+            }
+            if (!document.getElementById('minigame-quit-btn')) { const btn = document.createElement('button'); btn.id = 'minigame-quit-btn'; btn.innerText = "教室に戻る"; btn.onclick = () => this.showQuitConfirmation(); document.body.appendChild(btn); }
+        }
+        if (this.state === 'finished') {
+            c.fillStyle = "rgba(0,0,0,0.85)"; c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+            const isWin = this.score >= this.player.successThreshold;
+            c.fillStyle = isWin ? "#ffdf00" : "#fff"; c.font = "900 64px 'Zen Maru Gothic'"; c.textAlign = "center"; c.fillText(isWin ? "SUCCESS!" : "TIME UP", this.width/2, this.height/2);
+            c.font = "bold 24px 'Zen Maru Gothic'"; c.fillText(`Accuracy: ${Math.floor(this.score * 100)}%`, this.width/2, this.height/2 + 60);
+        }
+        c.restore();
+    }
+}
+
+// ==========================================
+// Minigame: Reading (Knowledge Gathering)
+// ==========================================
+class ReadingMinigame {
+    constructor(playerChar, ctx) {
+        this.ctx = ctx;
+        this.width = ctx.canvas.width;
+        this.height = ctx.canvas.height;
+        this.alpha = 0;
+        this.state = 'intro';
+        this.timer = 0;
+
+        const getStat = (key) => selectedToys.reduce((sum, t) => sum + (t.labels && t.labels[key] ? t.labels[key] : 0), 0);
+        const studyPts = getStat('study');
+
+        this.player = { char: playerChar, x: 120, y: this.height - 80 };
+        this.quizPool = this.getQuizPool();
+        this.questions = this.pickQuestions(studyPts);
+        this.currentQIdx = 0;
+        this.score = 0;
+        this.totalRequired = 3;
+        this.isPaused = false;
+        this.frameCount = 0;
+        this.selectedOption = -1;
+        this.feedbackTimer = 0;
+        this.isCorrect = false;
+    }
+
+    getQuizPool() {
+        return [
+            // Level 1: Very Easy
+            { lv: 1, text: "青い空に白い雲が浮かんでいます。小さな猫が赤い屋根の上で昼寝をしています。", q: "猫はどこで昼寝をしていますか？", opts: ["青い空", "赤い屋根", "白い雲"], ans: 1 },
+            { lv: 1, text: "朝ごはんに、ジャムを塗ったトーストとオレンジジュースを食べました。", q: "トーストに何を塗りましたか？", opts: ["バター", "ハチミツ", "ジャム"], ans: 2 },
+            { lv: 1, text: "雨の日、太郎くんは黄色い長靴を履いて、お気に入りの傘を持って出かけました。", q: "長靴の色は何色ですか？", opts: ["黄色", "青色", "赤色"], ans: 0 },
+            { lv: 1, text: "公園のベンチにおじいさんが座っています。隣には大きな犬がいます。", q: "おじいさんの隣にいるのは？", opts: ["猫", "犬", "鳥"], ans: 1 },
+            { lv: 1, text: "机の上にリンゴが3つあります。お母さんがさらに2つ置きました。", q: "リンゴは全部でいくつ？", opts: ["3つ", "4つ", "5つ"], ans: 2 },
+            { lv: 1, text: "夜空に大きなお月様が出ています。星もキラキラと輝いています。", q: "夜空に出ているのは？", opts: ["太陽", "お月様", "虹"], ans: 1 },
+            // Level 2: Easy
+            { lv: 2, text: "図書室はとても静かです。窓際の席で花子さんは冒険の物語を読んでいます。", q: "花子さんは何を読んでいますか？", opts: ["教科書", "冒険の物語", "新聞"], ans: 1 },
+            { lv: 2, text: "理科の実験で、青い液体に魔法の粉を入れると、一瞬で紫色に変わりました。", q: "液体は何色に変わりましたか？", opts: ["緑色", "紫色", "黄色"], ans: 1 },
+            { lv: 2, text: "算数の授業中、先生が黒板に円を描きました。半径は5センチメートルです。", q: "先生が描いた図形は？", opts: ["四角", "三角", "円"], ans: 2 },
+            { lv: 2, text: "お弁当の時間、おにぎりの中身は鮭でした。デザートは甘いイチゴです。", q: "おにぎりの中身は何？", opts: ["梅", "鮭", "昆布"], ans: 1 },
+            { lv: 2, text: "森の中に古い時計台があります。12時になると鐘が鳴ります。", q: "鐘が鳴るのは何時？", opts: ["10時", "11時", "12時"], ans: 2 },
+            { lv: 2, text: "音楽室からピアノの音が聞こえます。誰かが静かな曲を練習しています。", q: "聞こえてくる楽器の音は？", opts: ["ギター", "ピアノ", "太鼓"], ans: 1 },
+            // Level 3: Medium
+            { lv: 3, text: "古い日記帳を開くと、10年前の夏の記憶が蘇りました。そこにはひまわり畑の写真がありました。", q: "日記帳には何の写真がありましたか？", opts: ["海", "ひまわり畑", "雪山"], ans: 1 },
+            { lv: 3, text: "遠くから聞こえる汽笛の音。旅人は鞄を握り直し、西へと向かう列車を待ちました。", q: "旅人はどの方角へ向かおうとしていますか？", opts: ["東", "西", "南"], ans: 1 },
+            { lv: 3, text: "夕暮れ時、影が長く伸びています。子供たちは影踏みをして遊んでいます。", q: "子供たちは何をして遊んでいますか？", opts: ["影踏み", "かけっこ", "隠れん坊"], ans: 0 },
+            { lv: 3, text: "手紙には「来月、青い鳥を探しに山へ行きます」と書かれていました。", q: "手紙の送り主はどこへ行きますか？", opts: ["海", "山", "街"], ans: 1 },
+            { lv: 3, text: "冬の夜、窓の外では雪が静かに降り積もり、街を真っ白に染め上げました。", q: "外で降っているものは何？", opts: ["雨", "雪", "雹"], ans: 1 },
+            { lv: 3, text: "ケーキ屋さんで一番人気のショートケーキは、生クリームがたっぷり乗っています。", q: "一番人気のケーキは？", opts: ["チョコケーキ", "ショートケーキ", "チーズケーキ"], ans: 1 },
+            // Level 4: Complex
+            { lv: 4, text: "図書館の奥深く、誰も読まない古い本の中に、銀色のしおりが挟まれていました。そこには謎の地図が描かれています。", q: "しおりには何が描かれていましたか？", opts: ["花の絵", "古い詩", "謎の地図"], ans: 2 },
+            { lv: 4, text: "波打ち際で拾った貝殻を耳に当てると、遠い海の記憶が囁くような音が聞こえました。それは不思議なリズムでした。", q: "貝殻から何が聞こえましたか？", opts: ["風の音", "海の記憶", "鳥の鳴き声"], ans: 1 },
+            { lv: 4, text: "時計の針が刻む音だけが響く部屋で、少年は宇宙の果てについて想像を巡らせていました。彼のノートは星の図でいっぱいです。", q: "少年は何について考えていましたか？", opts: ["過去の歴史", "深海の世界", "宇宙の果て"], ans: 2 },
+            { lv: 4, text: "祭りの夜、提灯の明かりが川面に反射し、まるで光の魚が泳いでいるようでした。人々は浴衣を着て歩いています。", q: "光の魚の正体は何ですか？", opts: ["本物の魚", "提灯の反射", "流し灯籠"], ans: 1 },
+            { lv: 4, text: "庭に咲く名もなき花は、太陽が昇ると開き、沈むと閉じます。その色は淡い月のような黄色でした。", q: "花の色はどんな黄色ですか？", opts: ["鮮やかな金", "淡い月のような", "オレンジに近い"], ans: 1 },
+            { lv: 4, text: "洞窟の奥から響く水滴の音。そのリズムは、古の時代から変わらぬ一定の間隔を保っていました。", q: "水滴の音のリズムはどうでしたか？", opts: ["不規則", "速くなっている", "一定の間隔"], ans: 2 },
+            // Level 5: Poetic/Hard
+            { lv: 5, text: "風が運んできたのは、見知らぬ異国のスパイスの香りと、かすかな楽器の音。それは北から吹き抜ける季節の変わり目の風でした。", q: "風はどの方角から吹いてきましたか？", opts: ["北", "東", "西"], ans: 0 },
+            { lv: 5, text: "鏡の中に映る自分は、自分であって自分ではないような気がした。それは、昨日読んだ哲学書の言葉が頭を離れないからだろう。", q: "何の影響で「自分ではない」と感じましたか？", opts: ["暗い部屋", "昨日読んだ本", "体調不良"], ans: 1 },
+            { lv: 5, text: "影絵のように揺れる木々。月明かりが作り出すその複雑な幾何学模様は、まるで誰かへの秘密のメッセージのようだった。", q: "木々の影は何に見えると表現されていますか？", opts: ["恐ろしい怪物", "誰かへの伝言", "秘密のメッセージ"], ans: 2 },
+            { lv: 5, text: "沈黙は雄弁に語る。何も言わない時間こそが、二人の間にあったわだかまりを溶かしていく。それは雪解けのような静かな変化だった。", q: "わだかまりを溶かしたものは何？", opts: ["謝罪の言葉", "沈黙", "贈り物"], ans: 1 },
+            { lv: 5, text: "深海に沈む難破船。そこにはかつての大航海時代の夢が、珊瑚に覆われながらも静かに眠り続けている。時間はそこだけ止まっていた。", q: "難破船は何に覆われていますか？", opts: ["海藻", "金銀財宝", "珊瑚"], ans: 1 },
+            { lv: 5, text: "記憶の糸を辿ると、幼い頃に見た虹の端っこに辿り着いた。そこには宝物ではなく、ただ温かい手の感触が残っていた。", q: "虹の端っこに辿り着いた時、何がありましたか？", opts: ["黄金の壺", "温かい手の感触", "秘密の鍵"], ans: 1 }
+        ];
+    }
+
+    pickQuestions(studyPts) {
+        let minLv = 3, maxLv = 5;
+        if (studyPts >= 6) { minLv = 1; maxLv = 3; }
+        else if (studyPts >= 3) { minLv = 2; maxLv = 4; }
+        const pool = this.quizPool.filter(q => q.lv >= minLv && q.lv <= maxLv);
+        const shuffled = pool.sort(() => Math.random() - 0.5);
+        return shuffled.slice(0, 3);
+    }
+
+    closeMinigame(resultLabel) {
+        if (!baby.minigameResults) baby.minigameResults = [];
+        baby.minigameResults.push({ toy: "reading", result: resultLabel, timestamp: Date.now() });
+        if (resultLabel === "勝利") {
+            selectedToys.push({ id: "reading_victory", name: "Perfect Clarity", labels: { study: 3, focused: 3, patient: 2 } });
+        } else if (resultLabel === "友達を置いて放棄") {
+            if (baby.affinity && baby.affinity.study !== undefined) baby.affinity.study = Math.max(0, baby.affinity.study - 2);
+        }
+        activeMinigame = null; isMinigameActive = false; minigameTriggerDrop = null;
+        document.body.classList.remove('minigame-active'); minigameWrapper.classList.remove('visible');
+        const btn = document.getElementById('minigame-quit-btn'); if (btn) btn.remove();
+        transitionMinigameToLesson();
+    }
+
+    showQuitConfirmation() {
+        if (this.isPaused) return;
+        this.isPaused = true;
+        const isFinished = this.state === 'finished' || this.state === 'failed';
+        const modal = document.createElement('div'); modal.id = 'minigame-modal';
+        const enText = isFinished ? "Return to the classroom?" : "Do you want to stop reading?";
+        const jpText = isFinished ? "教室に戻りますか？" : "読書をやめて戻りますか？";
+        modal.innerHTML = `<div class="modal-content"><p class="en">${enText}</p><p class="jp">${jpText}</p><div class="modal-buttons"><button id="modal-yes">YES</button><button id="modal-no">NO</button></div></div>`;
+        document.body.appendChild(modal);
+        document.getElementById('modal-yes').onclick = () => {
+            modal.remove();
+            let label = this.state === 'finished' ? "勝利" : "友達を置いて放棄";
+            this.closeMinigame(label);
+        };
+        document.getElementById('modal-no').onclick = () => { modal.remove(); this.isPaused = false; };
+    }
+
+    update(mouseX, mouseY) {
+        if (this.isPaused) return;
+        this.frameCount++;
+        if (this.alpha < 1) this.alpha += 0.05;
+
+        if (this.state === 'intro') {
+            this.timer++; if (this.timer > 480) { this.state = 'reading'; this.timer = 0; }
+            return;
+        }
+
+        if (this.state === 'reading') {
+            if (minigameClick) { this.state = 'question'; minigameClick = false; }
+        } else if (this.state === 'question') {
+            if (minigameClick) {
+                for (let i = 0; i < 3; i++) {
+                    const bx = this.width / 2 - 150, by = 220 + i * 50, bw = 300, bh = 40;
+                    if (mouseX > bx && mouseX < bx + bw && mouseY > by && mouseY < by + bh) {
+                        this.selectedOption = i;
+                        this.isCorrect = (i === this.questions[this.currentQIdx].ans);
+                        this.state = 'feedback';
+                        this.feedbackTimer = 90;
+                        break;
+                    }
+                }
+                minigameClick = false;
+            }
+        } else if (this.state === 'feedback') {
+            this.feedbackTimer--;
+            if (this.feedbackTimer <= 0) {
+                if (this.isCorrect) {
+                    this.currentQIdx++;
+                    this.selectedOption = -1;
+                    if (this.currentQIdx >= this.totalRequired) {
+                        this.state = 'finished';
+                        this.timer = 0; // Reset timer for result screen
+                    } else {
+                        this.state = 'reading';
+                    }
+                } else {
+                    this.state = 'failed';
+                    this.timer = 0; // Reset timer for result screen
+                }
+            }
+        } else if (this.state === 'finished' || this.state === 'failed') {
+            this.timer++;
+            if (this.timer > 180) {
+                this.alpha -= 0.05;
+                if (this.alpha <= 0) this.closeMinigame(this.state === 'finished' ? "勝利" : "敗北");
+            }
+        }
+
+        let dx = mouseX - this.player.x;
+        if (Math.abs(dx) > 10) { this.player.x += dx * 0.1; this.player.char.direction = dx < 0 ? -1 : 1; this.player.char.walkCycle += 0.15; }
+    }
+
+    draw() {
+        const c = this.ctx; c.clearRect(0, 0, this.width, this.height);
+        c.save(); c.globalAlpha = Math.max(0, this.alpha);
+        c.fillStyle = "#fdfaf0"; c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+        const grad = c.createLinearGradient(this.width/2-40, 0, this.width/2+40, 0);
+        grad.addColorStop(0, "rgba(0,0,0,0)"); grad.addColorStop(0.5, "rgba(0,0,0,0.06)"); grad.addColorStop(1, "rgba(0,0,0,0)");
+        c.fillStyle = grad; c.fillRect(this.width/2-40, 0, 80, this.height);
+
+        c.save(); c.translate(this.player.x, this.player.y); c.scale(0.6, 0.6); this.player.char.draw(c); c.restore();
+
+        const q = this.questions[this.currentQIdx];
+        
+        if (q && (this.state === 'reading' || this.state === 'question' || this.state === 'feedback')) {
+            c.fillStyle = "#3a2e22"; c.textAlign = "center"; c.textBaseline = "middle";
+            if (this.state === 'reading') {
+                c.font = "bold 18px 'Zen Maru Gothic'";
+                this.wrapText(q.text, this.width / 2, this.height / 2 - 20, 400, 28);
+                c.fillStyle = "rgba(0,0,0,0.3)"; c.font = "12px sans-serif";
+                c.fillText("クリックしてページをめくる", this.width / 2, this.height - 40);
+            } else if (this.state === 'question' || this.state === 'feedback') {
+                c.font = "bold 20px 'Zen Maru Gothic'";
+                c.fillText(q.q, this.width / 2, 140);
+                for (let i = 0; i < 3; i++) {
+                    const bx = this.width / 2 - 150, by = 220 + i * 50, bw = 300, bh = 40;
+                    c.fillStyle = (this.state === 'feedback' && i === q.ans) ? "#50ff50" : 
+                                 (this.state === 'feedback' && i === this.selectedOption ? "#ff5050" : "#fff");
+                    c.beginPath(); c.roundRect(bx, by, bw, bh, 5); c.fill();
+                    c.strokeStyle = "#9a8a68"; c.lineWidth = 2; c.stroke();
+                    c.fillStyle = "#3a2e22"; c.font = "16px 'Zen Maru Gothic'";
+                    c.fillText(q.opts[i], this.width / 2, by + bh / 2);
+                }
+            }
+        }
+
+        if (this.state === 'intro') {
+            c.fillStyle = "rgba(0,0,0,0.65)"; c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+            const totalIntroFrames = 480, countdownStartFrame = 300;
+            if (this.timer < countdownStartFrame) {
+                c.fillStyle = "#fff"; 
+                c.textAlign = "center";
+                c.textBaseline = "middle";
+                c.font = "800 42px 'Zen Maru Gothic'";
+                c.fillText("READING COMPREHENSION", this.width/2, this.height/2-40);
+                c.font = "600 18px 'Zen Maru Gothic'"; c.fillText("文章を読んで、その後のクイズに答えよう", this.width/2, this.height/2+10);
+                c.fillStyle = "#ffdf00"; c.font = "700 16px 'Zen Maru Gothic'"; c.fillText("※全3問。一回でも間違えると失敗です。集中して読もう！", this.width/2, this.height/2+45);
+            } else {
+                const ct = Math.ceil((totalIntroFrames - this.timer) / 60), pr = (this.timer % 60) / 60;
+                c.fillStyle = "#fff";
+                c.textAlign = "center";
+                c.textBaseline = "middle";
+                c.font = `900 ${80+(pr*40)}px 'Zen Maru Gothic'`; c.globalAlpha = Math.max(0, 1-pr); if (ct >= 1) c.fillText(ct.toString(), this.width/2, this.height/2);
+            }
+            if (!document.getElementById('minigame-quit-btn')) {
+                const btn = document.createElement('button'); btn.id = 'minigame-quit-btn'; btn.innerText = "教室に戻る"; btn.onclick = () => this.showQuitConfirmation(); document.body.appendChild(btn);
+            }
+        } else if (this.state === 'finished' || this.state === 'failed') {
+            c.fillStyle = `rgba(0,0,0,${this.state === 'finished' ? 0.8 : 0.9})`; c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+            c.fillStyle = this.state === 'finished' ? "#ffdf00" : "#ff5050";
+            c.font = "900 64px 'Zen Maru Gothic'";
+            c.textAlign = "center";
+            c.textBaseline = "middle";
+            c.fillText(this.state === 'finished' ? "PERFECT!" : "FAILED", this.width/2, this.height/2);
+            c.fillStyle = "#fff"; c.font = "bold 20px 'Zen Maru Gothic'";
+            c.fillText(this.state === 'finished' ? "素晴らしい理解力です！" : "読み直しが必要かもしれません...", this.width/2, this.height/2 + 60);
+        }
+        c.restore();
+    }
+
+    wrapText(text, x, y, maxWidth, lineHeight) {
+        const words = text.split(''); let line = '';
+        for (let n = 0; n < words.length; n++) {
+            let testLine = line + words[n];
+            let metrics = this.ctx.measureText(testLine);
+            if (metrics.width > maxWidth && n > 0) {
+                this.ctx.fillText(line, x, y); line = words[n]; y += lineHeight;
+            } else { line = testLine; }
+        }
+        this.ctx.fillText(line, x, y);
+    }
+}
+
+// ==========================================
+// Minigame: Chatting (Echo Chat)
+// ==========================================
+class ChattingMinigame {
+    constructor(playerChar, ctx) {
+        this.ctx = ctx;
+        this.width = ctx.canvas.width;
+        this.height = ctx.canvas.height;
+        this.alpha = 0;
+        this.state = 'intro';
+        this.timer = 0;
+
+        const getStat = (key) => selectedToys.reduce((sum, t) => sum + (t.labels && t.labels[key] ? t.labels[key] : 0), 0);
+        const socialPts = getStat('social');
+        const expressivePts = getStat('expressive');
+
+        this.player = {
+            char: playerChar,
+            x: this.width / 2,
+            y: this.height - 20,
+            judgeTolerance: 1.0 + (expressivePts * 0.1) 
+        };
+
+        this.friends = [
+            { char: this.createFriend(0), x: 40, y: 340, side: 'left' },
+            { char: this.createFriend(1), x: this.width - 40, y: 340, side: 'right' }
+        ];
+
+        this.timeRemaining = 20;
+        this.lives = 3;
+        this.symbols = [];
+        this.currentPath = [];
+        this.isPaused = false;
+        this.frameCount = 0;
+        this.spawnInterval = 85 - (socialPts * 3);
+        this.symbolsToSpawn = 18;
+        this.spawnCount = 0;
+        this.shapes = [
+            { id: 'circle', label: '◯' },
+            { id: 'v',      label: 'V' },
+            { id: 'line',   label: 'ー' },
+            { id: 'triangle', label: '△' }
+        ];
+        this.inkDrops = [];
+        this.shakeTimer = 0;
+        this.damageFlash = 0;
+    }
+
+    createFriend(idx) {
+        const colors = idx === 0 ? 
+            { body: "hsl(200, 60%, 70%)", limb: "hsl(200, 50%, 50%)", head: "hsl(25, 70%, 85%)", skin: "hsl(25, 70%, 85%)", cheek: "hsl(350, 70%, 85%)", hair: "hsl(40, 30%, 40%)" } :
+            { body: "hsl(140, 50%, 70%)", limb: "hsl(140, 40%, 50%)", head: "hsl(30, 60%, 85%)", skin: "hsl(30, 60%, 85%)", cheek: "hsl(350, 60%, 85%)", hair: "hsl(20, 40%, 30%)" };
+        let f = new Child(colors);
+        f.faceType = (idx + 2) % 5; f.isBoy = idx % 2 === 0;
+        return f;
+    }
+
+    spawnSymbol() {
+        if (this.spawnCount >= this.symbolsToSpawn) return;
+        const sideIdx = Math.random() < 0.5 ? 0 : 1;
+        const friend = this.friends[sideIdx];
+        const shape = this.shapes[Math.floor(Math.random() * this.shapes.length)];
+        const spawnX = sideIdx === 0 ? friend.x + 100 : friend.x - 100;
+        const spawnY = friend.y - 120;
+        this.symbols.push({
+            id: Date.now(), x: spawnX, y: spawnY, startX: spawnX, startY: spawnY,
+            targetX: this.width / 2, targetY: this.height - 100,
+            shape: shape.id, label: shape.label, progress: 0,
+            speed: 0.004 + (this.spawnCount * 0.0002), alive: true
+        });
+        this.spawnCount++;
+    }
+
+    closeMinigame(resultLabel) {
+        if (!baby.minigameResults) baby.minigameResults = [];
+        baby.minigameResults.push({ toy: "chatting", result: resultLabel, timestamp: Date.now() });
+        if (resultLabel === "勝利") {
+            selectedToys.push({ id: "chatting_victory", name: "Deep Connection", labels: { social: 3, expressive: 3, optimistic: 2 } });
+        }
+        activeMinigame = null; isMinigameActive = false; minigameTriggerDrop = null;
+        document.body.classList.remove('minigame-active'); minigameWrapper.classList.remove('visible');
+        const btn = document.getElementById('minigame-quit-btn'); if (btn) btn.remove();
+        transitionMinigameToLesson();
+    }
+
+    showQuitConfirmation() {
+        if (this.isPaused) return;
+        this.isPaused = true;
+        const isFinished = this.state === 'finished' || this.state === 'failed';
+        const modal = document.createElement('div'); modal.id = 'minigame-modal';
+        const enText = isFinished ? "Return to the classroom?" : "Do you want to stop talking?";
+        const jpText = isFinished ? "教室に戻りますか？" : "おしゃべりをやめて戻りますか？";
+        modal.innerHTML = `<div class="modal-content"><p class="en">${enText}</p><p class="jp">${jpText}</p><div class="modal-buttons"><button id="modal-yes">YES</button><button id="modal-no">NO</button></div></div>`;
+        document.body.appendChild(modal);
+        document.getElementById('modal-yes').onclick = () => {
+            modal.remove();
+            let label = this.state === 'finished' ? "勝利" : "友達を置いて放棄";
+            this.closeMinigame(label);
+        };
+        document.getElementById('modal-no').onclick = () => { modal.remove(); this.isPaused = false; };
+    }
+
+    recognizeShape(path) {
+        if (path.length < 6) return null;
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        path.forEach(p => { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; });
+        const w = maxX - minX, h = maxY - minY, centerX = (minX + maxX) / 2, centerY = (minY + maxY) / 2;
+        const size = Math.max(w, h); if (size < 15) return null;
+        const start = path[0], end = path[path.length - 1];
+        const distStartEnd = Math.hypot(start.x - end.x, start.y - end.y);
+        const isClosed = distStartEnd < size * 0.6;
+        if (h < w * 0.4) return 'line';
+        if (isClosed) {
+            let distSum = 0; path.forEach(p => { distSum += Math.hypot(p.x - centerX, p.y - centerY); });
+            const avgDist = distSum / path.length;
+            let variance = 0; path.forEach(p => { variance += Math.abs(Math.hypot(p.x - centerX, p.y - centerY) - avgDist); });
+            const roundness = variance / (avgDist * path.length);
+            if (roundness < 0.12) return 'circle'; 
+            return 'triangle';
+        } else {
+            const mid = path[Math.floor(path.length / 2)];
+            if (mid.y > start.y + 10 && mid.y > end.y + 10) return 'v';
+            return 'line';
+        }
+    }
+
+    update(mouseX, mouseY) {
+        if (this.isPaused) return;
+        this.frameCount++;
+        if (this.alpha < 1) this.alpha += 0.05;
+        if (this.shakeTimer > 0) this.shakeTimer--;
+        if (this.damageFlash > 0) this.damageFlash -= 0.05;
+        if (this.state === 'intro') {
+            this.timer++; if (this.timer > 480) { this.state = 'playing'; this.timer = 0; }
+            return;
+        }
+        if (this.state === 'finished' || this.state === 'failed') {
+            this.timer++; if (this.timer > 180) { this.alpha -= 0.05; if (this.alpha <= 0) this.closeMinigame(this.state === 'finished' ? "勝利" : "敗北"); }
+            return;
+        }
+        if (this.state === 'playing') {
+            if (this.frameCount % 60 === 0 && this.timeRemaining > 0) { this.timeRemaining--; if (this.timeRemaining <= 0) this.state = 'finished'; }
+            if (this.frameCount % this.spawnInterval === 0) this.spawnSymbol();
+            this.symbols.forEach(s => {
+                if (!s.alive) return;
+                s.progress += s.speed; s.x = s.startX + (s.targetX - s.startX) * s.progress; s.y = s.startY + (s.targetY - s.startY) * s.progress;
+                const distToCenter = Math.hypot(s.x - this.width/2, s.y - (this.height - 100));
+                if (s.progress >= 1.0 || distToCenter < 40) {
+                    s.alive = false; this.lives--; this.shakeTimer = 15; this.damageFlash = 0.4;
+                    if (this.lives <= 0) { this.state = 'failed'; this.timer = 0; }
+                }
+            });
+            if (orbDragging) { this.currentPath.push({ x: mouseX, y: mouseY }); }
+            else if (this.currentPath.length > 0) {
+                const recognized = this.recognizeShape(this.currentPath);
+                if (recognized) {
+                    const hit = this.symbols.find(s => s.alive && s.shape === recognized);
+                    if (hit) { hit.alive = false; for(let i=0; i<8; i++) { this.inkDrops.push({ x: hit.x, y: hit.y, vx: (Math.random()-0.5)*10, vy: (Math.random()-0.5)*10, life: 1.0, color: '#f06292' }); } }
+                }
+                this.currentPath = [];
+            }
+            this.inkDrops.forEach(p => { p.x += p.vx; p.y += p.vy; p.life -= 0.03; });
+            this.inkDrops = this.inkDrops.filter(p => p.life > 0);
+        }
+    }
+
+    draw() {
+        const c = this.ctx; c.clearRect(0, 0, this.width, this.height);
+        c.save(); if (this.shakeTimer > 0) c.translate((Math.random()-0.5)*10, (Math.random()-0.5)*10);
+        c.globalAlpha = Math.max(0, this.alpha);
+        c.fillStyle = "#ede5da"; c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+        c.fillStyle = "#dccca8"; c.fillRect(0, this.height * 0.6, this.width, this.height * 0.4); 
+        c.strokeStyle = "rgba(0,0,0,0.05)"; c.lineWidth = 2; c.beginPath(); c.moveTo(0, this.height * 0.6); c.lineTo(this.width, this.height * 0.6); c.stroke();
+        c.strokeStyle = "rgba(255, 80, 80, 0.3)"; c.lineWidth = 4; c.setLineDash([10, 10]); c.beginPath(); c.arc(this.width/2, this.height - 100, 120, Math.PI, 0); c.stroke(); c.setLineDash([]);
+        this.friends.forEach(f => {
+            c.save(); c.translate(f.x, f.y); c.scale(f.side === 'left' ? 2.2 : -2.2, 2.2); f.char.x = 0; f.char.y = 0; f.char.draw(c); c.restore();
+        });
+        c.save(); c.translate(this.width / 2, this.height + 60); c.scale(2.8, 2.8);
+        const myColors = babyColorScheme; c.fillStyle = myColors.skin; c.beginPath(); c.arc(0, -40, 30, 0, Math.PI*2); c.fill(); c.fillStyle = myColors.hair; c.beginPath(); c.arc(0, -42, 32, Math.PI, 0); c.fill();
+        c.restore();
+        this.symbols.forEach(s => {
+            if (!s.alive) return;
+            c.save(); c.translate(s.x, s.y); c.fillStyle = "#fff"; c.beginPath(); c.arc(0, 0, 30, 0, Math.PI*2); c.fill(); c.strokeStyle = "#f06292"; c.lineWidth = 3; c.stroke(); c.fillStyle = "#f06292"; c.font = "bold 24px sans-serif"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText(s.label, 0, 0); c.restore();
+        });
+        if (this.currentPath.length > 1) {
+            c.strokeStyle = "rgba(240, 98, 146, 0.6)"; c.lineWidth = 8; c.lineCap = "round"; c.lineJoin = "round"; c.beginPath(); c.moveTo(this.currentPath[0].x, this.currentPath[0].y); this.currentPath.forEach(p => c.lineTo(p.x, p.y)); c.stroke();
+        }
+        if (this.damageFlash > 0) { c.fillStyle = `rgba(255, 0, 0, ${this.damageFlash})`; c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill(); }
+        this.inkDrops.forEach(p => { c.fillStyle = p.color; c.globalAlpha = p.life; c.beginPath(); c.arc(p.x, p.y, 4, 0, Math.PI*2); c.fill(); });
+        c.fillStyle = "#5a4a3e"; c.font = "bold 20px 'Zen Maru Gothic'"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText(`TIME: ${this.timeRemaining}`, this.width/2, 40);
+        for(let i=0; i<3; i++) { c.fillStyle = i < this.lives ? "#f06292" : "#ccc"; c.font = "24px sans-serif"; c.fillText("❤", this.width/2 - 40 + i*40, 80); }
+        if (this.state === 'intro') {
+            c.fillStyle = "rgba(0,0,0,0.65)"; c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+            const totalIntroFrames = 480, countdownStartFrame = 300;
+            if (this.timer < countdownStartFrame) {
+                c.fillStyle = "#fff"; c.textAlign = "center"; c.textBaseline = "middle"; c.font = "800 42px 'Zen Maru Gothic'"; c.fillText("ECHO CHAT", this.width/2, this.height/2-40);
+                c.font = "600 18px 'Zen Maru Gothic'"; c.fillText("友達との会話をリズムよく繋げよう", this.width/2, this.height/2+10);
+                c.fillStyle = "#ffdf00"; c.font = "700 16px 'Zen Maru Gothic'"; c.fillText("※赤いラインに届く前に記号を描いて！(ライフ:3)", this.width/2, this.height/2+45);
+            } else {
+                const ct = Math.ceil((totalIntroFrames - this.timer) / 60), pr = (this.timer % 60) / 60;
+                c.fillStyle = "#fff"; c.textAlign = "center"; c.textBaseline = "middle"; c.font = `900 ${80+(pr*40)}px 'Zen Maru Gothic'`; c.globalAlpha = Math.max(0, 1-pr); if (ct >= 1) c.fillText(ct.toString(), this.width/2, this.height/2);
+            }
+            if (!document.getElementById('minigame-quit-btn')) { const btn = document.createElement('button'); btn.id = 'minigame-quit-btn'; btn.innerText = "教室に戻る"; btn.onclick = () => this.showQuitConfirmation(); document.body.appendChild(btn); }
+        } else if (this.state === 'finished' || this.state === 'failed') {
+            c.fillStyle = "rgba(0,0,0,0.85)"; c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+            const isWin = this.state === 'finished';
+            c.fillStyle = isWin ? "#ffdf00" : "#ff5050"; c.textAlign = "center"; c.textBaseline = "middle";
+            c.font = "900 64px 'Zen Maru Gothic'"; c.fillText(isWin ? "GREAT CHAT!" : "LOST TRACK...", this.width/2, this.height/2 - 20);
+            c.fillStyle = "#fff"; c.font = "bold 24px 'Zen Maru Gothic'";
+            c.fillText(isWin ? "軽妙なトークでした！" : "今日はあんまり話せなかった・・・", this.width/2, this.height/2 + 50);
+        }
+        c.restore();
+    }
+}
+
+// ==========================================
+// Minigame: Doodle (Afterschool Masterpiece)
+// ==========================================
+class DoodleMinigame {
+    constructor(playerChar, ctx) {
+        this.ctx = ctx;
+        this.width = ctx.canvas.width;
+        this.height = ctx.canvas.height;
+        this.alpha = 0;
+        this.state = 'intro';
+        this.timer = 0;
+        this.bookCounter = 0;
+
+        const getStat = (key) => selectedToys.reduce((sum, t) => sum + (t.labels && t.labels[key] ? t.labels[key] : 0), 0);
+        const creativePts = getStat('creative');
+        const organizedPts = getStat('organized');
+
+        this.player = {
+            char: playerChar,
+            x: 100, y: this.height - 80,
+            threshold: 0.5 - (creativePts * 0.04), 
+            showGrid: organizedPts >= 4
+        };
+
+        this.timeRemaining = 35;
+        this.chalks = [
+            { id: 'white',  color: '#ffffff', label: '白 / WHITE' },
+            { id: 'yellow', color: '#ffeb3b', label: '黄 / YELLOW' },
+            { id: 'red',    color: '#ff5252', label: '赤 / RED' },
+            { id: 'blue',   color: '#40c4ff', label: '青 / BLUE' },
+            { id: 'green',  color: '#69f0ae', label: '緑 / GREEN' },
+            { id: 'eraser', color: 'eraser',  label: '消しゴム / ERASER' }
+        ];
+        this.selectedChalk = 0;
+        this.strokes = []; 
+        this.isDrawing = false;
+
+        this.samples = [
+            { name: "Mountain & Sun", shapes: [
+                { type: 'mountain', color: '#69f0ae', x: 100, y: 120, size: 60 },
+                { type: 'snow',     color: '#ffffff', x: 100, y: 120, size: 20 },
+                { type: 'sun',      color: '#ff5252', x: 150, y: 50,  size: 25 },
+                { type: 'sunray',   color: '#ffeb3b', x: 150, y: 50,  size: 35 }
+            ]},
+            { name: "Ship on Sea", shapes: [
+                { type: 'sea',      color: '#40c4ff', x: 100, y: 140, size: 80 },
+                { type: 'waves',    color: '#ffffff', x: 100, y: 145, size: 70 },
+                { type: 'ship_body',color: '#ffffff', x: 100, y: 110, size: 40 },
+                { type: 'chimney',  color: '#ff5252', x: 110, y: 90,  size: 10 }
+            ]}
+        ];
+        this.targetSample = this.samples[Math.floor(Math.random() * this.samples.length)];
+        this.score = 0; this.isPaused = false; this.frameCount = 0;
+    }
+
+    closeMinigame(resultLabel) {
+        if (!baby.minigameResults) baby.minigameResults = [];
+        baby.minigameResults.push({ toy: "doodle", result: resultLabel, timestamp: Date.now() });
+        if (resultLabel === "勝利") {
+            selectedToys.push({ id: "doodle_victory", name: "Artistic Soul", labels: { creative: 3, expressive: 3, adventurous: 2 } });
+        } else if (resultLabel === "友達を置いて放棄") {
+            if (baby.affinity && baby.affinity.creative !== undefined) baby.affinity.creative = Math.max(0, baby.affinity.creative - 2);
+        }
+        activeMinigame = null; isMinigameActive = false; minigameTriggerDrop = null;
+        document.body.classList.remove('minigame-active'); minigameWrapper.classList.remove('visible');
+        const btn = document.getElementById('minigame-quit-btn'); if (btn) btn.remove();
+        transitionMinigameToLesson();
+    }
+
+    showQuitConfirmation() {
+        if (this.isPaused) return;
+        this.isPaused = true;
+        const isFinished = this.state === 'finished' || this.state === 'failed';
+        const modal = document.createElement('div'); modal.id = 'minigame-modal';
+        const enText = isFinished ? "Return to the classroom?" : "Do you want to stop drawing?";
+        const jpText = isFinished ? "教室に戻りますか？" : "お絵描きをやめて戻りますか？";
+        modal.innerHTML = `<div class="modal-content"><p class="en">${enText}</p><p class="jp">${jpText}</p><div class="modal-buttons"><button id="modal-yes">YES</button><button id="modal-no">NO</button></div></div>`;
+        document.body.appendChild(modal);
+        document.getElementById('modal-yes').onclick = () => {
+            modal.remove();
+            let label = this.state === 'finished' ? "勝利" : "友達を置いて放棄";
+            this.closeMinigame(label);
+        };
+        document.getElementById('modal-no').onclick = () => { modal.remove(); this.isPaused = false; };
+    }
+
+    evaluate() {
+        let score = 0;
+        if (this.strokes.length > 3) score += 50;
+        const colorsUsed = new Set(this.strokes.filter(s => s.color !== 'eraser').map(s => s.color)).size;
+        score += Math.min(3, colorsUsed) * 15;
+        const totalPoints = this.strokes.reduce((acc, s) => acc + s.points.length, 0);
+        if (totalPoints > 30) score += 20;
+        this.score = Math.min(1.0, score / 100);
+        return this.score >= this.player.threshold;
+    }
+
+    update(mouseX, mouseY) {
+        if (this.isPaused) return;
+        this.frameCount++;
+        if (this.alpha < 1) this.alpha += 0.05;
+        if (this.state === 'intro') {
+            this.timer++; if (this.timer > 480) { this.state = 'playing'; this.timer = 0; }
+            return;
+        }
+        if (this.state === 'finished' || this.state === 'failed') {
+            this.timer++; if (this.timer > 180) { this.alpha -= 0.05; if (this.alpha <= 0) this.closeMinigame(this.state === 'finished' ? "勝利" : "不合格"); }
+            return;
+        }
+        if (this.state === 'playing') {
+            if (this.frameCount % 60 === 0 && this.timeRemaining > 0) {
+                this.timeRemaining--; if (this.timeRemaining <= 0) {
+                    const passed = this.evaluate(); this.state = passed ? 'finished' : 'failed'; this.timer = 0;
+                }
+            }
+            const drawArea = { x: 280, y: 60, w: 380, h: 280 };
+            if (orbDragging && mouseX > drawArea.x && mouseX < drawArea.x + drawArea.w && mouseY > drawArea.y && mouseY < drawArea.y + drawArea.h) {
+                if (!this.isDrawing) {
+                    this.strokes.push({ points: [], color: this.chalks[this.selectedChalk].color });
+                    this.isDrawing = true;
+                }
+                this.strokes[this.strokes.length - 1].points.push({ x: mouseX, y: mouseY });
+            } else { this.isDrawing = false; }
+            if (minigameClick) {
+                this.chalks.forEach((c, i) => {
+                    const bx = 160 + i * 70, by = this.height - 60, bw = 60, bh = 40;
+                    if (mouseX > bx && mouseX < bx + bw && mouseY > by && mouseY < by + bh) this.selectedChalk = i;
+                });
+                const fbx = this.width - 140, fby = this.height - 60, fbw = 100, fbh = 40;
+                if (mouseX > fbx && mouseX < fbx + fbw && mouseY > fby && mouseY < fby + fbh) {
+                    const passed = this.evaluate(); this.state = passed ? 'finished' : 'failed'; this.timer = 0;
+                }
+                minigameClick = false;
+            }
+            let dx = mouseX - this.player.x;
+            if (Math.abs(dx) > 10) { this.player.x += dx * 0.1; this.player.char.direction = dx < 0 ? -1 : 1; this.player.char.walkCycle += 0.15; }
+        }
+    }
+
+    draw() {
+        const c = this.ctx; c.clearRect(0, 0, this.width, this.height);
+        c.save(); c.globalAlpha = Math.max(0, this.alpha);
+
+        // Blackboard with chalk dust texture
+        c.fillStyle = "#2c5040"; c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+        for(let i=0; i<200; i++) {
+            c.fillStyle = "rgba(255,255,255,0.02)";
+            c.beginPath(); c.arc(Math.random()*this.width, Math.random()*this.height, Math.random()*2, 0, Math.PI*2); c.fill();
+        }
+        c.strokeStyle = "#9a8a68"; c.lineWidth = 15; c.stroke();
+
+        // Grey Sample Paper
+        const paperX = 40, paperY = 60, paperW = 200, paperH = 280;
+        c.fillStyle = "#cfd8dc"; c.beginPath(); c.roundRect(paperX, paperY, paperW, paperH, 2); c.fill();
+        // Magnets
+        c.fillStyle = "#f44336"; c.beginPath(); c.arc(paperX+20, paperY+15, 8, 0, Math.PI*2); c.fill();
+        c.fillStyle = "#2196f3"; c.beginPath(); c.arc(paperX+paperW-20, paperY+paperH-15, 8, 0, Math.PI*2); c.fill();
+
+        c.save(); c.translate(paperX, paperY); c.fillStyle = "#37474f"; c.font = "800 14px 'Zen Maru Gothic'"; c.textAlign = "center";
+        c.fillText("お手本 / SAMPLE", paperW/2, 35); this.drawSampleIllustration(c, this.targetSample, paperW, paperH); c.restore();
+
+        // Canvas Area
+        const drawX = 280, drawY = 60, drawW = 380, drawH = 280;
+        c.strokeStyle = "rgba(255,255,255,0.08)"; c.lineWidth = 1; c.strokeRect(drawX, drawY, drawW, drawH);
+        if (this.player.showGrid && this.state === 'playing') {
+            c.strokeStyle = "rgba(255,255,255,0.03)";
+            for(let i=1; i<4; i++) {
+                c.beginPath(); c.moveTo(drawX+i*drawW/4, drawY); c.lineTo(drawX+i*drawW/4, drawY+drawH); c.stroke();
+                c.beginPath(); c.moveTo(drawX, drawY+i*drawH/4); c.lineTo(drawX+drawW, drawY+i*drawH/4); c.stroke();
+            }
+        }
+
+        // Draw Strokes with grainy texture
+        c.save(); c.lineCap = "round"; c.lineJoin = "round";
+        this.strokes.forEach(s => {
+            if (s.points.length < 2) return;
+            if (s.color === 'eraser') { c.globalCompositeOperation = 'destination-out'; c.lineWidth = 30; }
+            else { c.globalCompositeOperation = 'source-over'; c.strokeStyle = s.color; c.lineWidth = 5; }
+            c.beginPath(); c.moveTo(s.points[0].x, s.points[0].y);
+            s.points.forEach(p => c.lineTo(p.x, p.y)); c.stroke();
+        });
+        c.restore();
+        c.globalCompositeOperation = 'source-over';
+
+        // Sakura Finish Button
+        const fbx = this.width - 140, fby = this.height - 65, fbw = 100, fbh = 50;
+        c.fillStyle = "#ff80ab"; c.beginPath(); c.roundRect(fbx, fby, fbw, fbh, 12); c.fill();
+        c.strokeStyle = "#fff"; c.lineWidth = 3; c.stroke();
+        c.fillStyle = "#fff"; c.font = "800 14px 'Zen Maru Gothic'"; c.textAlign = "center";
+        c.fillText("完成！", fbx + fbw/2, fby + 20);
+        c.font = "800 10px sans-serif"; c.fillText("FINISH", fbx + fbw/2, fby + 38);
+
+        // Tools
+        this.chalks.forEach((chalk, i) => {
+            const bx = 160 + i * 70, by = this.height - 60, bw = 60, bh = 40;
+            c.fillStyle = chalk.id === 'eraser' ? "#eceff1" : chalk.color;
+            c.beginPath(); c.roundRect(bx, by, bw, bh, 8); c.fill();
+            if (this.selectedChalk === i) { c.strokeStyle = "#ffdf00"; c.lineWidth = 4; c.strokeRect(bx-3, by-3, bw+6, bh+6); }
+            c.fillStyle = "#455a64"; c.font = "800 9px 'Zen Maru Gothic'"; c.textAlign = "center";
+            c.fillText(chalk.label.split(' / ')[0], bx + bw/2, by + bh/2 + 4);
+        });
+
+        c.fillStyle = "#fff"; c.font = "bold 20px 'Zen Maru Gothic'"; c.textAlign = "right"; c.fillText(`TIME: ${this.timeRemaining}`, this.width - 45, 45);
+
+        if (this.state === 'intro') {
+            c.fillStyle = "rgba(0,0,0,0.7)"; c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+            const totalIntroFrames = 480, countdownStartFrame = 300;
+            if (this.timer < countdownStartFrame) {
+                c.fillStyle = "#fff"; c.textAlign = "center"; c.textBaseline = "middle";
+                c.font = "800 42px 'Zen Maru Gothic'"; c.fillText("AFTERSCHOOL MASTERPIECE", this.width/2, this.height/2-40);
+                c.font = "600 18px 'Zen Maru Gothic'"; c.fillText("左側の見本を黒板に描き写そう", this.width/2, this.height/2+15);
+                c.fillStyle = "#ffdf00"; c.font = "700 16px 'Zen Maru Gothic'"; c.fillText("※完成したら右下の「完成！」ボタンを押してね", this.width/2, this.height/2+55);
+            } else {
+                const ct = Math.ceil((totalIntroFrames - this.timer) / 60), pr = (this.timer % 60) / 60;
+                c.fillStyle = "#fff"; c.textAlign = "center"; c.textBaseline = "middle";
+                c.font = `900 ${80+(pr*40)}px 'Zen Maru Gothic'`; c.globalAlpha = Math.max(0, 1-pr); if (ct >= 1) c.fillText(ct.toString(), this.width/2, this.height/2);
+            }
+            if (!document.getElementById('minigame-quit-btn')) { const btn = document.createElement('button'); btn.id = 'minigame-quit-btn'; btn.innerText = "教室に戻る"; btn.onclick = () => this.showQuitConfirmation(); document.body.appendChild(btn); }
+        } else if (this.state === 'finished' || this.state === 'failed') {
+            c.fillStyle = "rgba(0,0,0,0.85)"; c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+            const isWin = this.state === 'finished';
+            c.save(); c.translate(this.width/2, this.height/2 + 100); this.drawTeacher(c, isWin); c.restore();
+            c.fillStyle = isWin ? "#ffdf00" : "#ff5050"; c.textAlign = "center"; c.textBaseline = "middle";
+            c.font = "900 72px 'Zen Maru Gothic'"; c.fillText(isWin ? "PASSED!" : "REDO!", this.width/2, this.height/2 - 110);
+            c.fillStyle = "#fff"; c.font = "bold 26px 'Zen Maru Gothic'";
+            c.fillText(isWin ? "素晴らしい芸術センスです！" : "もう一度練習が必要ですね...", this.width/2, this.height/2 - 45);
+        }
+        c.restore();
+    }
+
+    drawSampleIllustration(c, sample, w, h) {
+        sample.shapes.forEach(s => {
+            c.fillStyle = s.color;
+            if (s.type === 'mountain') { 
+                c.beginPath(); c.moveTo(s.x-s.size*0.8, s.y+s.size); c.lineTo(s.x, s.y); c.lineTo(s.x+s.size*0.8, s.y+s.size); c.fill(); 
+            } else if (s.type === 'snow') {
+                c.beginPath(); c.moveTo(s.x-s.size, s.y+s.size); c.lineTo(s.x, s.y); c.lineTo(s.x+s.size, s.y+s.size); c.fill();
+            } else if (s.type === 'sun') { 
+                c.beginPath(); c.arc(s.x, s.y, s.size, 0, Math.PI*2); c.fill(); 
+            } else if (s.type === 'sunray') {
+                c.strokeStyle = s.color; c.lineWidth = 3;
+                for(let i=0; i<8; i++) {
+                    const a = i * Math.PI/4;
+                    c.beginPath(); c.moveTo(s.x+Math.cos(a)*s.size*0.8, s.y+Math.sin(a)*s.size*0.8);
+                    c.lineTo(s.x+Math.cos(a)*s.size*1.2, s.y+Math.sin(a)*s.size*1.2); c.stroke();
+                }
+            } else if (s.type === 'sea') { 
+                c.fillRect(s.x-w*0.4, s.y, w*0.8, s.size*0.5); 
+            } else if (s.type === 'waves') {
+                c.strokeStyle = s.color; c.lineWidth = 2;
+                for(let i=0; i<3; i++) {
+                    c.beginPath(); c.moveTo(s.x-w*0.35, s.y+i*10); 
+                    for(let j=0; j<5; j++) c.quadraticCurveTo(s.x-w*0.35+(j*30)+15, s.y+i*10-10, s.x-w*0.35+(j*30)+30, s.y+i*10);
+                    c.stroke();
+                }
+            } else if (s.type === 'ship_body') { 
+                c.beginPath(); c.moveTo(s.x-s.size*0.8, s.y); c.lineTo(s.x+s.size*0.8, s.y); c.lineTo(s.x+s.size*0.5, s.y+s.size*0.4); c.lineTo(s.x-s.size*0.5, s.y+s.size*0.4); c.fill();
+                c.fillStyle = "#333"; c.fillRect(s.x-s.size*0.2, s.y-s.size*0.4, s.size*0.4, s.size*0.4); 
+            } else if (s.type === 'chimney') {
+                c.fillRect(s.x, s.y, s.size, s.size*2);
+                c.fillStyle = "rgba(0,0,0,0.2)"; c.beginPath(); c.arc(s.x+s.size/2, s.y-5, 5, 0, Math.PI*2); c.fill();
+            }
+        });
+    }
+
+    drawTeacher(c, isHappy) {
+        const colors = { body: "#444", limb: "#333", skin: "#ffe0bd", hair: "#554", cheek: "#ffb0b0" };
+        let teacher = new Child(colors); teacher.faceType = isHappy ? 0 : 4; 
+        teacher.draw(c);
+    }
+}
+// ==========================================
+// Minigame: Organ (Sync Melody)
+// ==========================================
+class OrganMinigame {
+    constructor(playerChar, ctx) {
+        this.ctx = ctx;
+        this.width = ctx.canvas.width;
+        this.height = ctx.canvas.height;
+        this.alpha = 0;
+        this.state = 'intro';
+        this.timer = 0;
+
+        const getStat = (key) => selectedToys.reduce((sum, t) => sum + (t.labels && t.labels[key] ? t.labels[key] : 0), 0);
+        const focusedPts = getStat('focused');
+        const expressivePts = getStat('expressive');
+
+        this.player = {
+            char: playerChar,
+            x: 120, y: this.height - 100,
+            timingWindow: 25 + (focusedPts * 4), 
+            flickTolerance: 0.6 + (expressivePts * 0.05)
+        };
+
+        this.scoreData = [
+            {n:'C4', d:1}, {n:'C4', d:1}, {n:'G4', d:1}, {n:'G4', d:1}, {n:'A4', d:1}, {n:'A4', d:1}, {n:'G4', d:2},
+            {n:'F4', d:1}, {n:'F4', d:1}, {n:'E4', d:1}, {n:'E4', d:1}, {n:'D4', d:1}, {n:'D4', d:1}, {n:'C4', d:2},
+            {n:'G4', d:1}, {n:'G4', d:1}, {n:'F4', d:1}, {n:'F4', d:1}, {n:'E4', d:1}, {n:'E4', d:1}, {n:'D4', d:2},
+            {n:'G4', d:1}, {n:'G4', d:1}, {n:'F4', d:1}, {n:'F4', d:1}, {n:'E4', d:1}, {n:'E4', d:1}, {n:'D4', d:2},
+            {n:'C4', d:1}, {n:'C4', d:1}, {n:'G4', d:1}, {n:'G4', d:1}, {n:'A4', d:1}, {n:'A4', d:1}, {n:'G4', d:2},
+            {n:'F4', d:1}, {n:'F4', d:1}, {n:'E4', d:1}, {n:'E4', d:1}, {n:'D4', d:1}, {n:'D4', d:1}, {n:'C4', d:2}
+        ];
+        this.noteIndex = 0;
+        this.hitLineY = this.height - 240; 
+        this.arrows = [];
+        this.inputPath = [];
+        this.isPaused = false;
+        this.frameCount = 0;
+        this.shake = 0;
+        this.flash = 0;
+        this.activeKey = null;
+        this.hitEffect = 0;
+
+        // Ensure total silence of background tracks
+        minigameMuteGroove = true;
+        this.muteBackground(true);
+
+        this.organSynth = new Tone.PolySynth(Tone.Synth, {
+            oscillator: { type: "triangle16" },
+            envelope: { attack: 0.01, decay: 0.1, sustain: 0.4, release: 0.8 },
+            volume: -4
+        }).toDestination();
+
+        this.errorSynth = new Tone.NoiseSynth({
+            noise: { type: "brown" },
+            envelope: { attack: 0.005, decay: 0.15, sustain: 0, release: 0.1 },
+            volume: -18
+        }).toDestination();
+
+        this.lastSpawnTime = 0;
+        this.bpm = 100;
+        this.quarterNoteMs = 60000 / this.bpm;
+    }
+
+    muteBackground(mute) {
+        if (baseGroove && baseGroove.kickSynth) baseGroove.kickSynth.volume.value = mute ? -100 : -8;
+        if (carryHatSynth) carryHatSynth.volume.value = mute ? -100 : inheritedHatVolumeDb;
+        if (carrySnareSynth) carrySnareSynth.volume.value = mute ? -100 : inheritedSnareVolumeDb;
+        if (carrySnareBody) carrySnareBody.volume.value = mute ? -100 : inheritedSnareBodyVolumeDb;
+        if (carryCymbalSynth) carryCymbalSynth.volume.value = mute ? -100 : inheritedCymbalVolumeDb;
+        toneDrops.forEach(d => { if (d.bassSynth) d.bassSynth.volume.value = -100; });
+    }
+
+    closeMinigame(resultLabel) {
+        activeMinigame = null;
+        isMinigameActive = false;
+        minigameMuteGroove = false;
+        minigameTriggerDrop = null;
+
+        this.muteBackground(false);
+
+        if (this.organSynth) this.organSynth.dispose();
+        if (this.errorSynth) this.errorSynth.dispose();
+        if (!baby.minigameResults) baby.minigameResults = [];
+        baby.minigameResults.push({ toy: "organ", result: resultLabel, timestamp: Date.now() });
+        if (resultLabel === "勝利") {
+            selectedToys.push({ id: "organ_victory", name: "Perfect Recital", labels: { creative: 3, expressive: 3, focused: 2 } });
+        }
+
+        document.body.classList.remove('minigame-active'); minigameWrapper.classList.remove('visible');
+        const btn = document.getElementById('minigame-quit-btn'); if (btn) btn.remove();
+        transitionMinigameToLesson();
+    }
+
+    showQuitConfirmation() {
+        if (this.isPaused) return;
+        this.isPaused = true;
+        const isFinished = this.state === 'finished' || this.state === 'failed';
+        const modal = document.createElement('div'); modal.id = 'minigame-modal';
+        const enText = isFinished ? "Return to the classroom?" : "Stop the recital?";
+        const jpText = isFinished ? "教室に戻りますか？" : "演奏を途中でやめますか？";
+        modal.innerHTML = `<div class="modal-content"><p class="en">${enText}</p><p class="jp">${jpText}</p><div class="modal-buttons"><button id="modal-yes">YES</button><button id="modal-no">NO</button></div></div>`;
+        document.body.appendChild(modal);
+        document.getElementById('modal-yes').onclick = () => {
+            modal.remove();
+            let label = this.state === 'finished' ? "勝利" : "友達を置いて放棄";
+            this.closeMinigame(label);
+        };
+        document.getElementById('modal-no').onclick = () => { modal.remove(); this.isPaused = false; };
+    }
+
+    spawnArrow() {
+        if (this.noteIndex >= this.scoreData.length) return;
+        const data = this.scoreData[this.noteIndex];
+        const dirs = ['up', 'down', 'left', 'right'];
+        const labels = ['↑', '↓', '←', '→'];
+        const idx = Math.floor(Math.random() * 4);
+        this.arrows.push({
+            id: Date.now(), dir: dirs[idx], label: labels[idx],
+            y: -60, note: data.n, duration: data.d,
+            alive: true, missed: false
+        });
+        this.noteIndex++;
+    }
+
+    getFlickDirection(path) {
+        if (path.length < 5) return null;
+        const start = path[0], end = path[path.length - 1];
+        const dx = end.x - start.x, dy = end.y - start.y;
+        if (Math.hypot(dx, dy) < 30) return null;
+        return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
+    }
+
+    update(mouseX, mouseY) {
+        if (this.isPaused) return;
+        this.frameCount++;
+        if (this.alpha < 1) this.alpha += 0.05;
+        if (this.shake > 0) this.shake--;
+        if (this.flash > 0) this.flash -= 0.05;
+        if (this.hitEffect > 0) this.hitEffect -= 0.1;
+
+        if (this.state === 'intro') {
+            this.timer++; if (this.timer > 480) { this.state = 'playing'; this.timer = 0; this.lastSpawnTime = performance.now(); }
+            return;
+        }
+        if (this.state === 'finished' || this.state === 'failed') {
+            this.timer++; if (this.timer > 180) { this.alpha -= 0.05; if (this.alpha <= 0) this.closeMinigame(this.state === 'finished' ? "勝利" : "敗北"); }
+            return;
+        }
+
+        if (this.state === 'playing') {
+            const now = performance.now();
+            if (this.noteIndex < this.scoreData.length) {
+                const prevNote = this.noteIndex > 0 ? this.scoreData[this.noteIndex - 1] : {d: 1};
+                const interval = prevNote.d * this.quarterNoteMs;
+                if (now - this.lastSpawnTime >= interval) {
+                    this.spawnArrow();
+                    this.lastSpawnTime = now;
+                }
+            }
+
+            const speed = 4.0;
+            this.arrows.forEach(a => {
+                if (a.alive) {
+                    a.y += speed;
+                    if (a.y > this.hitLineY + 50 && !a.missed) {
+                        a.missed = true; this.shake = 10; this.flash = 0.3; this.errorSynth.triggerAttackRelease("16n");
+                    }
+                    if (a.y > this.height) { a.alive = false; if(this.noteIndex >= this.scoreData.length && this.arrows.every(ar => !ar.alive)) this.state = 'finished'; }
+                }
+            });
+
+            if (orbDragging) { this.inputPath.push({ x: mouseX, y: mouseY }); }
+            else if (this.inputPath.length > 0) {
+                const flickDir = this.getFlickDirection(this.inputPath);
+                if (flickDir) {
+                    let closest = null, minDist = Infinity;
+                    this.arrows.forEach(a => {
+                        if (a.alive && !a.missed) {
+                            const d = Math.abs(a.y - this.hitLineY);
+                            if (d < minDist) { minDist = d; closest = a; }
+                        }
+                    });
+                    if (closest && minDist < this.player.timingWindow) {
+                        if (closest.dir === flickDir) {
+                            closest.alive = false; this.organSynth.triggerAttackRelease(closest.note, "4n");
+                            this.activeKey = closest.note; setTimeout(() => this.activeKey = null, 200);
+                            this.hitEffect = 1.0;
+                            if (this.noteIndex >= this.scoreData.length && this.arrows.every(arr => !arr.alive)) this.state = 'finished';
+                        } else { this.shake = 15; this.flash = 0.4; this.errorSynth.triggerAttackRelease("8n"); }
+                    }
+                }
+                this.inputPath = [];
+            }
+            let pdx = mouseX - this.player.x;
+            if (Math.abs(pdx) > 10) { this.player.x += pdx * 0.1; this.player.char.direction = pdx < 0 ? -1 : 1; this.player.char.walkCycle += 0.15; }
+        }
+    }
+
+    draw() {
+        const c = this.ctx; c.clearRect(0, 0, this.width, this.height);
+        c.save(); if (this.shake > 0) c.translate((Math.random()-0.5)*15, (Math.random()-0.5)*15);
+        c.globalAlpha = Math.max(0, this.alpha);
+
+        // Mahogany Organ with Polish
+        const woodG = c.createLinearGradient(0, 0, 0, this.height);
+        woodG.addColorStop(0, "#4e342e"); woodG.addColorStop(1, "#2d1d1a");
+        c.fillStyle = woodG; c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+        c.fillStyle = "#3e2723"; c.fillRect(0, this.height - 140, this.width, 140);
+
+        // Lane
+        c.fillStyle = "rgba(0,0,0,0.25)"; c.fillRect(this.width/2 - 65, 0, 130, this.height - 140);
+
+        // --- MAGIC CIRCLE JUDGE RING ---
+        const hx = this.width/2, hy = this.hitLineY;
+        c.save();
+        c.strokeStyle = "rgba(255, 223, 0, 0.6)"; c.lineWidth = 2;
+        c.beginPath(); c.arc(hx, hy, 55, 0, Math.PI*2); c.stroke();
+        c.setLineDash([4, 4]); c.beginPath(); c.arc(hx, hy, 48, this.frameCount*0.02, this.frameCount*0.02 + Math.PI*2); c.stroke();
+        c.restore();
+
+        // Ivory Keys
+        const whiteNotes = ['C4','D4','E4','F4','G4','A4','B4','C5'];
+        const whiteKeys = 8; const keyW = this.width / whiteKeys;
+        for(let i=0; i<whiteKeys; i++) {
+            const isHit = this.activeKey === whiteNotes[i];
+            c.fillStyle = isHit ? "#ffeb3b" : "#fffef0";
+            c.strokeStyle = "#a1887f"; c.lineWidth = 1;
+            c.beginPath(); c.roundRect(i*keyW, this.height-125, keyW-3, 125, [0,0,6,6]); c.fill(); c.stroke();
+            if (isHit) { // Key glow
+                const kg = c.createRadialGradient(i*keyW + keyW/2, this.height-60, 0, i*keyW+keyW/2, this.height-60, 40);
+                kg.addColorStop(0, "rgba(255,235,59,0.4)"); kg.addColorStop(1, "rgba(255,255,255,0)");
+                c.fillStyle = kg; c.fillRect(i*keyW, this.height-125, keyW-3, 125);
+            }
+        }
+        const hasBlack = [true, true, false, true, true, true, false];
+        for(let i=0; i<whiteKeys-1; i++) {
+            if (hasBlack[i]) {
+                c.fillStyle = "#263238";
+                c.beginPath(); c.roundRect(i*keyW + keyW*0.68, this.height-125, keyW*0.6, 75, [0,0,4,4]); c.fill();
+            }
+        }
+
+        // Crystal Notes
+        this.arrows.forEach(a => {
+            if (!a.alive) return;
+            c.save(); c.translate(this.width/2, a.y);
+            const isNear = Math.abs(a.y - hy) < this.player.timingWindow;
+            c.fillStyle = a.missed ? "#546e7a" : (isNear ? "#fff" : "#ffeb3b");
+            c.shadowColor = isNear ? "#fff" : "#ffeb3b"; c.shadowBlur = isNear ? 30 : 10;
+            c.beginPath(); c.arc(0, 0, 42, 0, Math.PI*2); c.fill();
+            c.fillStyle = "#3e2723"; c.font = "800 46px sans-serif"; c.textAlign = "center"; c.textBaseline = "middle";
+            c.fillText(a.label, 0, 0); c.restore();
+        });
+
+        // Flick Path (Sparkle)
+        if (this.inputPath.length > 1) {
+            c.save(); c.shadowColor = "#ffeb3b"; c.shadowBlur = 15;
+            c.strokeStyle = "#fff176"; c.lineWidth = 12; c.lineCap = "round";
+            c.beginPath(); c.moveTo(this.inputPath[0].x, this.inputPath[0].y);
+            this.inputPath.forEach(p => c.lineTo(p.x, p.y)); c.stroke(); c.restore();
+        }
+        if (this.flash > 0) { c.fillStyle = `rgba(255, 0, 0, ${this.flash * 0.6})`; c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill(); }
+        
+        c.save(); c.translate(this.player.x, this.player.y); c.scale(0.65, 0.65); this.player.char.draw(c); c.restore();
+
+        if (this.state === 'intro') {
+            c.fillStyle = "rgba(0,0,0,0.75)"; c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+            const totalIntroFrames = 480, countdownStartFrame = 300;
+            if (this.timer < countdownStartFrame) {
+                c.fillStyle = "#fff"; c.textAlign = "center"; c.textBaseline = "middle";
+                c.font = "800 42px 'Zen Maru Gothic'"; c.fillText("SYNC MELODY", this.width/2, this.height/2-45);
+                c.font = "600 18px 'Zen Maru Gothic'"; c.fillText("魔法の円に重なる瞬間に、矢印の方向へフリック！", this.width/2, this.height/2+15);
+                c.fillStyle = "#ffdf00"; c.font = "700 16px 'Zen Maru Gothic'"; c.fillText("※すべての雑音を消し、あなたの旋律を完成させよう", this.width/2, this.height/2+55);
+            } else {
+                const ct = Math.ceil((totalIntroFrames - this.timer) / 60), pr = (this.timer % 60) / 60;
+                c.fillStyle = "#fff"; c.textAlign = "center"; c.textBaseline = "middle";
+                c.font = `900 ${80+(pr*40)}px 'Zen Maru Gothic'`; c.globalAlpha = Math.max(0, 1-pr); if (ct >= 1) c.fillText(ct.toString(), this.width/2, this.height/2);
+            }
+            if (!document.getElementById('minigame-quit-btn')) { const btn = document.createElement('button'); btn.id = 'minigame-quit-btn'; btn.innerText = "教室に戻る"; btn.onclick = () => this.showQuitConfirmation(); document.body.appendChild(btn); }
+        } else if (this.state === 'finished' || this.state === 'failed') {
+            c.fillStyle = "rgba(0,0,0,0.85)"; c.beginPath(); c.roundRect(0, 0, this.width, this.height, 80); c.fill();
+            const isWin = this.state === 'finished';
+            c.fillStyle = isWin ? "#ffdf00" : "#ff5050"; c.textAlign = "center"; c.textBaseline = "middle";
+            c.font = "900 76px 'Zen Maru Gothic'"; c.fillText(isWin ? "MARVELOUS!" : "OUT OF SYNC...", this.width/2, this.height/2 - 30);
+            c.fillStyle = "#fff"; c.font = "bold 28px 'Zen Maru Gothic'";
+            c.fillText(isWin ? "心に響く音色でした！" : "リズムが少し乱れてしまったようです", this.width/2, this.height/2 + 55);
+        }
+        c.restore();
+    }
+}
