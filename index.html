@@ -19,6 +19,7 @@
                 <p class="logo-kicker">A LIFE IN SOUND</p>
                 <h1 id="logo-title">Tone.Tone.Life.</h1>
                 <p id="logo-subtitle">Every sound you choose becomes who you are.</p>
+                <p id="logo-credit">Title Music: <a href="https://otologic.jp/" target="_blank" rel="noopener">OtoLogic</a></p>
                 <div id="logo-ornaments" aria-hidden="true">
                     <span class="ornament orb-a"></span>
                     <span class="ornament orb-b"></span>
@@ -34,8 +35,8 @@
 
         <div id="choice-group">
             <div id="message-container">
-                <p class="msg-en">A new life begins. Which rhythm will guide your first steps?</p>
-                <p class="msg-jp">新しい命が始まる。最初の一歩を導くリズムはどれ？</p>
+                <p class="msg-en">A new life begins. Follow the tone that calls to your heart.</p>
+                <p class="msg-jp">新しい命が始まる。心が惹かれるtoneを辿っていこう。</p>
             </div>
             <div id="choices-btn-container">
                 <div class="choice-col">
@@ -69,11 +70,29 @@
     <div id="custom-cursor"></div>
     <div id="tone-hover-info"></div>
     <button id="score-toggle-btn" type="button">Score: Off</button>
+    <button id="settings-btn" type="button" style="display:none">&#9881; Settings</button>
+    <div id="settings-panel" class="hidden">
+        <div id="settings-header">
+            <span>&#9835; Volume</span>
+            <button id="settings-close-btn">&times;</button>
+        </div>
+        <div id="settings-tracks"></div>
+    </div>
 
     <div id="minigame-wrapper" class="hidden">
         <canvas id="minigame-canvas" width="700" height="440"></canvas>
     </div>
-    
+
+    <div id="sound-modal-overlay">
+        <div id="sound-modal">
+            <div class="sound-modal-icon">&#9835;</div>
+            <p class="sound-modal-title">Tone.Tone.Life.</p>
+            <p class="sound-modal-body">このゲームは音楽と共に体験します<br>This game is experienced with sound</p>
+            <p class="sound-modal-hint">ヘッドフォン推奨 / Headphones recommended</p>
+            <button id="sound-modal-btn">了解です / OK</button>
+        </div>
+    </div>
+
     <script src="js/toys.js"></script>
     <script src="js/main.js"></script>
 </body>

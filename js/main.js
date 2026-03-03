@@ -74,7 +74,74 @@
         let carryChordPattern = null;
         let schoolBgNpcs = null;
         let schoolBgObjects = null;
+        let adultNpcs = null;
         let hoveredSchoolActivity = null; // activityId of hovered bass drop
+
+        // UNIVERSITY (大学フェーズ) variables
+        let inheritedKeyboardPattern = null;
+        let inheritedKeyboardNotes = null;
+        let inheritedKeyboardAttacks = null;
+        let inheritedKeyboardDurations = null;
+        let inheritedKeyboardStyleClass = 'bass';
+        let inheritedKeyboardSustainType = null;
+        let inheritedKeyboardSoundConfig = null;
+        let carryKeyboardSynth = null;
+        let carryKeyboardEffects = [];
+        let universityNpcs = null;
+        let universityBuildingSeeds = [];
+        let adultTransitionLock = false;
+
+        // PART_TIME & JOB_HUNT (見下ろし型2D) variables
+        let worldHeight = 0;
+        let isTopDownScene = false;
+        let topDownOffsetX = 0;
+        let topDownOffsetY = 0;
+        let topDownCameraX = 0;
+        let topDownCameraY = 0;
+        let jobHuntInterviewRound = 1;
+        let jobHuntCameraZoom = 1.0;
+        let partTimeNpcs = [];
+        let partTimeObstacles = [];
+        let jobHuntObstacles = [];
+        let jobHuntNpcs = [];
+        let inheritedKeys2Pattern = null;
+        let inheritedKeys2Notes = null;
+        let inheritedKeys2Attacks = null;
+        let inheritedKeys2Durations = null;
+        let inheritedKeys2SustainType = null;
+        let inheritedKeys2SoundConfig = null;
+        let carryKeys2Synth = null;
+        let carryKeys2Effects = [];
+        let secondInterviewText = null; // {text, alpha, scale, timer}
+
+        // Side-scroll interview room state
+        let jobHuntViewMode = "topdown";          // "topdown" | "sidescroll"
+        let jobHuntTransitioning = false;         // lock during fade animation
+        let jobHuntSideScrollWorldW = 0;          // side-scroll room width
+        let jobHuntSavedTopDownX = 0;             // baby position backup
+        let jobHuntSavedTopDownY = 0;
+        let jobHuntSavedCamX = 0;                 // camera backup
+        let jobHuntSavedCamY = 0;
+        let jobHuntDropTopDownPositions = [];     // tone drop position backup [{x,y}]
+
+        // Modifier tone preview state (JOB_HUNT2)
+        let modifierPreviewDrop = null;         // currently previewing modifier drop
+        let modifierPreviewOriginal = null;     // saved original bar data before preview
+
+        let titleBgmPlayer = null;
+
+        // Volume management
+        const volumeState = {};  // { trackId: { volume: 0-100, muted: false, el: DOMrow } }
+        let settingsPanelOpen = false;
+        const VOLUME_TRACKS = [
+            { id: 'kick',     label: 'Kick',     color: 'rgba(60,80,140,0.95)' },
+            { id: 'hat',      label: 'Hat',      color: 'rgba(36,120,212,0.92)' },
+            { id: 'snare',    label: 'Snare',    color: 'rgba(242,129,56,0.98)' },
+            { id: 'cymbal',   label: 'Cymbal',   color: 'rgba(120,160,210,0.96)' },
+            { id: 'bass',     label: 'Bass',     color: 'rgba(82,65,148,0.96)' },
+            { id: 'keyboard', label: 'Keys',     color: 'rgba(100,80,168,0.96)' },
+            { id: 'keys2',    label: 'Keys2',    color: 'rgba(120,95,180,0.96)' },
+        ];
 
         let activeMinigame = null;
         let isMinigameActive = false;
@@ -197,12 +264,12 @@
             scored.sort((a, b) => b.score - a.score);
             return scored.slice(0, 4).map(s => s.fac);
         }
-        const scoreHudState = { rows: [], totalSteps: 0, currentStep: -1, previewDropIndex: -1, chordCells: null, barLabelCells: null };
+        const scoreHudState = { rows: [], totalSteps: 0, currentStep: -1, previewDropIndex: -1, chordCells: null, barLabelCells: null, pageCount: 1, currentPage: 0, stepsPerPage: 0, paginationEl: null, barHighlights: [] };
         let scoreHudEnabled = true;
         const toySystem = window.TTLToyData || { LIFE_LABELS: [], TOY_LIBRARY: [], drawToy: () => {} };
 
         // シーン管理
-        const SCENE = { TITLE: 0, CHOICE: 1, TRANSITION: 2, CRAWL: 3, CRAWL2: 4, TODDLE1: 5, CHILD1: 6, CHILD2: 7, LESSON: 8, ADULT: 9 };
+        const SCENE = { TITLE: 0, CHOICE: 1, TRANSITION: 2, CRAWL: 3, CRAWL2: 4, TODDLE1: 5, CHILD1: 6, CHILD2: 7, LESSON: 8, ADULT: 9, UNIVERSITY: 10, PART_TIME: 11, JOB_HUNT: 12, JOB_HUNT2: 13 };
         let currentScene = SCENE.TITLE;
         const RHYTHM_BARS = 4;
         const STEPS_PER_BEAT = 4;
@@ -279,18 +346,23 @@
             height = window.innerHeight;
             canvas.width = width;
             canvas.height = height;
-            worldWidth = Math.max(width * 1.5, 1200);
+            // Top-down scenes: lock world dimensions (obstacles/drops at absolute positions)
+            if (!isTopDownScene) {
+                worldWidth = Math.max(worldWidth, width * 1.5, 1200);
+            }
             cameraX = Math.max(0, Math.min(cameraX, Math.max(0, worldWidth - width)));
+            if (isTopDownScene) {
+                topDownCameraX = Math.max(0, Math.min(topDownCameraX, Math.max(0, worldWidth - width)));
+                topDownCameraY = Math.max(0, Math.min(topDownCameraY, Math.max(0, worldHeight - height)));
+            }
             if (baby) {
                 baby.x = Math.max(80, Math.min(worldWidth - 80, baby.x));
-                baby.y = height * ROOM_WALL_RATIO;
-            }
-            if (toneDrops.length) {
-                const floorY = height * ROOM_WALL_RATIO + TONE_FLOOR_OFFSET;
-                toneDrops.forEach((drop, i) => {
-                    drop.x = Math.max(180, Math.min(worldWidth - 180, drop.x));
-                    drop.y = floorY + (i % 2 === 0 ? -8 : 8);
-                });
+                if (!isTopDownScene) baby.y = height * ROOM_WALL_RATIO;
+                // Side-scroll interview room: clamp to room width, pin to floor
+                if ((currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) && jobHuntViewMode === "sidescroll") {
+                    baby.x = Math.max(0, Math.min(jobHuntSideScrollWorldW - 40, baby.x));
+                    baby.y = height * ROOM_WALL_RATIO;
+                }
             }
         }
         window.addEventListener('resize', resize);
@@ -304,8 +376,16 @@
             mouseX = clientX;
             mouseY = clientY;
             const isGameplay = currentScene >= SCENE.CRAWL;
-            orbWorldX = isGameplay ? clientX + cameraX : clientX;
-            orbWorldY = clientY;
+            if (isTopDownScene && (currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) && jobHuntViewMode === "sidescroll") {
+                orbWorldX = clientX + cameraX;
+                orbWorldY = clientY;
+            } else if (isTopDownScene) {
+                orbWorldX = clientX - topDownOffsetX;
+                orbWorldY = clientY - topDownOffsetY;
+            } else {
+                orbWorldX = isGameplay ? clientX + cameraX : clientX;
+                orbWorldY = clientY;
+            }
             if (orbDragging) {
                 emitOrbParticles(orbWorldX, orbWorldY, 2);
             }
@@ -342,8 +422,17 @@
 
         function getToneDropAtScreenPoint(screenX, screenY) {
             if (currentScene < SCENE.CRAWL || !toneDrops.length) return null;
-            const wx = screenX + cameraX;
-            const wy = screenY;
+            let wx, wy;
+            if (isTopDownScene && (currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) && jobHuntViewMode === "sidescroll") {
+                wx = screenX + cameraX;
+                wy = screenY;
+            } else if (isTopDownScene) {
+                wx = screenX - topDownOffsetX;
+                wy = screenY - topDownOffsetY;
+            } else {
+                wx = screenX + cameraX;
+                wy = screenY;
+            }
             const picked = toneDrops.find(drop => {
                 return Math.hypot(wx - drop.x, wy - drop.y) <= 60;
             });
@@ -419,6 +508,13 @@
                     label: toyTop ? `Labels: ${toyTop}` : 'Labels: harmonic'
                 };
             }
+            if (drop.instrument === 'keyboard') {
+                return {
+                    title: drop.activityName || 'Keyboard Tone',
+                    meta: `Sound: Keyboard`,
+                    label: `Labels: ${Object.keys(drop.activityLabels || {}).slice(0, 3).join(', ') || 'activity'}`
+                };
+            }
             if (drop.instrument === 'bass') {
                 return {
                     title: drop.activityName || 'Bass Tone',
@@ -462,11 +558,24 @@
                 handleChildChoice(picked);
             } else if (currentScene === SCENE.CHILD2) {
                 handleChild2Choice(picked);
+            } else if (currentScene === SCENE.ADULT) {
+                handleAdultChoice(picked);
+            } else if (currentScene === SCENE.UNIVERSITY) {
+                handleUniversityChoice(picked);
+            } else if (currentScene === SCENE.PART_TIME) {
+                handlePartTimeChoice(picked);
+            } else if (currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) {
+                handleJobHuntChoice(picked);
             }
         }
 
         window.addEventListener('click', (e) => {
             if (isMinigameActive) {
+                // If minigame is finished/failed, click anywhere closes it
+                if (activeMinigame && (activeMinigame.state === 'finished' || activeMinigame.state === 'failed') && activeMinigame._resultClickReady) {
+                    activeMinigame._handleResultClick();
+                    return;
+                }
                 minigameClick = true;
             } else {
                 void pickToneDropAt(e.clientX, e.clientY);
@@ -1037,7 +1146,6 @@
                 c.stroke();
             }
         }
-
         // 3. The Toddler Rig (Upright wobbling walk)
         class Toddler {
             constructor(colors) {
@@ -1204,18 +1312,270 @@
                 this.faceType = babyFaceType;
                 this.isBoy = babyIsBoy;
                 this.hairStyle = Math.floor(Math.random() * 3); // 0-2, 男女各3種
+                this.isBicycle = false;
+                this.isTopDown = false;
+                this.outfit = null; // "fastfood" | "suit" | null
             }
-            update(tx) {
+            updateTopDown(tx, ty) {
                 const dx = tx - this.x;
-                if (Math.abs(dx) > 10) {
+                const dy = ty - this.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist > 8) {
                     this.direction = dx > 0 ? 1 : -1;
-                    const speed = Math.min(Math.abs(dx) * 0.04, 2.8);
-                    this.x += speed * this.direction;
-                    this.walkCycle += 0.13;
+                    const speed = Math.min(dist * 0.12, 4.0);
+                    this.x += (dx / dist) * speed;
+                    this.y += (dy / dist) * speed;
+                    this.walkCycle += 0.2;
                 } else {
                     this.walkCycle += 0.03;
                 }
-                this.x = Math.max(80, Math.min(worldWidth - 80, this.x));
+                if (currentScene === SCENE.PART_TIME) {
+                    const kitchenMaxY = worldHeight * 0.33;
+                    this.y = Math.min(this.y, kitchenMaxY);
+                    this.x = Math.max(20, Math.min(worldWidth - 20, this.x));
+                    this.y = Math.max(20, this.y);
+                    resolveObstacleCollision(this, 20);
+                } else if (currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) {
+                    this.x = Math.max(20, Math.min(worldWidth - 20, this.x));
+                    this.y = Math.max(20, Math.min(worldHeight - 20, this.y));
+                    resolveObstacleCollision(this, 20, jobHuntObstacles);
+                    // Detect door crossing → enter side-scroll interview room
+                    if (jobHuntViewMode === "topdown" && !jobHuntTransitioning) {
+                        const wallY = worldHeight * 0.52;
+                        const doorX = worldWidth * 0.38, doorW = worldWidth * 0.24;
+                        if (this.y < wallY && this.x > doorX && this.x < doorX + doorW) {
+                            triggerJobHuntEnterInterview();
+                        }
+                    }
+                } else {
+                    this.x = Math.max(20, Math.min(worldWidth - 20, this.x));
+                    this.y = Math.max(20, Math.min(worldHeight - 20, this.y));
+                }
+            }
+            drawTopDown(ctx, t) {
+                // Side-view rendering (same design as draw()) with outfit support
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                const verticalBob = Math.abs(Math.sin(t)) * 2.5;
+                ctx.scale(-this.direction * this.scale, this.scale);
+                ctx.translate(0, -verticalBob);
+
+                const legSwingL = Math.sin(t) * 0.26;
+                const legSwingR = Math.sin(t + Math.PI) * 0.26;
+                const kneeL = Math.max(0, -legSwingL) * 0.4;
+                const kneeR = Math.max(0, -legSwingR) * 0.4;
+                const armSwingL = Math.sin(t + Math.PI) * 0.22;
+                const armSwingR = Math.sin(t) * 0.22;
+                const headBobA = Math.sin(t * 2) * 0.02;
+
+                // Outfit-derived colors
+                const topColor = this.outfit === "fastfood" ? "#cc3333" : this.outfit === "suit" ? "#2a3050" : this.bodyColor;
+                const pantsColor = this.outfit === "fastfood" ? "#333" : this.outfit === "suit" ? "#2a2a3a" : this.limbColor;
+                const longPants = this.outfit === "fastfood" || this.outfit === "suit";
+
+                // --- Leg helper ---
+                const drawLeg = (x, y, upperAng, kneeAng) => {
+                    this.drawPart(ctx, x, y, upperAng, c => {
+                        c.fillStyle = pantsColor;
+                        c.beginPath(); c.roundRect(-7, -3, 14, 25, 5); c.fill();
+                        c.fillStyle = "rgba(0,0,0,0.06)";
+                        c.beginPath(); c.roundRect(-7, 17, 14, 4, [0,0,3,3]); c.fill();
+                        this.drawPart(c, 0, 17, kneeAng, c2 => {
+                            if (longPants) {
+                                c2.fillStyle = pantsColor;
+                                c2.beginPath(); c2.roundRect(-6, -4, 12, 22, 4); c2.fill();
+                            } else {
+                                c2.fillStyle = this.skinColor;
+                                c2.beginPath(); c2.roundRect(-5, 2, 10, 16, 4); c2.fill();
+                                c2.fillStyle = pantsColor;
+                                c2.beginPath(); c2.roundRect(-6.5, -4, 13, 9, 4); c2.fill();
+                                c2.fillStyle = "rgba(0,0,0,0.05)";
+                                c2.beginPath(); c2.roundRect(-6, 3, 12, 2, 1); c2.fill();
+                                c2.fillStyle = this.sockColor;
+                                c2.beginPath(); c2.roundRect(-5.5, 13, 11, 7, 3); c2.fill();
+                            }
+                            c2.fillStyle = this.shoeColor;
+                            c2.beginPath(); c2.ellipse(2, 20, 10, 5.5, 0, 0, Math.PI * 2); c2.fill();
+                            c2.beginPath(); c2.roundRect(-5, 16, 12, 5, [3,3,0,0]); c2.fill();
+                            c2.fillStyle = this.soleColor;
+                            c2.beginPath(); c2.moveTo(-6, 21); c2.lineTo(12, 21); c2.lineTo(11, 24); c2.lineTo(-5, 24); c2.closePath(); c2.fill();
+                            c2.strokeStyle = "rgba(255,255,255,0.18)"; c2.lineWidth = 0.8;
+                            c2.beginPath(); c2.moveTo(-2, 18); c2.lineTo(8, 18); c2.stroke();
+                        });
+                    });
+                };
+
+                // --- Arm helper ---
+                const drawArm = (x, y, swingAng) => {
+                    this.drawPart(ctx, x, y, swingAng, c => {
+                        c.fillStyle = topColor;
+                        c.beginPath(); c.roundRect(-5.5, -2, 11, 10, 4); c.fill();
+                        c.fillStyle = "rgba(0,0,0,0.05)";
+                        c.beginPath(); c.roundRect(-5.5, 6, 11, 2, 1); c.fill();
+                        // Forearm: suit = sleeve, otherwise skin
+                        c.fillStyle = this.outfit === "suit" ? topColor : this.skinColor;
+                        c.beginPath(); c.roundRect(-4.5, 8, 9, 12, 4); c.fill();
+                        if (this.outfit === "suit") {
+                            c.fillStyle = "rgba(0,0,0,0.06)";
+                            c.beginPath(); c.roundRect(-4.5, 17, 9, 3, [0,0,2,2]); c.fill();
+                        }
+                        this.drawPart(c, 0, 20, 0.12, c2 => {
+                            c2.fillStyle = this.skinColor;
+                            c2.beginPath(); c2.roundRect(-3.5, 0, 7, 11, 3.5); c2.fill();
+                            c2.beginPath(); c2.ellipse(0, 12, 4.5, 3.5, 0, 0, Math.PI * 2); c2.fill();
+                        });
+                    });
+                };
+
+                // === Draw order: back-leg → back-arm → body → pants → front-leg → front-arm → head ===
+                drawLeg(-8, -7, legSwingL, kneeL);
+                drawArm(-15, -54, armSwingL);
+
+                // Body
+                if (this.outfit === "fastfood") {
+                    ctx.fillStyle = "#cc3333";
+                    ctx.beginPath(); ctx.roundRect(-17, -58, 34, 32, 8); ctx.fill();
+                    ctx.fillStyle = this.skinColor;
+                    ctx.beginPath(); ctx.moveTo(-7, -58); ctx.quadraticCurveTo(0, -53, 7, -58); ctx.fill();
+                    ctx.fillStyle = "#bb2222";
+                    ctx.beginPath(); ctx.moveTo(-9, -58); ctx.lineTo(-5, -53); ctx.lineTo(-1, -58); ctx.closePath(); ctx.fill();
+                    ctx.beginPath(); ctx.moveTo(1, -58); ctx.lineTo(5, -53); ctx.lineTo(9, -58); ctx.closePath(); ctx.fill();
+                    ctx.fillStyle = "#2a2a2a";
+                    ctx.beginPath(); ctx.roundRect(-15, -42, 30, 22, [0,0,4,4]); ctx.fill();
+                    ctx.strokeStyle = "#3a3a3a"; ctx.lineWidth = 1;
+                    ctx.beginPath(); ctx.moveTo(-15, -42); ctx.lineTo(-18, -46); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(15, -42); ctx.lineTo(18, -46); ctx.stroke();
+                    ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 0.7;
+                    ctx.beginPath(); ctx.roundRect(-6, -38, 12, 8, 2); ctx.stroke();
+                } else if (this.outfit === "suit") {
+                    ctx.fillStyle = "#2a3050";
+                    ctx.beginPath(); ctx.roundRect(-17, -58, 34, 32, 8); ctx.fill();
+                    ctx.fillStyle = "#e8e8e8";
+                    ctx.beginPath(); ctx.moveTo(-6, -58); ctx.lineTo(0, -48); ctx.lineTo(6, -58); ctx.closePath(); ctx.fill();
+                    ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 0.8;
+                    ctx.beginPath(); ctx.moveTo(-8, -58); ctx.lineTo(-4, -44); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(8, -58); ctx.lineTo(4, -44); ctx.stroke();
+                    ctx.fillStyle = "#882222";
+                    ctx.beginPath(); ctx.moveTo(-2, -56); ctx.lineTo(0, -40); ctx.lineTo(2, -56); ctx.closePath(); ctx.fill();
+                    ctx.fillStyle = "#772020";
+                    ctx.beginPath(); ctx.ellipse(0, -56, 2.5, 1.8, 0, 0, Math.PI * 2); ctx.fill();
+                    ctx.fillStyle = "#e8e8e8";
+                    ctx.beginPath(); ctx.roundRect(4, -52, 6, 4, 1); ctx.fill();
+                } else {
+                    ctx.fillStyle = this.bodyColor;
+                    ctx.beginPath(); ctx.roundRect(-17, -58, 34, 32, 8); ctx.fill();
+                    ctx.fillStyle = this.skinColor;
+                    ctx.beginPath(); ctx.moveTo(-7, -58); ctx.quadraticCurveTo(0, -51, 7, -58); ctx.fill();
+                    ctx.fillStyle = "rgba(255,255,255,0.08)";
+                    ctx.beginPath(); ctx.ellipse(2, -44, 10, 12, 0, 0, Math.PI * 2); ctx.fill();
+                    ctx.strokeStyle = "rgba(0,0,0,0.06)"; ctx.lineWidth = 0.8;
+                    ctx.beginPath(); ctx.roundRect(4, -50, 8, 8, 2); ctx.stroke();
+                }
+
+                // Pants
+                ctx.fillStyle = pantsColor;
+                ctx.beginPath(); ctx.roundRect(-16, -28, 32, 24, [0,0,6,6]); ctx.fill();
+                ctx.fillStyle = "rgba(0,0,0,0.08)";
+                ctx.beginPath(); ctx.roundRect(-16, -28, 32, 3, 1); ctx.fill();
+                ctx.fillStyle = pantsColor;
+                ctx.beginPath(); ctx.ellipse(-8, -7, 10, 9, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.ellipse(8, -7, 10, 9, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = "rgba(0,0,0,0.04)";
+                ctx.beginPath(); ctx.ellipse(-8, -5, 7, 4, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.ellipse(8, -5, 7, 4, 0, 0, Math.PI * 2); ctx.fill();
+
+                drawLeg(8, -7, legSwingR, kneeR);
+                drawArm(15, -54, armSwingR);
+
+                // Head
+                this.drawPart(ctx, 0, -72, headBobA, c => {
+                    c.scale(-1, 1);
+                    const HR = 21;
+                    c.fillStyle = this.hairColor;
+                    // BACK HAIR
+                    if (this.isBoy) {
+                        if (this.hairStyle === 1) { c.beginPath(); c.arc(0, -1, HR + 5, Math.PI * 0.95, Math.PI * 0.05, false); c.closePath(); c.fill(); }
+                        else if (this.hairStyle === 2) { c.beginPath(); c.arc(0, -1, HR + 2, Math.PI, 0, false); c.closePath(); c.fill(); }
+                    } else {
+                        if (this.hairStyle === 0) {
+                            c.beginPath(); c.arc(0, -1, HR + 4, Math.PI, 0, false); c.closePath(); c.fill();
+                            c.beginPath(); c.roundRect(-HR - 5, -6, 9, 22, 4); c.fill();
+                            c.beginPath(); c.roundRect(HR - 4, -6, 9, 22, 4); c.fill();
+                        } else if (this.hairStyle === 1) {
+                            c.beginPath(); c.arc(0, -1, HR + 3, Math.PI, 0, false); c.closePath(); c.fill();
+                            c.beginPath(); c.ellipse(-20, -8, 8, 14, -0.2, 0, Math.PI * 2); c.fill();
+                            c.beginPath(); c.ellipse(20, -8, 8, 14, 0.2, 0, Math.PI * 2); c.fill();
+                        } else {
+                            c.beginPath(); c.arc(0, -1, HR + 4, Math.PI, 0, false); c.closePath(); c.fill();
+                            c.beginPath(); c.ellipse(-18, -4, 7, 16, 0.25, 0, Math.PI * 2); c.fill();
+                        }
+                    }
+                    // FACE BASE
+                    c.fillStyle = this.skinColor;
+                    c.beginPath(); c.arc(0, 0, HR, 0, Math.PI * 2); c.fill();
+                    // Ears
+                    c.beginPath(); c.arc(-18, 3, 5.5, 0, Math.PI * 2); c.fill();
+                    c.beginPath(); c.arc(18, 3, 5.5, 0, Math.PI * 2); c.fill();
+                    // FRONT HAIR
+                    c.fillStyle = this.hairColor;
+                    if (this.isBoy) {
+                        if (this.hairStyle === 1) {
+                            c.beginPath(); c.moveTo(-19, -21); c.lineTo(-19, -10);
+                            c.quadraticCurveTo(-10, -13, 0, -10); c.quadraticCurveTo(10, -13, 19, -10);
+                            c.lineTo(19, -21); c.closePath(); c.fill();
+                        } else if (this.hairStyle === 2) {
+                            c.globalAlpha = 0.45;
+                            c.beginPath(); c.moveTo(-16, -21); c.lineTo(-16, -17); c.lineTo(16, -17); c.lineTo(16, -21); c.closePath(); c.fill();
+                            c.globalAlpha = 1;
+                        }
+                    } else {
+                        if (this.hairStyle === 0) {
+                            c.beginPath(); c.moveTo(-18, -21); c.lineTo(-18, -11); c.lineTo(18, -11); c.lineTo(18, -21); c.closePath(); c.fill();
+                        } else if (this.hairStyle === 1) {
+                            c.beginPath(); c.moveTo(-17, -21); c.lineTo(-17, -11); c.lineTo(17, -11); c.lineTo(17, -21); c.closePath(); c.fill();
+                            c.fillStyle = "hsl(345, 65%, 65%)";
+                            [[-20, -14], [20, -14]].forEach(([rx, ry]) => {
+                                c.beginPath(); c.ellipse(rx - 4, ry, 4, 2.5, -0.3, 0, Math.PI * 2); c.fill();
+                                c.beginPath(); c.ellipse(rx + 4, ry, 4, 2.5, 0.3, 0, Math.PI * 2); c.fill();
+                                c.beginPath(); c.arc(rx, ry, 1.5, 0, Math.PI * 2); c.fill();
+                            });
+                        } else {
+                            c.beginPath(); c.moveTo(-15, -21); c.lineTo(-15, -12);
+                            c.quadraticCurveTo(0, -10, 17, -13); c.lineTo(17, -21); c.closePath(); c.fill();
+                        }
+                    }
+                    // Fastfood cap
+                    if (this.outfit === "fastfood") {
+                        drawBaseballCap(c, HR);
+                    }
+                    // FEATURES
+                    drawBabyFace(c, this.faceType, this.skinColor, this.cheekColor, null, false);
+                });
+
+                ctx.restore();
+            }
+            update(tx) {
+                const dx = tx - this.x;
+                const isAdultScene = (typeof currentScene !== 'undefined' && currentScene === SCENE.ADULT);
+                const isUniversityScene = (typeof currentScene !== 'undefined' && currentScene === SCENE.UNIVERSITY);
+                if (Math.abs(dx) > 10) {
+                    this.direction = dx > 0 ? 1 : -1;
+                    const speedMult = isUniversityScene ? 0.18 : (isAdultScene ? 0.12 : 0.04);
+                    const maxSpd = isUniversityScene ? 10.0 : (isAdultScene ? 7.0 : 2.8);
+                    const speed = Math.min(Math.abs(dx) * speedMult, maxSpd);
+                    this.x += speed * this.direction;
+                    this.walkCycle += isUniversityScene ? 0.35 : (isAdultScene ? 0.25 : 0.13);
+                } else {
+                    this.walkCycle += 0.03;
+                }
+                if ((currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) && jobHuntViewMode === "sidescroll") {
+                    // Chair right edge acts as wall — can't pass beyond it
+                    const chairRightEdge = jobHuntSideScrollWorldW * 0.40 + 20;
+                    this.x = Math.max(0, Math.min(chairRightEdge, this.x));
+                } else {
+                    this.x = Math.max(80, Math.min(worldWidth - 80, this.x));
+                }
             }
             drawPart(ctx, x, y, ang, fn) {
                 ctx.save(); ctx.translate(x, y); ctx.rotate(ang); fn(ctx); ctx.restore();
@@ -1225,47 +1585,78 @@
                 ctx.translate(this.x, this.y);
 
                 const t = this.walkCycle;
-                const verticalBob = Math.abs(Math.sin(t)) * 2.5;
+                const isAdultScene = (typeof currentScene !== 'undefined' && currentScene === SCENE.ADULT);
+                const isUniversityScene = (typeof currentScene !== 'undefined' && currentScene === SCENE.UNIVERSITY);
+
+                // --- Bicycle mode (UNIVERSITY) ---
+                if (this.isBicycle) {
+                    this.drawBicycle(ctx, t);
+                    ctx.restore();
+                    return;
+                }
+
+                // Seated check: sitting on interview chair
+                const isJobHuntSeated = (currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2)
+                    && jobHuntViewMode === "sidescroll"
+                    && this.x >= jobHuntSideScrollWorldW * 0.40 - 25;
+
+                let verticalBob, legSwingL, legSwingR, kneeL, kneeR, armSwingL, armSwingR, headBob;
+                if (isJobHuntSeated) {
+                    verticalBob = 0;
+                    legSwingL = 1.2; legSwingR = 1.2;
+                    kneeL = -1.5; kneeR = -1.5;
+                    armSwingL = -0.05; armSwingR = -0.05;
+                    headBob = Math.sin(t * 2) * 0.02;
+                } else {
+                    verticalBob = Math.abs(Math.sin(t)) * (isAdultScene ? 4.0 : 2.5);
+                    const swingMult = isAdultScene ? 1.5 : 1.0;
+                    legSwingL = Math.sin(t) * 0.26 * swingMult;
+                    legSwingR = Math.sin(t + Math.PI) * 0.26 * swingMult;
+                    kneeL = Math.max(0, -legSwingL) * 0.4;
+                    kneeR = Math.max(0, -legSwingR) * 0.4;
+                    armSwingL = Math.sin(t + Math.PI) * 0.22 * swingMult;
+                    armSwingR = Math.sin(t) * 0.22 * swingMult;
+                    headBob = Math.sin(t * 2) * 0.02;
+                }
 
                 // direction flipped: character faces the direction they walk
-                ctx.scale(-this.direction * this.scale, this.scale);
+                // When seated in interview, always face right (toward interviewers)
+                const drawDir = isJobHuntSeated ? -1 : -this.direction;
+                ctx.scale(drawDir * this.scale, this.scale);
                 ctx.translate(0, -verticalBob);
 
-                // Walk animation
-                const legSwingL = Math.sin(t) * 0.26;
-                const legSwingR = Math.sin(t + Math.PI) * 0.26;
-                const kneeL = Math.max(0, -legSwingL) * 0.4;
-                const kneeR = Math.max(0, -legSwingR) * 0.4;
-                const armSwingL = Math.sin(t + Math.PI) * 0.22;
-                const armSwingR = Math.sin(t) * 0.22;
-                const headBob = Math.sin(t * 2) * 0.02;
+                // Forward lean when running in ADULT phase
+                const isMoving = Math.abs(Math.sin(t)) > 0.1;
+                if (isAdultScene && isMoving && !isJobHuntSeated) {
+                    ctx.rotate(-0.08);
+                }
 
-                // --- Leg helper: shorts → knee-cover → shin → sock → shoe ---
+                // Outfit-derived colors for draw() (side-scroll)
+                const topColor = this.outfit === "fastfood" ? "#cc3333" : this.outfit === "suit" ? "#2a3050" : this.bodyColor;
+                const pantsColor = this.outfit === "fastfood" ? "#333" : this.outfit === "suit" ? "#2a2a3a" : this.limbColor;
+                const longPants = this.outfit === "fastfood" || this.outfit === "suit";
+
+                // --- Leg helper ---
                 const drawLeg = (x, y, upperAng, kneeAng) => {
                     this.drawPart(ctx, x, y, upperAng, c => {
-                        // Shorts (upper leg) — long enough to cover past knee pivot
-                        c.fillStyle = this.limbColor;
+                        c.fillStyle = pantsColor;
                         c.beginPath(); c.roundRect(-7, -3, 14, 25, 5); c.fill();
-                        // Shorts hem highlight
                         c.fillStyle = "rgba(0,0,0,0.06)";
                         c.beginPath(); c.roundRect(-7, 17, 14, 4, [0,0,3,3]); c.fill();
-                        // Lower leg pivots at y=17
                         this.drawPart(c, 0, 17, kneeAng, c2 => {
-                            // Shin (skin) — starts below shorts overlap
-                            c2.fillStyle = this.skinColor;
-                            c2.beginPath(); c2.roundRect(-5, 2, 10, 16, 4); c2.fill();
-                            // Shorts-color cap over knee joint (hides skin/shorts seam)
-                            c2.fillStyle = this.limbColor;
-                            c2.beginPath(); c2.roundRect(-6.5, -4, 13, 9, 4); c2.fill();
-                            // Hem line at knee cap bottom
-                            c2.fillStyle = "rgba(0,0,0,0.05)";
-                            c2.beginPath(); c2.roundRect(-6, 3, 12, 2, 1); c2.fill();
-                            // Sock
-                            c2.fillStyle = this.sockColor;
-                            c2.beginPath(); c2.roundRect(-5.5, 13, 11, 7, 3); c2.fill();
-                            // Sock band
-                            c2.fillStyle = "rgba(0,0,0,0.05)";
-                            c2.beginPath(); c2.roundRect(-5.5, 13, 11, 2, 1); c2.fill();
+                            if (longPants) {
+                                c2.fillStyle = pantsColor;
+                                c2.beginPath(); c2.roundRect(-6, -4, 12, 22, 4); c2.fill();
+                            } else {
+                                c2.fillStyle = this.skinColor;
+                                c2.beginPath(); c2.roundRect(-5, 2, 10, 16, 4); c2.fill();
+                                c2.fillStyle = pantsColor;
+                                c2.beginPath(); c2.roundRect(-6.5, -4, 13, 9, 4); c2.fill();
+                                c2.fillStyle = "rgba(0,0,0,0.05)";
+                                c2.beginPath(); c2.roundRect(-6, 3, 12, 2, 1); c2.fill();
+                                c2.fillStyle = this.sockColor;
+                                c2.beginPath(); c2.roundRect(-5.5, 13, 11, 7, 3); c2.fill();
+                            }
                             // Shoe body
                             c2.fillStyle = this.shoeColor;
                             c2.beginPath(); c2.ellipse(2, 20, 10, 5.5, 0, 0, Math.PI * 2); c2.fill();
@@ -1285,25 +1676,33 @@
                     });
                 };
 
-                // --- Arm helper: short sleeve → skin arm → hand ---
+                // --- Arm helper ---
                 const drawArm = (x, y, swingAng) => {
                     this.drawPart(ctx, x, y, swingAng, c => {
-                        // Short sleeve (T-shirt color)
-                        c.fillStyle = this.bodyColor;
+                        c.fillStyle = topColor;
                         c.beginPath(); c.roundRect(-5.5, -2, 11, 10, 4); c.fill();
-                        // Sleeve hem shadow
                         c.fillStyle = "rgba(0,0,0,0.05)";
                         c.beginPath(); c.roundRect(-5.5, 6, 11, 2, 1); c.fill();
-                        // Upper arm (skin)
-                        c.fillStyle = this.skinColor;
-                        c.beginPath(); c.roundRect(-4.5, 8, 9, 12, 4); c.fill();
-                        // Forearm + hand
-                        this.drawPart(c, 0, 20, 0.12, c2 => {
-                            c2.fillStyle = this.skinColor;
-                            c2.beginPath(); c2.roundRect(-3.5, 0, 7, 11, 3.5); c2.fill();
-                            // Hand
-                            c2.beginPath(); c2.ellipse(0, 12, 4.5, 3.5, 0, 0, Math.PI * 2); c2.fill();
-                        });
+                        if (longPants) {
+                            // Suit: full sleeve
+                            c.fillStyle = topColor;
+                            c.beginPath(); c.roundRect(-4.5, 8, 9, 12, 4); c.fill();
+                            this.drawPart(c, 0, 20, 0.12, c2 => {
+                                c2.fillStyle = topColor;
+                                c2.beginPath(); c2.roundRect(-4, 0, 8, 8, 3); c2.fill();
+                                c2.fillStyle = this.skinColor;
+                                c2.beginPath(); c2.roundRect(-3.5, 6, 7, 5, 3.5); c2.fill();
+                                c2.beginPath(); c2.ellipse(0, 12, 4.5, 3.5, 0, 0, Math.PI * 2); c2.fill();
+                            });
+                        } else {
+                            c.fillStyle = this.skinColor;
+                            c.beginPath(); c.roundRect(-4.5, 8, 9, 12, 4); c.fill();
+                            this.drawPart(c, 0, 20, 0.12, c2 => {
+                                c2.fillStyle = this.skinColor;
+                                c2.beginPath(); c2.roundRect(-3.5, 0, 7, 11, 3.5); c2.fill();
+                                c2.beginPath(); c2.ellipse(0, 12, 4.5, 3.5, 0, 0, Math.PI * 2); c2.fill();
+                            });
+                        }
                     });
                 };
 
@@ -1314,76 +1713,77 @@
                 // Back arm
                 drawArm(-15, -54, armSwingL);
 
-                // Backpack (behind body)
-                ctx.save();
-                ctx.fillStyle = this.backpackColor;
-                ctx.globalAlpha = 0.82;
-                // Main bag
-                ctx.beginPath(); ctx.roundRect(-22, -52, 16, 26, 5); ctx.fill();
-                // Flap
-                ctx.fillStyle = "rgba(0,0,0,0.07)";
-                ctx.beginPath(); ctx.roundRect(-22, -52, 16, 9, [5,5,0,0]); ctx.fill();
-                // Flap buckle
-                ctx.fillStyle = "rgba(255,255,255,0.25)";
-                ctx.beginPath(); ctx.roundRect(-16, -44, 4, 3, 1); ctx.fill();
-                // Side pocket
-                ctx.fillStyle = "rgba(0,0,0,0.04)";
-                ctx.beginPath(); ctx.roundRect(-8, -40, 3, 12, 1); ctx.fill();
-                ctx.globalAlpha = 1;
-                ctx.restore();
+                // Backpack (behind body) — hide for suit/fastfood
+                if (!this.outfit) {
+                    ctx.save();
+                    ctx.fillStyle = this.backpackColor;
+                    ctx.globalAlpha = 0.82;
+                    ctx.beginPath(); ctx.roundRect(-22, -52, 16, 26, 5); ctx.fill();
+                    ctx.fillStyle = "rgba(0,0,0,0.07)";
+                    ctx.beginPath(); ctx.roundRect(-22, -52, 16, 9, [5,5,0,0]); ctx.fill();
+                    ctx.fillStyle = "rgba(255,255,255,0.25)";
+                    ctx.beginPath(); ctx.roundRect(-16, -44, 4, 3, 1); ctx.fill();
+                    ctx.fillStyle = "rgba(0,0,0,0.04)";
+                    ctx.beginPath(); ctx.roundRect(-8, -40, 3, 12, 1); ctx.fill();
+                    ctx.globalAlpha = 1;
+                    ctx.restore();
+                }
 
-                // Body — T-shirt
-                ctx.fillStyle = this.bodyColor;
+                // Body
+                ctx.fillStyle = topColor;
                 ctx.beginPath(); ctx.roundRect(-17, -58, 34, 32, 8); ctx.fill();
-                // Collar (V-neck)
-                ctx.fillStyle = this.skinColor;
-                ctx.beginPath();
-                ctx.moveTo(-7, -58);
-                ctx.quadraticCurveTo(0, -51, 7, -58);
-                ctx.fill();
-                // T-shirt highlight
-                ctx.fillStyle = "rgba(255,255,255,0.08)";
-                ctx.beginPath(); ctx.ellipse(2, -44, 10, 12, 0, 0, Math.PI * 2); ctx.fill();
-                // Pocket (small square on chest)
-                ctx.strokeStyle = "rgba(0,0,0,0.06)";
-                ctx.lineWidth = 0.8;
-                ctx.beginPath(); ctx.roundRect(4, -50, 8, 8, 2); ctx.stroke();
+                if (this.outfit === "suit") {
+                    // Suit jacket lapels
+                    ctx.fillStyle = this.skinColor;
+                    ctx.beginPath(); ctx.moveTo(-5, -58); ctx.lineTo(0, -48); ctx.lineTo(5, -58); ctx.fill();
+                    // Tie
+                    ctx.fillStyle = "#883333";
+                    ctx.beginPath(); ctx.moveTo(-1, -55); ctx.lineTo(1, -55); ctx.lineTo(2, -40); ctx.lineTo(0, -38); ctx.lineTo(-2, -40); ctx.closePath(); ctx.fill();
+                    ctx.fillStyle = "#772828";
+                    ctx.beginPath(); ctx.ellipse(0, -55, 2.5, 1.5, 0, 0, Math.PI * 2); ctx.fill();
+                    // Highlight
+                    ctx.fillStyle = "rgba(255,255,255,0.05)";
+                    ctx.beginPath(); ctx.ellipse(2, -44, 10, 12, 0, 0, Math.PI * 2); ctx.fill();
+                } else {
+                    // Regular T-shirt collar
+                    ctx.fillStyle = this.skinColor;
+                    ctx.beginPath(); ctx.moveTo(-7, -58); ctx.quadraticCurveTo(0, -51, 7, -58); ctx.fill();
+                    ctx.fillStyle = "rgba(255,255,255,0.08)";
+                    ctx.beginPath(); ctx.ellipse(2, -44, 10, 12, 0, 0, Math.PI * 2); ctx.fill();
+                    ctx.strokeStyle = "rgba(0,0,0,0.06)"; ctx.lineWidth = 0.8;
+                    ctx.beginPath(); ctx.roundRect(4, -50, 8, 8, 2); ctx.stroke();
+                }
 
-                // Shorts (waistband + shorts body)
-                ctx.fillStyle = this.limbColor;
+                // Pants/Shorts
+                ctx.fillStyle = pantsColor;
                 ctx.beginPath(); ctx.roundRect(-16, -28, 32, 24, [0,0,6,6]); ctx.fill();
-                // Waistband
                 ctx.fillStyle = "rgba(0,0,0,0.08)";
                 ctx.beginPath(); ctx.roundRect(-16, -28, 32, 3, 1); ctx.fill();
-                // Center seam
-                ctx.strokeStyle = "rgba(0,0,0,0.04)";
-                ctx.lineWidth = 0.8;
+                ctx.strokeStyle = "rgba(0,0,0,0.04)"; ctx.lineWidth = 0.8;
                 ctx.beginPath(); ctx.moveTo(0, -25); ctx.lineTo(0, -6); ctx.stroke();
-                // Hip joints — shorts-color to hide leg pivot seam
-                ctx.fillStyle = this.limbColor;
+                ctx.fillStyle = pantsColor;
                 ctx.beginPath(); ctx.ellipse(-8, -7, 10, 9, 0, 0, Math.PI * 2); ctx.fill();
                 ctx.beginPath(); ctx.ellipse(8, -7, 10, 9, 0, 0, Math.PI * 2); ctx.fill();
-                // Subtle shadow at hip
                 ctx.fillStyle = "rgba(0,0,0,0.04)";
                 ctx.beginPath(); ctx.ellipse(-8, -5, 7, 4, 0, 0, Math.PI * 2); ctx.fill();
                 ctx.beginPath(); ctx.ellipse(8, -5, 7, 4, 0, 0, Math.PI * 2); ctx.fill();
 
-                // Front leg (pivot at hip joint center)
+                // Front leg
                 drawLeg(8, -7, legSwingR, kneeR);
                 // Front arm
                 drawArm(15, -54, armSwingR);
 
-                // Backpack straps (visible from front, over shoulders)
-                ctx.strokeStyle = this.backpackColor;
-                ctx.globalAlpha = 0.55;
-                ctx.lineWidth = 2.5;
-                ctx.lineCap = "round";
-                // Left strap
-                ctx.beginPath(); ctx.moveTo(-10, -56); ctx.quadraticCurveTo(-12, -48, -10, -42); ctx.stroke();
-                // Right strap
-                ctx.beginPath(); ctx.moveTo(4, -56); ctx.quadraticCurveTo(6, -48, 4, -42); ctx.stroke();
-                ctx.globalAlpha = 1;
-                ctx.lineCap = "butt";
+                // Backpack straps — hide for suit/fastfood
+                if (!this.outfit) {
+                    ctx.strokeStyle = this.backpackColor;
+                    ctx.globalAlpha = 0.55;
+                    ctx.lineWidth = 2.5;
+                    ctx.lineCap = "round";
+                    ctx.beginPath(); ctx.moveTo(-10, -56); ctx.quadraticCurveTo(-12, -48, -10, -42); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(4, -56); ctx.quadraticCurveTo(6, -48, 4, -42); ctx.stroke();
+                    ctx.globalAlpha = 1;
+                    ctx.lineCap = "butt";
+                }
 
                 // Head (radius 21, child proportions)
                 this.drawPart(ctx, 0, -72, headBob, c => {
@@ -1454,6 +1854,222 @@
 
                 ctx.restore();
             }
+
+            drawBicycle(ctx, t) {
+                const isMoving = Math.abs(Math.sin(t)) > 0.1;
+                const pedalAngle = t * 2;
+                const bob = Math.sin(t * 2) * 1.5;
+
+                ctx.scale(this.direction * this.scale, this.scale);
+                ctx.translate(0, -bob);
+
+                // Slight forward lean when riding
+                if (isMoving) ctx.rotate(-0.06);
+
+                // --- Bicycle frame ---
+                const wheelR = 16;
+                const wheelY = -wheelR;
+                const rearWheelX = -22;
+                const frontWheelX = 22;
+                const seatX = -8;
+                const seatY = -wheelR - 22;
+                const handleX = 18;
+                const handleY = -wheelR - 26;
+                const bbX = 0; // bottom bracket (pedal center)
+                const bbY = -wheelR - 2;
+                const pedalR = 10;
+
+                // Rear wheel
+                ctx.strokeStyle = "#444";
+                ctx.lineWidth = 2.5;
+                ctx.beginPath(); ctx.arc(rearWheelX, wheelY, wheelR, 0, Math.PI * 2); ctx.stroke();
+                // Spokes
+                ctx.strokeStyle = "rgba(100,100,100,0.4)";
+                ctx.lineWidth = 1;
+                for (let s = 0; s < 6; s++) {
+                    const a = s * Math.PI / 3 + t * 0.5;
+                    ctx.beginPath();
+                    ctx.moveTo(rearWheelX, wheelY);
+                    ctx.lineTo(rearWheelX + Math.cos(a) * wheelR * 0.9, wheelY + Math.sin(a) * wheelR * 0.9);
+                    ctx.stroke();
+                }
+
+                // Front wheel
+                ctx.strokeStyle = "#444";
+                ctx.lineWidth = 2.5;
+                ctx.beginPath(); ctx.arc(frontWheelX, wheelY, wheelR, 0, Math.PI * 2); ctx.stroke();
+                ctx.strokeStyle = "rgba(100,100,100,0.4)";
+                ctx.lineWidth = 1;
+                for (let s = 0; s < 6; s++) {
+                    const a = s * Math.PI / 3 + t * 0.5;
+                    ctx.beginPath();
+                    ctx.moveTo(frontWheelX, wheelY);
+                    ctx.lineTo(frontWheelX + Math.cos(a) * wheelR * 0.9, wheelY + Math.sin(a) * wheelR * 0.9);
+                    ctx.stroke();
+                }
+
+                // Frame (triangle structure)
+                ctx.strokeStyle = "#5588aa";
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                // Seat tube: seat → bottom bracket
+                ctx.moveTo(seatX, seatY);
+                ctx.lineTo(bbX, bbY);
+                // Chain stay: bottom bracket → rear axle
+                ctx.lineTo(rearWheelX, wheelY);
+                // Seat stay: rear axle → seat
+                ctx.lineTo(seatX, seatY);
+                ctx.stroke();
+                ctx.beginPath();
+                // Down tube: bottom bracket → head tube (front)
+                ctx.moveTo(bbX, bbY);
+                ctx.lineTo(handleX, handleY);
+                // Fork: head tube → front axle
+                ctx.lineTo(frontWheelX, wheelY);
+                ctx.stroke();
+                // Top tube: seat → handlebars
+                ctx.beginPath();
+                ctx.moveTo(seatX, seatY);
+                ctx.lineTo(handleX, handleY);
+                ctx.stroke();
+
+                // Saddle
+                ctx.fillStyle = "#333";
+                ctx.beginPath();
+                ctx.ellipse(seatX, seatY - 3, 10, 4, -0.1, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Handlebars
+                ctx.strokeStyle = "#333";
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.moveTo(handleX - 6, handleY - 6);
+                ctx.lineTo(handleX + 4, handleY - 2);
+                ctx.stroke();
+
+                // Pedals (rotating)
+                const pedalLX = bbX + Math.cos(pedalAngle) * pedalR;
+                const pedalLY = bbY + Math.sin(pedalAngle) * pedalR;
+                const pedalRX = bbX + Math.cos(pedalAngle + Math.PI) * pedalR;
+                const pedalRY = bbY + Math.sin(pedalAngle + Math.PI) * pedalR;
+                ctx.fillStyle = "#555";
+                ctx.fillRect(pedalLX - 4, pedalLY - 2, 8, 4);
+                ctx.fillRect(pedalRX - 4, pedalRY - 2, 8, 4);
+                // Crank arms
+                ctx.strokeStyle = "#666";
+                ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(bbX, bbY); ctx.lineTo(pedalLX, pedalLY); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(bbX, bbY); ctx.lineTo(pedalRX, pedalRY); ctx.stroke();
+
+                // --- Rider (upper body, seated on bike) ---
+                const riderBaseY = seatY - 4;
+
+                // Back leg (connects to rear pedal)
+                this.drawPart(ctx, seatX + 4, riderBaseY + 6, 0, c => {
+                    // Upper leg to pedal
+                    const dx = pedalRX - (seatX + 4);
+                    const dy = pedalRY - (riderBaseY + 6);
+                    const legAng = Math.atan2(dy, dx);
+                    c.save(); c.rotate(legAng);
+                    const legLen = Math.hypot(dx, dy);
+                    c.fillStyle = this.limbColor;
+                    c.beginPath(); c.roundRect(-5, -5, Math.min(legLen * 0.55, 22), 10, 4); c.fill();
+                    c.save(); c.translate(Math.min(legLen * 0.55, 22) - 2, 0);
+                    const lowerLen = legLen - Math.min(legLen * 0.55, 22) + 2;
+                    c.fillStyle = this.skinColor;
+                    c.beginPath(); c.roundRect(-3, -4, Math.max(lowerLen, 8), 8, 3); c.fill();
+                    // Shoe
+                    c.fillStyle = this.shoeColor;
+                    c.beginPath(); c.ellipse(Math.max(lowerLen, 8) - 2, 0, 8, 5, 0, 0, Math.PI * 2); c.fill();
+                    c.restore();
+                    c.restore();
+                });
+
+                // Body (torso, slightly leaning forward)
+                ctx.save();
+                ctx.translate(seatX, riderBaseY);
+                ctx.rotate(-0.15); // leaning forward on bike
+
+                // Torso
+                ctx.fillStyle = this.bodyColor;
+                ctx.beginPath();
+                ctx.roundRect(-14, -34, 28, 32, 8);
+                ctx.fill();
+                // T-shirt collar
+                ctx.fillStyle = this.skinColor;
+                ctx.beginPath();
+                ctx.ellipse(0, -34, 8, 3, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Front leg (connects to front pedal)
+                ctx.save();
+                ctx.translate(4, -2);
+                const dx2 = pedalLX - (seatX + 4);
+                const dy2 = pedalLY - (riderBaseY - 2);
+                const fLegAng = Math.atan2(dy2 + 2, dx2);
+                ctx.rotate(fLegAng + 0.15);
+                const fLegLen = Math.hypot(dx2, dy2 + 2);
+                ctx.fillStyle = this.limbColor;
+                ctx.beginPath(); ctx.roundRect(-5, -5, Math.min(fLegLen * 0.55, 22), 10, 4); ctx.fill();
+                ctx.save(); ctx.translate(Math.min(fLegLen * 0.55, 22) - 2, 0);
+                const fLowerLen = fLegLen - Math.min(fLegLen * 0.55, 22) + 2;
+                ctx.fillStyle = this.skinColor;
+                ctx.beginPath(); ctx.roundRect(-3, -4, Math.max(fLowerLen, 8), 8, 3); ctx.fill();
+                ctx.fillStyle = this.shoeColor;
+                ctx.beginPath(); ctx.ellipse(Math.max(fLowerLen, 8) - 2, 0, 8, 5, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+                ctx.restore();
+
+                // Arms reaching to handlebars
+                const armTargetX = handleX - seatX;
+                const armTargetY = handleY - riderBaseY + 34 - 10;
+                const armAng = Math.atan2(armTargetY, armTargetX);
+                const armLen = Math.min(Math.hypot(armTargetX, armTargetY), 30);
+                // Back arm
+                ctx.save();
+                ctx.translate(-8, -28);
+                ctx.rotate(armAng + 0.1);
+                ctx.fillStyle = this.skinColor;
+                ctx.beginPath(); ctx.roundRect(-3, -3, armLen * 0.5, 8, 3); ctx.fill();
+                ctx.translate(armLen * 0.5, 0);
+                ctx.fillStyle = this.skinColor;
+                ctx.beginPath(); ctx.roundRect(-3, -3, armLen * 0.5, 7, 3); ctx.fill();
+                ctx.restore();
+                // Front arm
+                ctx.save();
+                ctx.translate(8, -28);
+                ctx.rotate(armAng - 0.1);
+                ctx.fillStyle = this.skinColor;
+                ctx.beginPath(); ctx.roundRect(-3, -3, armLen * 0.5, 8, 3); ctx.fill();
+                ctx.translate(armLen * 0.5, 0);
+                ctx.fillStyle = this.skinColor;
+                ctx.beginPath(); ctx.roundRect(-3, -3, armLen * 0.5, 7, 3); ctx.fill();
+                ctx.restore();
+
+                // Head
+                this.drawPart(ctx, 0, -48, Math.sin(t * 2) * 0.02, c => {
+                    // Head
+                    c.fillStyle = this.skinColor;
+                    c.beginPath(); c.arc(3, 0, 20, 0, Math.PI * 2); c.fill();
+                    // Ears
+                    c.beginPath(); c.arc(-15, 2, 5, 0, Math.PI * 2); c.fill();
+                    c.beginPath(); c.arc(21, 2, 5, 0, Math.PI * 2); c.fill();
+                    // Hair
+                    c.fillStyle = this.hairColor;
+                    if (this.hairStyle === 0) {
+                        c.beginPath(); c.ellipse(3, -12, 18, 13, 0, Math.PI, 0); c.fill();
+                    } else if (this.hairStyle === 1) {
+                        c.beginPath(); c.ellipse(3, -12, 20, 14, 0, Math.PI, 0); c.fill();
+                        c.beginPath(); c.ellipse(-10, -5, 8, 14, 0.2, Math.PI * 0.5, Math.PI * 1.5); c.fill();
+                    } else {
+                        c.beginPath(); c.ellipse(3, -10, 19, 16, 0, Math.PI, 0); c.fill();
+                        c.beginPath(); c.ellipse(3, 2, 20, 10, 0, Math.PI * 0.85, Math.PI * 0.15, true); c.fill();
+                    }
+                    drawBabyFace(c, this.faceType, this.skinColor, this.cheekColor, null, false);
+                });
+
+                ctx.restore(); // end body rotation
+            }
         }
 
         function updateCamera() {
@@ -1467,6 +2083,29 @@
 
             const maxCamera = Math.max(0, worldWidth - width);
             cameraX = Math.max(0, Math.min(cameraX, maxCamera));
+        }
+
+        function updateTopDownCamera() {
+            if (!baby) return;
+            const hudH = 130;
+            const effH = height - hudH;
+            const leftT = width * 0.30, rightT = width * 0.70;
+            const topT = effH * 0.30, bottomT = effH * 0.65;
+            const sx = baby.x - topDownCameraX;
+            const sy = baby.y - topDownCameraY;
+            if (sx > rightT) topDownCameraX = baby.x - rightT;
+            if (sx < leftT) topDownCameraX = baby.x - leftT;
+            if (sy > bottomT) topDownCameraY = baby.y - bottomT;
+            if (sy < topT) topDownCameraY = baby.y - topT;
+            topDownCameraX = Math.max(0, Math.min(topDownCameraX, Math.max(0, worldWidth - width)));
+            topDownCameraY = Math.max(0, Math.min(topDownCameraY, Math.max(0, worldHeight - height)));
+
+            // Job hunt camera zoom — zoom in when inside interview room (skip in side-scroll mode)
+            if ((currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) && jobHuntViewMode !== "sidescroll") {
+                const wallY = worldHeight * 0.52;
+                const targetZoom = (baby.y < wallY) ? 1.4 : 1.0;
+                jobHuntCameraZoom += (targetZoom - jobHuntCameraZoom) * 0.04;
+            }
         }
 
         function drawCrawlBackground() {
@@ -2390,12 +3029,10 @@
             const chimeSynth = new Tone.PolySynth(Tone.Synth, {
                 oscillator: { type: "sine" },
                 envelope: { attack: 0.01, decay: 1.2, sustain: 0.15, release: 1.5 },
-                volume: -8
+                volume: -16
             }).toDestination();
-            const reverb = new Tone.Reverb({ decay: 2.5, wet: 0.4 }).toDestination();
-            chimeSynth.connect(reverb);
-            // E5 → C5 → D5 → G4 (classic pattern)
-            const notes = ["E5", "C5", "D5", "G4"];
+            // E4 → C4 → D4 → G3 (1 octave lower than original)
+            const notes = ["E4", "C4", "D4", "G3"];
             const spacing = 0.55; // seconds between each note
             notes.forEach((note, i) => {
                 chimeSynth.triggerAttackRelease(note, "2n", Tone.now() + i * spacing);
@@ -2403,7 +3040,6 @@
             // Dispose after chime finishes
             setTimeout(() => {
                 chimeSynth.dispose();
-                reverb.dispose();
             }, (notes.length * spacing + 3) * 1000);
         }
 
@@ -3099,24 +3735,38 @@
 
         // ======== ADULT PHASE (大人フェーズ) ========
         const ADULT_ACTIVITIES = [
-            { id: "university", name: "大学", bassStyle: "contemplative", guitarStyle: "fingerpicking",
+            { id: "university", name: "大学", keyboardStyle: "piano-gentle",
               color: "hsl(220, 55%, 60%)", worldFraction: [0.04, 0.16],
               labels: { study: 3, curious: 2, focused: 1 } },
-            { id: "parttime", name: "アルバイト", bassStyle: "groovy", guitarStyle: "cutting",
+            { id: "parttime", name: "アルバイト", keyboardStyle: "organ-funky",
               color: "hsl(35, 60%, 58%)", worldFraction: [0.20, 0.34],
               labels: { resilient: 3, social: 2, patient: 1 } },
-            { id: "jobhunt", name: "就活", bassStyle: "soft", guitarStyle: "clean-electric",
+            { id: "jobhunt", name: "就活", keyboardStyle: "piano-chord",
               color: "hsl(0, 0%, 55%)", worldFraction: [0.40, 0.54],
               labels: { focused: 3, cautious: 2, resilient: 1 } },
-            { id: "travel", name: "旅", bassStyle: "melodic", guitarStyle: "acoustic-arpeggio",
+            { id: "travel", name: "旅", keyboardStyle: "piano-arpeggio",
               color: "hsl(170, 50%, 55%)", worldFraction: [0.60, 0.74],
               labels: { adventurous: 3, curious: 2, optimistic: 1 } },
-            { id: "startup", name: "起業", bassStyle: "energetic", guitarStyle: "rock",
+            { id: "startup", name: "起業", keyboardStyle: "organ-power",
               color: "hsl(45, 70%, 55%)", worldFraction: [0.80, 0.94],
               labels: { creative: 3, adventurous: 2, expressive: 1 } }
         ];
 
         let adultBuildingSeeds = [];
+
+        // ======== UNIVERSITY FACILITIES (大学キャンパス施設) ========
+        const UNIVERSITY_FACILITIES = [
+            { id: "gate", name: "校門", worldFraction: [0.02, 0.14],
+              color: "hsl(30, 45%, 55%)", labels: { social: 5, optimistic: 4 } },
+            { id: "field", name: "運動場", worldFraction: [0.18, 0.34],
+              color: "hsl(120, 50%, 50%)", labels: { active: 5, resilient: 4 } },
+            { id: "building", name: "校舎", worldFraction: [0.38, 0.56],
+              color: "hsl(210, 50%, 60%)", labels: { study: 5, focused: 4 } },
+            { id: "gym", name: "体育館", worldFraction: [0.60, 0.76],
+              color: "hsl(15, 55%, 58%)", labels: { resilient: 5, active: 4 } },
+            { id: "art_hall", name: "制作館", worldFraction: [0.80, 0.96],
+              color: "hsl(280, 45%, 60%)", labels: { creative: 5, expressive: 4 } }
+        ];
 
         function startAdultPhase() {
             currentScene = SCENE.ADULT;
@@ -3142,6 +3792,7 @@
                 });
             }
 
+            initAdultNpcs();
             initAdultDrops();
             initCarryHatLayer();
             initCarrySnareLayer();
@@ -3162,70 +3813,32 @@
             if (!baseRhythmInfo || !inheritedChordProgression) return;
 
             const floorY = height * ROOM_WALL_RATIO + TONE_FLOOR_OFFSET;
-            const BASS_TIMBRES = {
-                energetic:     { osc: "sawtooth", attack: 0.01, decay: 0.15, sustain: 0.35, release: 0.25, filterBase: 150, filterOct: 3 },
-                soft:          { osc: "sine",     attack: 0.06, decay: 0.5,  sustain: 0.5,  release: 0.8,  filterBase: 80,  filterOct: 1.5 },
-                contemplative: { osc: "sine",     attack: 0.08, decay: 0.6,  sustain: 0.6,  release: 1.2,  filterBase: 60,  filterOct: 1.2 },
-                groovy:        { osc: "triangle", attack: 0.01, decay: 0.2,  sustain: 0.3,  release: 0.3,  filterBase: 130, filterOct: 2.5 },
-                melodic:       { osc: "sine",     attack: 0.03, decay: 0.35, sustain: 0.45, release: 0.6,  filterBase: 100, filterOct: 2 }
-            };
 
             for (let i = 0; i < ADULT_ACTIVITIES.length; i++) {
                 const act = ADULT_ACTIVITIES[i];
-                const bassVariant = randInt(0, 1);
-                const bassBundle = buildBassLine(baseRhythmInfo, act.bassStyle, inheritedChordProgression, bassVariant);
-
-                const timbre = BASS_TIMBRES[act.bassStyle] || BASS_TIMBRES.soft;
-                const bassSynth = new Tone.MonoSynth({
-                    oscillator: { type: timbre.osc },
-                    envelope: { attack: timbre.attack, decay: timbre.decay, sustain: timbre.sustain, release: timbre.release },
-                    filterEnvelope: {
-                        attack: timbre.attack * 0.5, decay: timbre.decay, sustain: timbre.sustain, release: timbre.release,
-                        baseFrequency: timbre.filterBase, octaves: timbre.filterOct
-                    },
-                    volume: -100
-                }).toDestination();
-
-                // Guitar layer
-                const guitarVariant = randInt(0, 1);
-                const guitarBundle = act.guitarStyle
-                    ? buildGuitarLine(baseRhythmInfo, act.guitarStyle, inheritedChordProgression, guitarVariant)
-                    : null;
-                const guitar = act.guitarStyle ? createGuitarSynth(act.guitarStyle) : { synth: null, effects: [] };
+                const variant = randInt(0, 1);
+                const kbBundle = buildKeyboardLine(baseRhythmInfo, act.keyboardStyle, inheritedChordProgression, variant);
+                const kb = createKeyboardSynth(act.keyboardStyle);
 
                 const minX = worldWidth * act.worldFraction[0];
                 const maxX = worldWidth * act.worldFraction[1];
                 const cx = minX + (maxX - minX) * 0.5;
 
-                // Merge bass + guitar patterns so tick loop processes guitar-only steps too
-                const mergedPattern = bassBundle.pattern.slice();
-                if (guitarBundle) {
-                    for (let s = 0; s < mergedPattern.length; s++) {
-                        if (guitarBundle.pattern[s]) mergedPattern[s] = true;
-                    }
-                }
-
                 toneDrops.push({
                     x: cx,
                     y: floorY + (i % 2 === 0 ? -8 : 8),
-                    pattern: mergedPattern,
-                    bassNotes: bassBundle.notes,
-                    bassAttacks: bassBundle.attacks,
-                    bassDurations: bassBundle.durations,
-                    bassSustainType: bassBundle.sustainType,
+                    pattern: kbBundle.pattern,
                     velocityPattern: null,
                     proximityVol: -100,
                     isHovered: false,
                     overlapAlpha: 0,
-                    instrument: "bass",
-                    bassSynth,
-                    bassStyle: act.bassStyle,
-                    bassVariant,
-                    guitarSynth: guitar.synth,
-                    guitarEffects: guitar.effects,
-                    guitarNotes: guitarBundle ? guitarBundle.notes : null,
-                    guitarAttacks: guitarBundle ? guitarBundle.attacks : null,
-                    guitarDurations: guitarBundle ? guitarBundle.durations : null,
+                    instrument: "keyboard",
+                    keyboardSynth: kb.synth,
+                    keyboardEffects: kb.effects,
+                    keyboardNotes: kbBundle.notes,
+                    keyboardAttacks: kbBundle.attacks,
+                    keyboardDurations: kbBundle.durations,
+                    keyboardSustainType: kbBundle.sustainType,
                     activityId: act.id,
                     activityName: act.name,
                     dropColor: act.color,
@@ -3544,6 +4157,60 @@
             }
         }
 
+        function initAdultNpcs() {
+            adultNpcs = [];
+            for (let i = 0; i < 8; i++) {
+                const modeRoll = Math.random();
+                const mode = modeRoll < 0.4 ? "walk" : (modeRoll < 0.7 ? "jog" : "stand");
+                const goingRight = Math.random() < 0.5;
+                adultNpcs.push({
+                    x: Math.random() * worldWidth,
+                    dir: goingRight ? 1 : -1,
+                    mode,
+                    speed: mode === "walk" ? (0.5 + Math.random() * 0.3) : (mode === "jog" ? (2.0 + Math.random() * 1.0) : 0),
+                    scale: 1.0 + Math.random() * 0.1,
+                    walkCycle: Math.random() * Math.PI * 2,
+                    bodyHue: randInt(0, 360),
+                    limbHue: randInt(0, 360),
+                    skinTone: `hsl(25, ${58 + randInt(0, 20)}%, ${78 + randInt(0, 10)}%)`,
+                    hairColor: `hsl(${randInt(15, 45)}, ${30 + randInt(0, 25)}%, ${35 + randInt(0, 25)}%)`,
+                    faceType: randInt(0, 4),
+                    isBoy: Math.random() < 0.5,
+                    hairStyle: randInt(0, 2),
+                    cheekColor: "hsl(350, 62%, 78%)"
+                });
+            }
+        }
+
+        function updateAdultNpcs() {
+            if (!adultNpcs) return;
+            adultNpcs.forEach(npc => {
+                npc.x += npc.speed * npc.dir;
+                if (npc.mode === "walk") npc.walkCycle += 0.10;
+                else if (npc.mode === "jog") npc.walkCycle += 0.22;
+                else npc.walkCycle += 0.02; // idle sway
+                // Respawn off-screen NPCs at opposite edge with new random mode
+                if (npc.dir > 0 && npc.x > worldWidth + 200) {
+                    npc.x = -150 - randInt(0, 300);
+                    const modeRoll = Math.random();
+                    npc.mode = modeRoll < 0.4 ? "walk" : (modeRoll < 0.7 ? "jog" : "stand");
+                    npc.speed = npc.mode === "walk" ? (0.5 + Math.random() * 0.3) : (npc.mode === "jog" ? (2.0 + Math.random() * 1.0) : 0);
+                    npc.scale = 1.0 + Math.random() * 0.1;
+                    npc.bodyHue = randInt(0, 360);
+                    npc.limbHue = randInt(0, 360);
+                }
+                if (npc.dir < 0 && npc.x < -200) {
+                    npc.x = worldWidth + 150 + randInt(0, 300);
+                    const modeRoll = Math.random();
+                    npc.mode = modeRoll < 0.4 ? "walk" : (modeRoll < 0.7 ? "jog" : "stand");
+                    npc.speed = npc.mode === "walk" ? (0.5 + Math.random() * 0.3) : (npc.mode === "jog" ? (2.0 + Math.random() * 1.0) : 0);
+                    npc.scale = 1.0 + Math.random() * 0.1;
+                    npc.bodyHue = randInt(0, 360);
+                    npc.limbHue = randInt(0, 360);
+                }
+            });
+        }
+
         function drawAdultBackground() {
             const wallH = height * ROOM_WALL_RATIO;
 
@@ -3669,6 +4336,18 @@
                 ctx.beginPath(); ctx.arc(lx + 12, groundY - poleH + 2, 4, 0, Math.PI * 2); ctx.fill();
             }
 
+            // === Adult NPCs ===
+            updateAdultNpcs();
+            if (adultNpcs) {
+                adultNpcs.forEach(npc => {
+                    if (npc.mode === "stand") {
+                        drawSchoolNpc(npc, { standing: true, gesturePhase: npc.walkCycle });
+                    } else {
+                        drawSchoolNpc(npc);
+                    }
+                });
+            }
+
             // === Activity signs ===
             for (let i = 0; i < ADULT_ACTIVITIES.length; i++) {
                 const act = ADULT_ACTIVITIES[i];
@@ -3695,6 +4374,4223 @@
                 ctx.fillStyle = "#666";
                 ctx.fillRect(signX - 1.5, signY + signH / 2, 3, 30 - signH / 2);
             }
+        }
+
+        // ======== UNIVERSITY drop pick (add labels) ========
+        function handleUniversityChoice(clickedDrop) {
+            if (!clickedDrop.activityLabels) return;
+            playTitleToneConfirmSound();
+            addVolumeTrack('keys2');
+            // Add the facility's labels to selectedToys
+            selectedToys.push({
+                id: clickedDrop.activityId,
+                name: clickedDrop.activityName,
+                labels: clickedDrop.activityLabels
+            });
+            // Save as Keys2 for carry into next phase
+            if (clickedDrop.pattern) {
+                inheritedKeys2Pattern = clickedDrop.pattern.slice();
+                inheritedKeys2Notes = clickedDrop.keyboardNotes ? clickedDrop.keyboardNotes.slice() : null;
+                inheritedKeys2Attacks = clickedDrop.keyboardAttacks ? clickedDrop.keyboardAttacks.slice() : null;
+                inheritedKeys2Durations = clickedDrop.keyboardDurations ? clickedDrop.keyboardDurations.slice() : null;
+                inheritedKeys2SustainType = clickedDrop.keyboardSustainType ? clickedDrop.keyboardSustainType.slice() : null;
+                inheritedKeys2SoundConfig = clickedDrop.activityId || null;
+            }
+            // Visual ripple
+            const sx = clickedDrop.x - cameraX;
+            const sy = clickedDrop.y;
+            const ripple = document.createElement('div');
+            ripple.className = 'ripple ripple-anim';
+            ripple.style.position = 'fixed';
+            ripple.style.left = (sx - 40) + 'px';
+            ripple.style.top = (sy - 40) + 'px';
+            document.body.appendChild(ripple);
+            setTimeout(() => ripple.remove(), 2000);
+            // Remove the picked drop so it can't be picked again
+            const idx = toneDrops.indexOf(clickedDrop);
+            if (idx >= 0) {
+                if (clickedDrop.keyboardSynth) clickedDrop.keyboardSynth.dispose();
+                if (clickedDrop.keyboardEffects) clickedDrop.keyboardEffects.forEach(e => e.dispose());
+                toneDrops.splice(idx, 1);
+            }
+            buildScoreHud();
+        }
+
+        // ======== ADULT → UNIVERSITY transition ========
+        function handleAdultChoice(clickedDrop) {
+            if (!clickedDrop.keyboardNotes) return;
+            if (clickedDrop.activityId !== "university" &&
+                clickedDrop.activityId !== "parttime" &&
+                clickedDrop.activityId !== "jobhunt") return;
+            if (adultTransitionLock) return;
+            playTitleToneConfirmSound();
+            addVolumeTrack('keyboard');
+            adultTransitionLock = true;
+
+            // Save the keyboard pattern for carry layer
+            inheritedKeyboardPattern = clickedDrop.pattern ? clickedDrop.pattern.slice() : null;
+            inheritedKeyboardNotes = clickedDrop.keyboardNotes ? clickedDrop.keyboardNotes.slice() : null;
+            inheritedKeyboardAttacks = clickedDrop.keyboardAttacks ? clickedDrop.keyboardAttacks.slice() : null;
+            inheritedKeyboardDurations = clickedDrop.keyboardDurations ? clickedDrop.keyboardDurations.slice() : null;
+            inheritedKeyboardSustainType = clickedDrop.keyboardSustainType ? clickedDrop.keyboardSustainType.slice() : null;
+            inheritedKeyboardSoundConfig = clickedDrop.activityId || null;
+            inheritedKeyboardStyleClass = 'bass';
+
+            if (clickedDrop.activityLabels) {
+                selectedToys.push({
+                    id: clickedDrop.activityId,
+                    name: clickedDrop.activityName,
+                    labels: clickedDrop.activityLabels
+                });
+            }
+
+            disposeToneDrops();
+            toneDrops = [];
+
+            const sx = clickedDrop.x - cameraX;
+            const sy = clickedDrop.y;
+            const ripple = document.createElement('div');
+            ripple.className = 'ripple ripple-anim';
+            ripple.style.position = 'fixed';
+            ripple.style.left = (sx - 40) + 'px';
+            ripple.style.top = (sy - 40) + 'px';
+            document.body.appendChild(ripple);
+
+            fadeScreenTo(1, 1400);
+            if (clickedDrop.activityId === "university") {
+                setTimeout(() => {
+                    startUniversityPhase();
+                    fadeScreenTo(0, 1300);
+                    ripple.remove();
+                    adultTransitionLock = false;
+                }, 1400);
+            } else if (clickedDrop.activityId === "parttime") {
+                setTimeout(() => {
+                    startPartTimePhase();
+                    fadeScreenTo(0, 1300);
+                    ripple.remove();
+                    adultTransitionLock = false;
+                }, 1400);
+            } else if (clickedDrop.activityId === "jobhunt") {
+                setTimeout(() => {
+                    startJobHuntPhase();
+                    fadeScreenTo(0, 1300);
+                    ripple.remove();
+                    adultTransitionLock = false;
+                }, 1400);
+            }
+        }
+
+        // ======== UNIVERSITY PHASE (大学フェーズ) ========
+        function startUniversityPhase() {
+            currentScene = SCENE.UNIVERSITY;
+            worldWidth = Math.max(width * 3.5, 3200);
+            baby = new Child(babyColorScheme);
+            baby.x = worldWidth * 0.08;
+            baby.isBicycle = true;
+
+            initUniversityNpcs();
+            initUniversityDrops();
+            initCarryHatLayer();
+            initCarrySnareLayer();
+            initCarryCymbalLayer();
+            initCarryBassLayer();
+            initCarryKeyboardLayer();
+            startBaseGroove();
+            buildScoreHud();
+            updateScoreToggleUi();
+            orbWorldX = baby.x;
+            orbWorldY = height * ROOM_WALL_RATIO + TONE_FLOOR_OFFSET;
+            orbParticles = [];
+        }
+
+        function disposeCarryKeyboardLayer() {
+            if (carryKeyboardSynth) {
+                carryKeyboardSynth.dispose();
+                carryKeyboardSynth = null;
+            }
+            if (carryKeyboardEffects) {
+                carryKeyboardEffects.forEach(e => e.dispose());
+                carryKeyboardEffects = [];
+            }
+        }
+
+        function initCarryKeyboardLayer() {
+            disposeCarryKeyboardLayer();
+            if (!inheritedKeyboardPattern || !inheritedKeyboardNotes) return;
+            // Reuse the ADULT keyboard style that was selected
+            const styleMap = {
+                university: "piano-gentle",
+                parttime: "organ-funky",
+                jobhunt: "piano-chord",
+                travel: "piano-arpeggio",
+                startup: "organ-power"
+            };
+            const style = styleMap[inheritedKeyboardSoundConfig] || "piano-gentle";
+            const kb = createKeyboardSynth(style);
+            carryKeyboardSynth = kb.synth;
+            carryKeyboardEffects = kb.effects;
+            if (carryKeyboardSynth) {
+                carryKeyboardSynth.volume.value = -22;
+            }
+        }
+
+        function initUniversityDrops() {
+            disposeToneDrops();
+            toneDrops = [];
+            if (!baseRhythmInfo || !inheritedChordProgression) return;
+
+            const floorY = height * ROOM_WALL_RATIO + TONE_FLOOR_OFFSET;
+
+            for (let i = 0; i < UNIVERSITY_FACILITIES.length; i++) {
+                const fac = UNIVERSITY_FACILITIES[i];
+                const timbres = UNIVERSITY_FACILITY_TIMBRES[fac.id] || ["piano-gentle", "organ-funky", "piano-chord"];
+                const minX = worldWidth * fac.worldFraction[0];
+                const maxX = worldWidth * fac.worldFraction[1];
+                const cx = minX + (maxX - minX) * 0.5;
+
+                // Randomly pick 1 of 3 timbres for this facility
+                const pick = randInt(0, timbres.length - 1);
+                const timbreName = timbres[pick];
+                const patternStyle = UNIVERSITY_PATTERN_STYLES[timbreName] || "piano-gentle";
+                const variant = randInt(0, 1);
+                const kbBundle = buildKeyboardLine(baseRhythmInfo, patternStyle, inheritedChordProgression, variant);
+                const kb = createUniversitySynth(timbreName);
+
+                toneDrops.push({
+                    x: cx,
+                    y: floorY + (i % 2 === 0 ? -8 : 8),
+                    pattern: kbBundle.pattern,
+                    velocityPattern: null,
+                    proximityVol: -100,
+                    isHovered: false,
+                    overlapAlpha: 0,
+                    instrument: "keyboard",
+                    keyboardSynth: kb.synth,
+                    keyboardEffects: kb.effects,
+                    keyboardNotes: kbBundle.notes,
+                    keyboardAttacks: kbBundle.attacks,
+                    keyboardDurations: kbBundle.durations,
+                    keyboardSustainType: kbBundle.sustainType,
+                    activityId: fac.id,
+                    activityName: fac.name,
+                    dropColor: fac.color,
+                    activityLabels: fac.labels,
+                    timbreName: timbreName,
+                    ripples: []
+                });
+            }
+            primeToneDrops();
+        }
+
+        function initUniversityNpcs() {
+            universityNpcs = [];
+            for (let i = 0; i < 12; i++) {
+                const modeRoll = Math.random();
+                const mode = modeRoll < 0.5 ? "walk" : (modeRoll < 0.75 ? "jog" : "stand");
+                const goingRight = Math.random() < 0.5;
+                universityNpcs.push({
+                    x: Math.random() * worldWidth,
+                    dir: goingRight ? 1 : -1,
+                    mode,
+                    speed: mode === "walk" ? (0.4 + Math.random() * 0.3) : (mode === "jog" ? (1.5 + Math.random() * 1.0) : 0),
+                    scale: 1.0 + Math.random() * 0.1,
+                    walkCycle: Math.random() * Math.PI * 2,
+                    bodyHue: randInt(0, 360),
+                    limbHue: randInt(0, 360),
+                    skinTone: `hsl(25, ${58 + randInt(0, 20)}%, ${78 + randInt(0, 10)}%)`,
+                    hairColor: `hsl(${randInt(15, 45)}, ${30 + randInt(0, 25)}%, ${35 + randInt(0, 25)}%)`,
+                    faceType: randInt(0, 4),
+                    isBoy: Math.random() < 0.5,
+                    hairStyle: randInt(0, 2),
+                    cheekColor: "hsl(350, 62%, 78%)"
+                });
+            }
+        }
+
+        function updateUniversityNpcs() {
+            if (!universityNpcs) return;
+            universityNpcs.forEach(npc => {
+                npc.x += npc.speed * npc.dir;
+                if (npc.mode === "walk") npc.walkCycle += 0.10;
+                else if (npc.mode === "jog") npc.walkCycle += 0.22;
+                else npc.walkCycle += 0.02;
+                if (npc.dir > 0 && npc.x > worldWidth + 200) {
+                    npc.x = -150 - randInt(0, 300);
+                    const modeRoll = Math.random();
+                    npc.mode = modeRoll < 0.5 ? "walk" : (modeRoll < 0.75 ? "jog" : "stand");
+                    npc.speed = npc.mode === "walk" ? (0.4 + Math.random() * 0.3) : (npc.mode === "jog" ? (1.5 + Math.random() * 1.0) : 0);
+                    npc.scale = 1.0 + Math.random() * 0.1;
+                    npc.bodyHue = randInt(0, 360);
+                    npc.limbHue = randInt(0, 360);
+                }
+                if (npc.dir < 0 && npc.x < -200) {
+                    npc.x = worldWidth + 150 + randInt(0, 300);
+                    const modeRoll = Math.random();
+                    npc.mode = modeRoll < 0.5 ? "walk" : (modeRoll < 0.75 ? "jog" : "stand");
+                    npc.speed = npc.mode === "walk" ? (0.4 + Math.random() * 0.3) : (npc.mode === "jog" ? (1.5 + Math.random() * 1.0) : 0);
+                    npc.scale = 1.0 + Math.random() * 0.1;
+                    npc.bodyHue = randInt(0, 360);
+                    npc.limbHue = randInt(0, 360);
+                }
+            });
+        }
+
+        // ======== UNIVERSITY BACKGROUND DRAWING ========
+        function drawUniversityBackground() {
+            const wallH = height * ROOM_WALL_RATIO;
+            const groundY = wallH;
+            const groundH = height - wallH;
+
+            // === Sky gradient (warm afternoon — slightly golden, distinct from ADULT's blue) ===
+            const skyG = ctx.createLinearGradient(0, 0, 0, wallH);
+            skyG.addColorStop(0, "#5899cc");      // warm blue top
+            skyG.addColorStop(0.25, "#78b8e0");   // lighter blue
+            skyG.addColorStop(0.50, "#a0d0e8");   // soft sky
+            skyG.addColorStop(0.72, "#c8dce0");   // pale warm
+            skyG.addColorStop(0.88, "#e8dcc0");   // warm cream
+            skyG.addColorStop(1, "#f0e0b0");      // golden horizon
+            ctx.fillStyle = skyG;
+            ctx.fillRect(0, 0, worldWidth, wallH);
+
+            // === Sun (afternoon, mid-height) ===
+            const sunX = worldWidth * 0.70;
+            const sunY = wallH * 0.35;
+            const sunG = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, wallH * 0.45);
+            sunG.addColorStop(0, "rgba(255,248,220,0.7)");
+            sunG.addColorStop(0.2, "rgba(255,235,180,0.3)");
+            sunG.addColorStop(0.5, "rgba(255,220,160,0.08)");
+            sunG.addColorStop(1, "rgba(255,200,140,0)");
+            ctx.fillStyle = sunG;
+            ctx.fillRect(0, 0, worldWidth, wallH);
+            // Sun disc
+            ctx.fillStyle = "rgba(255,245,200,0.75)";
+            ctx.beginPath();
+            ctx.arc(sunX, sunY, 16, 0, Math.PI * 2);
+            ctx.fill();
+
+            // === Clouds (soft white with warm tint) ===
+            ctx.fillStyle = "rgba(255,252,240,0.55)";
+            const clouds = [
+                { x: worldWidth * 0.06, y: wallH * 0.10, r: 24 },
+                { x: worldWidth * 0.20, y: wallH * 0.06, r: 30 },
+                { x: worldWidth * 0.38, y: wallH * 0.12, r: 22 },
+                { x: worldWidth * 0.55, y: wallH * 0.05, r: 26 },
+                { x: worldWidth * 0.72, y: wallH * 0.10, r: 20 },
+                { x: worldWidth * 0.88, y: wallH * 0.07, r: 24 },
+                { x: worldWidth * 0.95, y: wallH * 0.14, r: 18 },
+            ];
+            for (const cl of clouds) {
+                ctx.beginPath();
+                ctx.arc(cl.x, cl.y, cl.r, 0, Math.PI * 2); ctx.fill();
+                ctx.arc(cl.x - cl.r * 0.7, cl.y + 3, cl.r * 0.7, 0, Math.PI * 2); ctx.fill();
+                ctx.arc(cl.x + cl.r * 0.8, cl.y + 2, cl.r * 0.65, 0, Math.PI * 2); ctx.fill();
+                ctx.arc(cl.x + cl.r * 0.2, cl.y - cl.r * 0.3, cl.r * 0.55, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // === Draw the 5 campus buildings ===
+            drawUniversityBuildings(wallH);
+
+            // === Ground (campus paths + grass) ===
+            // Grass base
+            const grassG = ctx.createLinearGradient(0, groundY, 0, groundY + groundH);
+            grassG.addColorStop(0, "#5aaa38");
+            grassG.addColorStop(0.3, "#68b848");
+            grassG.addColorStop(1, "#4a9030");
+            ctx.fillStyle = grassG;
+            ctx.fillRect(0, groundY, worldWidth, groundH);
+
+            // Brick path (walkway across campus)
+            const pathY = groundY + groundH * 0.35;
+            const pathH = groundH * 0.30;
+            ctx.fillStyle = "#c8a882";
+            ctx.fillRect(0, pathY, worldWidth, pathH);
+            // Path edge lines
+            ctx.fillStyle = "rgba(160,120,80,0.3)";
+            ctx.fillRect(0, pathY, worldWidth, 2);
+            ctx.fillRect(0, pathY + pathH - 2, worldWidth, 2);
+            // Brick pattern on path
+            ctx.strokeStyle = "rgba(140,100,70,0.15)";
+            ctx.lineWidth = 1;
+            for (let bx = 0; bx < worldWidth; bx += 24) {
+                const rowOffset = (Math.floor(bx / 24) % 2) * 12;
+                ctx.beginPath();
+                ctx.moveTo(bx, pathY);
+                ctx.lineTo(bx, pathY + pathH);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(bx, pathY + pathH * 0.5 + rowOffset % pathH);
+                ctx.lineTo(bx + 24, pathY + pathH * 0.5 + rowOffset % pathH);
+                ctx.stroke();
+            }
+
+            // Bicycle lane line (dashed white)
+            ctx.strokeStyle = "rgba(255,255,255,0.45)";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([16, 10]);
+            ctx.beginPath();
+            ctx.moveTo(0, pathY + pathH * 0.75);
+            ctx.lineTo(worldWidth, pathY + pathH * 0.75);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // === Trees along campus ===
+            const treeSpacing = worldWidth / 16;
+            for (let i = 0; i < 16; i++) {
+                const tx = treeSpacing * (i + 0.5) + (Math.sin(i * 3.7) * 20);
+                // Skip trees that overlap building zones
+                const inFac = UNIVERSITY_FACILITIES.some(f => {
+                    const fc = worldWidth * (f.worldFraction[0] + f.worldFraction[1]) / 2;
+                    const fw = worldWidth * (f.worldFraction[1] - f.worldFraction[0]) * 0.5;
+                    return Math.abs(tx - fc) < fw;
+                });
+                if (inFac) continue;
+                drawCampusTree(tx, groundY, wallH * 0.22 + Math.sin(i * 2.3) * 8, i);
+            }
+
+            // === Street lamps ===
+            const lampSpacing = worldWidth / 12;
+            for (let i = 0; i < 12; i++) {
+                const lx = lampSpacing * (i + 0.5);
+                const poleH = wallH * 0.18;
+                ctx.fillStyle = "#555";
+                ctx.fillRect(lx - 2, groundY - poleH, 4, poleH);
+                ctx.fillStyle = "#555";
+                ctx.fillRect(lx - 1, groundY - poleH, 12, 3);
+                ctx.fillStyle = "#ccc";
+                ctx.beginPath(); ctx.arc(lx + 10, groundY - poleH + 2, 3.5, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // === Benches ===
+            for (let i = 0; i < 6; i++) {
+                const bx = worldWidth * (0.05 + i * 0.18) + Math.sin(i * 5.1) * 30;
+                const inFac = UNIVERSITY_FACILITIES.some(f => {
+                    const fc = worldWidth * (f.worldFraction[0] + f.worldFraction[1]) / 2;
+                    const fw = worldWidth * (f.worldFraction[1] - f.worldFraction[0]) * 0.4;
+                    return Math.abs(bx - fc) < fw;
+                });
+                if (inFac) continue;
+                drawCampusBench(bx, groundY - 2);
+            }
+
+            // === University NPCs ===
+            updateUniversityNpcs();
+            if (universityNpcs) {
+                universityNpcs.forEach(npc => {
+                    if (npc.mode === "stand") {
+                        drawSchoolNpc(npc, { standing: true, gesturePhase: npc.walkCycle });
+                    } else {
+                        drawSchoolNpc(npc);
+                    }
+                });
+            }
+
+            // === Facility signs ===
+            for (let i = 0; i < UNIVERSITY_FACILITIES.length; i++) {
+                const fac = UNIVERSITY_FACILITIES[i];
+                const signX = worldWidth * (fac.worldFraction[0] + fac.worldFraction[1]) / 2;
+                const signY = groundY - 30;
+                const signW = 70;
+                const signH = 24;
+                ctx.fillStyle = "rgba(40,40,60,0.7)";
+                ctx.beginPath(); ctx.roundRect(signX - signW / 2, signY - signH / 2, signW, signH, 4); ctx.fill();
+                ctx.strokeStyle = fac.color;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.roundRect(signX - signW / 2, signY - signH / 2, signW, signH, 4); ctx.stroke();
+                ctx.fillStyle = "#fff";
+                ctx.font = "700 11px 'Zen Maru Gothic'";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(fac.name, signX, signY);
+                ctx.fillStyle = "#666";
+                ctx.fillRect(signX - 1.5, signY + signH / 2, 3, 30 - signH / 2);
+            }
+        }
+
+        function drawCampusTree(x, groundY, treeH, seed) {
+            const trunkW = 6 + (seed % 3) * 2;
+            const trunkH = treeH * 0.35;
+            // Trunk
+            ctx.fillStyle = "hsl(28, 35%, 38%)";
+            ctx.fillRect(x - trunkW / 2, groundY - trunkH, trunkW, trunkH);
+            // Foliage (3 overlapping circles)
+            const hue = 90 + (seed * 17) % 40;
+            ctx.fillStyle = `hsl(${hue}, 45%, 42%)`;
+            const crownY = groundY - trunkH;
+            const crownR = treeH * 0.35;
+            ctx.beginPath(); ctx.arc(x, crownY - crownR * 0.5, crownR, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = `hsl(${hue + 8}, 50%, 48%)`;
+            ctx.beginPath(); ctx.arc(x - crownR * 0.5, crownY - crownR * 0.2, crownR * 0.75, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(x + crownR * 0.5, crownY - crownR * 0.3, crownR * 0.7, 0, Math.PI * 2); ctx.fill();
+        }
+
+        function drawCampusBench(x, y) {
+            // Bench seat
+            ctx.fillStyle = "hsl(28, 30%, 45%)";
+            ctx.fillRect(x - 18, y - 8, 36, 5);
+            // Bench legs
+            ctx.fillStyle = "hsl(0, 0%, 35%)";
+            ctx.fillRect(x - 15, y - 3, 3, 8);
+            ctx.fillRect(x + 12, y - 3, 3, 8);
+            // Back rest
+            ctx.fillStyle = "hsl(28, 30%, 50%)";
+            ctx.fillRect(x - 16, y - 16, 32, 4);
+            ctx.fillRect(x - 16, y - 10, 32, 3);
+        }
+
+        // ======== PART-TIME PHASE (アルバイトフェーズ) ========
+        const PARTTIME_TIMBRES = {
+            "register-beep":    { wave: "square",   attack: 0.001, decay: 0.06, sustain: 0.0, release: 0.03, filterType: "highpass", filterFreq: 2000 },
+            "register-clack":   { wave: "triangle", attack: 0.001, decay: 0.1,  sustain: 0.0, release: 0.05, filterType: "bandpass", filterFreq: 1500 },
+            "register-ding":    { wave: "sine",     attack: 0.001, decay: 0.2,  sustain: 0.0, release: 0.1 },
+            "fryer-bubble":     { wave: "sawtooth", attack: 0.01,  decay: 0.15, sustain: 0.1, release: 0.1, filterType: "lowpass", filterFreq: 800 },
+            "fryer-sizzle":     { wave: "sawtooth", attack: 0.001, decay: 0.08, sustain: 0.0, release: 0.05, filterType: "bandpass", filterFreq: 3000 },
+            "fryer-pop":        { wave: "sine",     attack: 0.001, decay: 0.12, sustain: 0.0, release: 0.06, filterType: "highpass", filterFreq: 1200 },
+            "griddle-sear":     { wave: "sawtooth", attack: 0.001, decay: 0.1,  sustain: 0.05, release: 0.08, filterType: "bandpass", filterFreq: 2500 },
+            "griddle-scrape":   { wave: "square",   attack: 0.001, decay: 0.05, sustain: 0.0, release: 0.03, filterType: "highpass", filterFreq: 3500 },
+            "griddle-clang":    { wave: "triangle", attack: 0.001, decay: 0.15, sustain: 0.0, release: 0.08 },
+            "dishes-clink":     { wave: "sine",     attack: 0.001, decay: 0.3,  sustain: 0.0, release: 0.15, filterType: "highpass", filterFreq: 1800 },
+            "dishes-splash":    { wave: "triangle", attack: 0.01,  decay: 0.08, sustain: 0.0, release: 0.05, filterType: "lowpass", filterFreq: 600 },
+            "dishes-chime":     { wave: "sine",     attack: 0.001, decay: 0.4,  sustain: 0.0, release: 0.2 }
+        };
+        const PARTTIME_FACILITY_TIMBRES = {
+            "register": ["register-beep", "register-clack", "register-ding"],
+            "fryer":    ["fryer-bubble",  "fryer-sizzle",   "fryer-pop"],
+            "griddle":  ["griddle-sear",  "griddle-scrape",  "griddle-clang"],
+            "dishes":   ["dishes-clink",  "dishes-splash",   "dishes-chime"]
+        };
+        const PARTTIME_PATTERN_STYLES = {
+            "register-beep": "staccato-burst", "register-clack": "synco-punch", "register-ding": "staccato-burst",
+            "fryer-bubble": "rapid-tap", "fryer-sizzle": "synco-punch", "fryer-pop": "staccato-burst",
+            "griddle-sear": "rapid-tap", "griddle-scrape": "synco-punch", "griddle-clang": "staccato-burst",
+            "dishes-clink": "staccato-burst", "dishes-splash": "rapid-tap", "dishes-chime": "synco-punch"
+        };
+        const PARTTIME_DROPS = [
+            { id: "register", name: "レジ",    nameEn: "Register", color: "hsl(350, 55%, 58%)", labels: { social: 4, optimistic: 3 },   xFrac: 0.20, yFrac: 0.24 },
+            { id: "fryer",    name: "フライヤー", nameEn: "Fryer",  color: "hsl(35, 65%, 55%)",  labels: { resilient: 4, active: 3 },    xFrac: 0.30, yFrac: 0.10 },
+            { id: "griddle",  name: "鉄板",    nameEn: "Griddle",  color: "hsl(15, 50%, 50%)",  labels: { focused: 4, patient: 3 },     xFrac: 0.70, yFrac: 0.10 },
+            { id: "dishes",   name: "洗い物",   nameEn: "Dishes",  color: "hsl(195, 50%, 55%)", labels: { patient: 4, organized: 3 },   xFrac: 0.72, yFrac: 0.18 }
+        ];
+
+        function createPartTimeSynth(timbreName) {
+            const cfg = PARTTIME_TIMBRES[timbreName];
+            if (!cfg) return { synth: null, effects: [] };
+            const effects = [];
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: cfg.wave },
+                envelope: { attack: cfg.attack, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release }
+            });
+            synth.volume.value = -100;
+            if (cfg.filterType && cfg.vibratoFreq) {
+                const filter = new Tone.Filter({ type: cfg.filterType, frequency: cfg.filterFreq, Q: 1.5 });
+                const vibrato = new Tone.Vibrato({ frequency: cfg.vibratoFreq, depth: cfg.vibratoDepth });
+                effects.push(filter, vibrato);
+                synth.chain(filter, vibrato, Tone.Destination);
+            } else if (cfg.filterType) {
+                const filter = new Tone.Filter({ type: cfg.filterType, frequency: cfg.filterFreq, Q: 1.5 });
+                effects.push(filter);
+                synth.chain(filter, Tone.Destination);
+            } else {
+                synth.toDestination();
+            }
+            return { synth, effects };
+        }
+
+        function resolveObstacleCollision(entity, radius, obstacles) {
+            const r = radius || 20;
+            const obsList = obstacles || partTimeObstacles;
+            for (const obs of obsList) {
+                const cx = Math.max(obs.x, Math.min(entity.x, obs.x + obs.w));
+                const cy = Math.max(obs.y, Math.min(entity.y, obs.y + obs.h));
+                const dx = entity.x - cx, dy = entity.y - cy;
+                const dist = Math.hypot(dx, dy);
+                if (dist < r && dist > 0) {
+                    entity.x += (dx / dist) * (r - dist);
+                    entity.y += (dy / dist) * (r - dist);
+                } else if (dist === 0) {
+                    const dLeft = entity.x - obs.x;
+                    const dRight = (obs.x + obs.w) - entity.x;
+                    const dTop = entity.y - obs.y;
+                    const dBottom = (obs.y + obs.h) - entity.y;
+                    const minD = Math.min(dLeft, dRight, dTop, dBottom);
+                    if (minD === dLeft) entity.x = obs.x - r;
+                    else if (minD === dRight) entity.x = obs.x + obs.w + r;
+                    else if (minD === dTop) entity.y = obs.y - r;
+                    else entity.y = obs.y + obs.h + r;
+                }
+            }
+        }
+
+        function startPartTimePhase() {
+            currentScene = SCENE.PART_TIME;
+            isTopDownScene = true;
+            worldWidth = Math.max(width * 1.1, 900);
+            worldHeight = Math.max(height * 2.4, 1400);
+            baby = new Child(babyColorScheme);
+            baby.isTopDown = true;
+            baby.outfit = "fastfood";
+            baby.x = worldWidth * 0.5;
+            baby.y = worldHeight * 0.18;
+            cameraX = 0;
+            topDownCameraX = Math.max(0, Math.min(baby.x - width / 2, worldWidth - width));
+            topDownCameraY = Math.max(0, Math.min(baby.y - height / 2, worldHeight - height));
+            initPartTimeNpcs();
+            initPartTimeDrops();
+            const wW = worldWidth, wH = worldHeight;
+            partTimeObstacles = [
+                { x: wW*0.10, y: wH*0.03, w: wW*0.20, h: wH*0.08 },   // fryer
+                { x: wW*0.58, y: wH*0.03, w: wW*0.24, h: wH*0.08 },   // griddle
+                { x: wW*0.34, y: wH*0.09, w: wW*0.20, h: wH*0.06 },   // prep counter
+                { x: wW*0.36, y: wH*0.03, w: wW*0.18, h: wH*0.04 },   // wire rack
+                { x: wW*0.88, y: wH*0.02, w: wW*0.08, h: wH*0.12 },   // refrigerator
+                { x: wW*0.10, y: wH*0.215, w: wW*0.08, h: wH*0.035 }, // register (on counter)
+                { x: wW*0.55, y: wH*0.21, w: wW*0.12, h: wH*0.05 },   // drink machine (counter)
+                { x: wW*0.60, y: wH*0.16, w: wW*0.18, h: wH*0.04 },   // sink (kitchen, below griddle)
+                { x: 0, y: wH*0.22, w: wW, h: wH*0.05 },              // counter strip (ORDER HERE)
+            ];
+            initCarryHatLayer(); initCarrySnareLayer(); initCarryCymbalLayer();
+            initCarryBassLayer(); initCarryKeyboardLayer();
+            initCarryKeys2Layer();
+            startBaseGroove(); buildScoreHud(); updateScoreToggleUi();
+            orbWorldX = baby.x;
+            orbWorldY = baby.y;
+            orbParticles = [];
+        }
+
+        function initPartTimeNpcs() {
+            partTimeNpcs = [];
+            // Staff NPCs in kitchen area (4 staff)
+            for (let i = 0; i < 4; i++) {
+                partTimeNpcs.push({
+                    x: worldWidth * (0.2 + Math.random() * 0.6),
+                    y: worldHeight * (0.05 + Math.random() * 0.22),
+                    targetX: 0, targetY: 0,
+                    moveTimer: Math.random() * 200,
+                    speed: 1.5 + Math.random() * 1.5,
+                    walkCycle: Math.random() * Math.PI * 2,
+                    bodyHue: randInt(0, 40),
+                    limbHue: randInt(0, 40),
+                    isStaff: true,
+                    scale: 0.95 + Math.random() * 0.15,
+                    skinTone: `hsl(25, ${58 + randInt(0, 20)}%, ${78 + randInt(0, 10)}%)`,
+                    hairColor: `hsl(${randInt(15, 45)}, ${30 + randInt(0, 25)}%, ${35 + randInt(0, 25)}%)`,
+                    faceType: randInt(0, 4),
+                    isBoy: Math.random() < 0.5,
+                    hairStyle: randInt(0, 2),
+                    cheekColor: "hsl(350, 62%, 78%)"
+                });
+            }
+            // Customer NPCs lined up (8 customers)
+            for (let i = 0; i < 8; i++) {
+                partTimeNpcs.push({
+                    x: worldWidth * (0.10 + (i % 4) * 0.22),
+                    y: worldHeight * (0.36 + Math.floor(i / 4) * 0.10 + Math.random() * 0.04),
+                    targetX: 0, targetY: 0,
+                    moveTimer: 0,
+                    speed: 0,
+                    walkCycle: Math.random() * Math.PI * 2,
+                    bodyHue: randInt(0, 360),
+                    limbHue: randInt(0, 360),
+                    isStaff: false,
+                    scale: 0.90 + Math.random() * 0.15,
+                    skinTone: `hsl(25, ${58 + randInt(0, 20)}%, ${78 + randInt(0, 10)}%)`,
+                    hairColor: `hsl(${randInt(15, 45)}, ${30 + randInt(0, 25)}%, ${35 + randInt(0, 25)}%)`,
+                    faceType: randInt(0, 4),
+                    isBoy: Math.random() < 0.5,
+                    hairStyle: randInt(0, 2),
+                    cheekColor: "hsl(350, 62%, 78%)"
+                });
+            }
+            partTimeNpcs.forEach(n => {
+                n.targetX = n.x;
+                n.targetY = n.y;
+            });
+        }
+
+        function updatePartTimeNpcs() {
+            partTimeNpcs.forEach(npc => {
+                if (!npc.isStaff) {
+                    npc.walkCycle += 0.015;
+                    return;
+                }
+                npc.moveTimer--;
+                if (npc.moveTimer <= 0) {
+                    npc.targetX = worldWidth * (0.15 + Math.random() * 0.7);
+                    npc.targetY = worldHeight * (0.04 + Math.random() * 0.26);
+                    npc.moveTimer = 30 + Math.random() * 60;
+                }
+                const dx = npc.targetX - npc.x;
+                const dy = npc.targetY - npc.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist > 4) {
+                    npc.x += (dx / dist) * npc.speed;
+                    npc.y += (dy / dist) * npc.speed;
+                    npc.walkCycle += 0.35;
+                    npc.dir = dx > 0 ? 1 : -1;
+                } else {
+                    npc.walkCycle += 0.02;
+                }
+                resolveObstacleCollision(npc, 15);
+            });
+        }
+
+        function drawBaseballCap(c, HR) {
+            // Crown: shallow arch covering top of head only
+            c.fillStyle = "#cc2222";
+            c.beginPath();
+            c.arc(0, -HR * 0.5, HR * 0.75, Math.PI * 1.1, -Math.PI * 0.1, false);
+            c.closePath(); c.fill();
+            // Band (rim of cap)
+            c.fillStyle = "#aa1818";
+            c.beginPath(); c.roundRect(-HR * 0.72, -HR * 0.52, HR * 1.44, 3, 1); c.fill();
+            // Brim: large, clearly protruding forward
+            c.fillStyle = "#bb2020";
+            c.beginPath(); c.ellipse(HR * 0.8, -HR * 0.45, HR * 0.65, 5, -0.1, 0, Math.PI * 2); c.fill();
+            // Brim underside shadow
+            c.fillStyle = "rgba(0,0,0,0.18)";
+            c.beginPath(); c.ellipse(HR * 0.8, -HR * 0.38, HR * 0.55, 3, -0.1, 0, Math.PI); c.fill();
+            // Logo badge
+            c.fillStyle = "#ffcc00";
+            c.beginPath(); c.arc(0, -HR * 0.75, 3, 0, Math.PI * 2); c.fill();
+        }
+
+        function drawTopDownNpc(npc, ctx) {
+            ctx.save();
+            ctx.translate(npc.x, npc.y);
+
+            const s = npc.scale || 0.7;
+            const t = npc.walkCycle || 0;
+            const moving = Math.abs(Math.sin(t)) > 0.15;
+            const verticalBob = moving ? Math.abs(Math.sin(t)) * 2.5 : 0;
+            const dir = -(npc.dir || 1);
+            ctx.scale(dir * s, s);
+            ctx.translate(0, -verticalBob);
+
+            const skinColor = npc.skinTone || "hsl(25, 60%, 80%)";
+            const hairColor = npc.hairColor || `hsl(${20 + npc.bodyHue * 0.3}, 30%, 40%)`;
+            const cheekColor = npc.cheekColor || "hsl(350, 62%, 78%)";
+            const faceType = npc.faceType != null ? npc.faceType : 0;
+            const isBoy = npc.isBoy != null ? npc.isBoy : true;
+            const hairStyle = npc.hairStyle != null ? npc.hairStyle : 0;
+
+            const bodyColor = npc.isStaff ? "#cc3333" : `hsl(${npc.bodyHue}, 55%, 65%)`;
+            const limbColor = npc.isStaff ? "#333" : `hsl(${npc.limbHue || npc.bodyHue}, 45%, 55%)`;
+            const longPants = npc.isStaff;
+            const shoeColor = "hsl(25, 15%, 30%)";
+            const soleColor = "hsl(25, 10%, 22%)";
+            const sockColor = "hsl(0, 0%, 93%)";
+
+            let legSwingL, legSwingR, kneeL, kneeR, armSwingL, armSwingR, headBobA;
+            if (moving) {
+                legSwingL = Math.sin(t) * 0.26;
+                legSwingR = Math.sin(t + Math.PI) * 0.26;
+                kneeL = Math.max(0, -legSwingL) * 0.4;
+                kneeR = Math.max(0, -legSwingR) * 0.4;
+                armSwingL = Math.sin(t + Math.PI) * 0.22;
+                armSwingR = Math.sin(t) * 0.22;
+                headBobA = Math.sin(t * 2) * 0.02;
+            } else {
+                legSwingL = 0; legSwingR = 0; kneeL = 0; kneeR = 0;
+                armSwingL = -0.05; armSwingR = -0.05; headBobA = 0;
+            }
+
+            const dp = (x, y, ang, fn) => { ctx.save(); ctx.translate(x, y); ctx.rotate(ang); fn(ctx); ctx.restore(); };
+
+            const drawLeg = (x, y, upperAng, kneeAng) => {
+                dp(x, y, upperAng, c => {
+                    c.fillStyle = limbColor;
+                    c.beginPath(); c.roundRect(-7, -3, 14, 25, 5); c.fill();
+                    dp(0, 17, kneeAng, c2 => {
+                        if (longPants) {
+                            c2.fillStyle = limbColor;
+                            c2.beginPath(); c2.roundRect(-6, -4, 12, 22, 4); c2.fill();
+                        } else {
+                            c2.fillStyle = skinColor;
+                            c2.beginPath(); c2.roundRect(-5, 2, 10, 16, 4); c2.fill();
+                            c2.fillStyle = limbColor;
+                            c2.beginPath(); c2.roundRect(-6.5, -4, 13, 9, 4); c2.fill();
+                            c2.fillStyle = sockColor;
+                            c2.beginPath(); c2.roundRect(-5.5, 13, 11, 7, 3); c2.fill();
+                        }
+                        c2.fillStyle = shoeColor;
+                        c2.beginPath(); c2.ellipse(2, 20, 10, 5.5, 0, 0, Math.PI * 2); c2.fill();
+                        c2.beginPath(); c2.roundRect(-5, 16, 12, 5, [3,3,0,0]); c2.fill();
+                        c2.fillStyle = soleColor;
+                        c2.beginPath(); c2.moveTo(-6, 21); c2.lineTo(12, 21); c2.lineTo(11, 24); c2.lineTo(-5, 24); c2.closePath(); c2.fill();
+                    });
+                });
+            };
+            const drawArm = (x, y, swingAng) => {
+                dp(x, y, swingAng, c => {
+                    c.fillStyle = bodyColor;
+                    c.beginPath(); c.roundRect(-5.5, -2, 11, 10, 4); c.fill();
+                    c.fillStyle = skinColor;
+                    c.beginPath(); c.roundRect(-4.5, 8, 9, 12, 4); c.fill();
+                    dp(0, 20, 0.12, c2 => {
+                        c2.fillStyle = skinColor;
+                        c2.beginPath(); c2.roundRect(-3.5, 0, 7, 11, 3.5); c2.fill();
+                        c2.beginPath(); c2.ellipse(0, 12, 4.5, 3.5, 0, 0, Math.PI * 2); c2.fill();
+                    });
+                });
+            };
+
+            // === Draw order: back-leg → back-arm → body → pants → front-leg → front-arm → head ===
+            drawLeg(-8, -7, legSwingL, kneeL);
+            drawArm(-15, -54, armSwingL);
+
+            // Body
+            if (npc.isStaff) {
+                // Staff: red polo + dark apron
+                ctx.fillStyle = "#cc3333";
+                ctx.beginPath(); ctx.roundRect(-17, -58, 34, 32, 8); ctx.fill();
+                ctx.fillStyle = skinColor;
+                ctx.beginPath(); ctx.moveTo(-7, -58); ctx.quadraticCurveTo(0, -53, 7, -58); ctx.fill();
+                // Collar
+                ctx.fillStyle = "#bb2222";
+                ctx.beginPath(); ctx.moveTo(-9, -58); ctx.lineTo(-5, -53); ctx.lineTo(-1, -58); ctx.closePath(); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(1, -58); ctx.lineTo(5, -53); ctx.lineTo(9, -58); ctx.closePath(); ctx.fill();
+                // Apron
+                ctx.fillStyle = "#2a2a2a";
+                ctx.beginPath(); ctx.roundRect(-15, -42, 30, 22, [0,0,4,4]); ctx.fill();
+                ctx.strokeStyle = "#3a3a3a"; ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(-15, -42); ctx.lineTo(-18, -46); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(15, -42); ctx.lineTo(18, -46); ctx.stroke();
+                // Apron pocket
+                ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 0.7;
+                ctx.beginPath(); ctx.roundRect(-6, -38, 12, 8, 2); ctx.stroke();
+            } else {
+                // Customer: random color T-shirt
+                ctx.fillStyle = bodyColor;
+                ctx.beginPath(); ctx.roundRect(-17, -58, 34, 32, 8); ctx.fill();
+                ctx.fillStyle = skinColor;
+                ctx.beginPath(); ctx.moveTo(-7, -58); ctx.quadraticCurveTo(0, -51, 7, -58); ctx.fill();
+                ctx.fillStyle = "rgba(255,255,255,0.08)";
+                ctx.beginPath(); ctx.ellipse(2, -44, 10, 12, 0, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // Pants
+            ctx.fillStyle = limbColor;
+            ctx.beginPath(); ctx.roundRect(-16, -28, 32, 24, [0,0,6,6]); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(-8, -7, 10, 9, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(8, -7, 10, 9, 0, 0, Math.PI * 2); ctx.fill();
+
+            drawLeg(8, -7, legSwingR, kneeR);
+            drawArm(15, -54, armSwingR);
+
+            // Head
+            dp(0, -72, headBobA, c => {
+                c.scale(-1, 1);
+                const HR = 21;
+                // BACK HAIR
+                c.fillStyle = hairColor;
+                if (isBoy) {
+                    if (hairStyle === 1) { c.beginPath(); c.arc(0, -1, HR + 5, Math.PI * 0.95, Math.PI * 0.05, false); c.closePath(); c.fill(); }
+                    else if (hairStyle === 2) { c.beginPath(); c.arc(0, -1, HR + 2, Math.PI, 0, false); c.closePath(); c.fill(); }
+                } else {
+                    if (hairStyle === 0) {
+                        c.beginPath(); c.arc(0, -1, HR + 4, Math.PI, 0, false); c.closePath(); c.fill();
+                        c.beginPath(); c.roundRect(-HR - 5, -6, 9, 22, 4); c.fill();
+                        c.beginPath(); c.roundRect(HR - 4, -6, 9, 22, 4); c.fill();
+                    } else if (hairStyle === 1) {
+                        c.beginPath(); c.arc(0, -1, HR + 3, Math.PI, 0, false); c.closePath(); c.fill();
+                        c.beginPath(); c.ellipse(-20, -8, 8, 14, -0.2, 0, Math.PI * 2); c.fill();
+                        c.beginPath(); c.ellipse(20, -8, 8, 14, 0.2, 0, Math.PI * 2); c.fill();
+                    } else {
+                        c.beginPath(); c.arc(0, -1, HR + 4, Math.PI, 0, false); c.closePath(); c.fill();
+                        c.beginPath(); c.ellipse(-18, -4, 7, 16, 0.25, 0, Math.PI * 2); c.fill();
+                    }
+                }
+                // FACE BASE
+                c.fillStyle = skinColor;
+                c.beginPath(); c.arc(0, 0, HR, 0, Math.PI * 2); c.fill();
+                // Ears
+                c.beginPath(); c.arc(-18, 3, 5.5, 0, Math.PI * 2); c.fill();
+                c.beginPath(); c.arc(18, 3, 5.5, 0, Math.PI * 2); c.fill();
+                // FRONT HAIR
+                c.fillStyle = hairColor;
+                if (isBoy) {
+                    if (hairStyle === 0) {
+                        c.beginPath(); c.arc(0, -1, HR + 3, Math.PI, 0, false); c.closePath(); c.fill();
+                        c.fillStyle = skinColor;
+                        c.beginPath(); c.arc(0, 0, HR, 0, Math.PI * 2); c.fill();
+                        c.beginPath(); c.arc(-18, 3, 5.5, 0, Math.PI * 2); c.fill();
+                        c.beginPath(); c.arc(18, 3, 5.5, 0, Math.PI * 2); c.fill();
+                        c.fillStyle = hairColor;
+                        c.beginPath(); c.moveTo(-17, -21); c.lineTo(-17, -13);
+                        c.quadraticCurveTo(-8, -16, 0, -13);
+                        c.quadraticCurveTo(8, -16, 17, -13);
+                        c.lineTo(17, -21); c.closePath(); c.fill();
+                    } else if (hairStyle === 1) {
+                        c.beginPath(); c.moveTo(-19, -21); c.lineTo(-19, -10);
+                        c.quadraticCurveTo(-10, -13, 0, -10); c.quadraticCurveTo(10, -13, 19, -10);
+                        c.lineTo(19, -21); c.closePath(); c.fill();
+                    } else {
+                        c.globalAlpha = 0.45;
+                        c.beginPath(); c.moveTo(-16, -21); c.lineTo(-16, -17); c.lineTo(16, -17); c.lineTo(16, -21); c.closePath(); c.fill();
+                        c.globalAlpha = 1;
+                    }
+                } else {
+                    if (hairStyle === 0) {
+                        c.beginPath(); c.moveTo(-18, -21); c.lineTo(-18, -11); c.lineTo(18, -11); c.lineTo(18, -21); c.closePath(); c.fill();
+                    } else if (hairStyle === 1) {
+                        c.beginPath(); c.moveTo(-17, -21); c.lineTo(-17, -11); c.lineTo(17, -11); c.lineTo(17, -21); c.closePath(); c.fill();
+                        c.fillStyle = "hsl(345, 65%, 65%)";
+                        [[-20, -14], [20, -14]].forEach(([rx, ry]) => {
+                            c.beginPath(); c.ellipse(rx - 4, ry, 4, 2.5, -0.3, 0, Math.PI * 2); c.fill();
+                            c.beginPath(); c.ellipse(rx + 4, ry, 4, 2.5, 0.3, 0, Math.PI * 2); c.fill();
+                            c.beginPath(); c.arc(rx, ry, 1.5, 0, Math.PI * 2); c.fill();
+                        });
+                    } else {
+                        c.beginPath(); c.moveTo(-15, -21); c.lineTo(-15, -12);
+                        c.quadraticCurveTo(0, -10, 17, -13); c.lineTo(17, -21); c.closePath(); c.fill();
+                    }
+                }
+                // Staff: red cap over hair
+                if (npc.isStaff) {
+                    drawBaseballCap(c, HR);
+                }
+                // FEATURES
+                drawBabyFace(c, faceType, skinColor, cheekColor, null, false);
+            });
+
+            ctx.restore();
+        }
+
+        function initPartTimeDrops() {
+            disposeToneDrops();
+            toneDrops = [];
+            if (!baseRhythmInfo || !inheritedChordProgression) return;
+            for (let i = 0; i < PARTTIME_DROPS.length; i++) {
+                const fac = PARTTIME_DROPS[i];
+                const timbres = PARTTIME_FACILITY_TIMBRES[fac.id] || ["register-beep"];
+                const pick = randInt(0, timbres.length - 1);
+                const timbreName = timbres[pick];
+                const patternStyle = PARTTIME_PATTERN_STYLES[timbreName] || "staccato-burst";
+                const variant = randInt(0, 1);
+                const kbBundle = buildKeyboardLine(baseRhythmInfo, patternStyle, inheritedChordProgression, variant);
+                const kb = createPartTimeSynth(timbreName);
+                toneDrops.push({
+                    x: worldWidth * fac.xFrac,
+                    y: worldHeight * fac.yFrac,
+                    pattern: kbBundle.pattern,
+                    velocityPattern: null,
+                    proximityVol: -100,
+                    isHovered: false,
+                    overlapAlpha: 0,
+                    instrument: "keyboard",
+                    keyboardSynth: kb.synth,
+                    keyboardEffects: kb.effects,
+                    keyboardNotes: kbBundle.notes,
+                    keyboardAttacks: kbBundle.attacks,
+                    keyboardDurations: kbBundle.durations,
+                    keyboardSustainType: kbBundle.sustainType,
+                    activityId: fac.id,
+                    activityName: fac.name,
+                    activityNameEn: fac.nameEn,
+                    dropColor: fac.color,
+                    activityLabels: fac.labels,
+                    ripples: []
+                });
+            }
+            primeToneDrops();
+        }
+
+        function drawPartTimeBackground() {
+            const wW = worldWidth, wH = worldHeight;
+            const kitchenBottom = wH * 0.22;
+            const counterTop = wH * 0.22;
+            const counterBottom = wH * 0.27;
+            const customerTop = wH * 0.32;
+            const seatingTop = wH * 0.55;
+            const entranceTop = wH * 0.80;
+
+            // === Floor tiles per zone ===
+            const tileSize = 32;
+            for (let ty = 0; ty < wH; ty += tileSize) {
+                for (let tx = 0; tx < wW; tx += tileSize) {
+                    const isEven = ((Math.floor(tx / tileSize) + Math.floor(ty / tileSize)) % 2 === 0);
+                    let c1, c2;
+                    if (ty < kitchenBottom) { c1 = "#b0b0b0"; c2 = "#a4a4a4"; }
+                    else if (ty < counterBottom) { c1 = "#e8ddd0"; c2 = "#ddd2c4"; }
+                    else if (ty < seatingTop) { c1 = "#e5ddd2"; c2 = "#dcd4c8"; }
+                    else if (ty < entranceTop) { c1 = "#d4c0a8"; c2 = "#ccb8a0"; }
+                    else { c1 = "#c0a888"; c2 = "#b8a080"; }
+                    ctx.fillStyle = isEven ? c1 : c2;
+                    ctx.fillRect(tx, ty, tileSize, tileSize);
+                }
+            }
+            // Grout lines
+            ctx.strokeStyle = "rgba(0,0,0,0.06)"; ctx.lineWidth = 0.5;
+            for (let ty = 0; ty <= wH; ty += tileSize) { ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(wW, ty); ctx.stroke(); }
+            for (let tx = 0; tx <= wW; tx += tileSize) { ctx.beginPath(); ctx.moveTo(tx, 0); ctx.lineTo(tx, wH); ctx.stroke(); }
+
+            // === Kitchen area — steel floor overlay ===
+            const kitchenG = ctx.createLinearGradient(0, 0, 0, kitchenBottom);
+            kitchenG.addColorStop(0, "#b0b0b0"); kitchenG.addColorStop(1, "#9a9a9a");
+            ctx.fillStyle = kitchenG;
+            ctx.fillRect(0, 0, wW, kitchenBottom);
+
+            // -- Fluorescent lights (kitchen) --
+            for (let li = 0; li < 3; li++) {
+                const lx = wW * (0.2 + li * 0.3), ly = wH * 0.005;
+                const lgr = ctx.createRadialGradient(lx, ly, 0, lx, ly, wH * 0.06);
+                lgr.addColorStop(0, "rgba(255,255,240,0.10)"); lgr.addColorStop(1, "rgba(255,255,240,0)");
+                ctx.fillStyle = lgr;
+                ctx.fillRect(lx - wW * 0.08, ly, wW * 0.16, wH * 0.06);
+                ctx.fillStyle = "#f8f8f0";
+                ctx.beginPath(); ctx.roundRect(lx - wW * 0.04, ly, wW * 0.08, wH * 0.006, 2); ctx.fill();
+            }
+
+            // -- Exhaust hood --
+            ctx.fillStyle = "#888";
+            ctx.beginPath(); ctx.roundRect(wW * 0.08, wH * 0.012, wW * 0.30, wH * 0.015, 2); ctx.fill();
+            ctx.fillStyle = "#777";
+            ctx.beginPath(); ctx.roundRect(wW * 0.55, wH * 0.012, wW * 0.30, wH * 0.015, 2); ctx.fill();
+
+            // -- Fryer (left) — 3D box style --
+            const fryX = wW * 0.10, fryY = wH * 0.03, fryW = wW * 0.20, fryH = wH * 0.08;
+            const fryDepth = 8;
+            // Side panel (3D depth)
+            ctx.fillStyle = "#555";
+            ctx.beginPath(); ctx.moveTo(fryX + fryW, fryY); ctx.lineTo(fryX + fryW + fryDepth, fryY + fryDepth);
+            ctx.lineTo(fryX + fryW + fryDepth, fryY + fryH + fryDepth); ctx.lineTo(fryX + fryW, fryY + fryH); ctx.closePath(); ctx.fill();
+            // Front panel (3D depth)
+            ctx.fillStyle = "#5a5a5a";
+            ctx.beginPath(); ctx.moveTo(fryX, fryY + fryH); ctx.lineTo(fryX + fryDepth, fryY + fryH + fryDepth);
+            ctx.lineTo(fryX + fryW + fryDepth, fryY + fryH + fryDepth); ctx.lineTo(fryX + fryW, fryY + fryH); ctx.closePath(); ctx.fill();
+            // Control panel on front
+            ctx.fillStyle = "#484848";
+            ctx.fillRect(fryX + 6, fryY + fryH + 1, fryW - 12, fryDepth - 2);
+            ctx.fillStyle = "#ff4444"; ctx.beginPath(); ctx.arc(fryX + 14, fryY + fryH + fryDepth * 0.5, 2, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "#44ff44"; ctx.beginPath(); ctx.arc(fryX + 24, fryY + fryH + fryDepth * 0.5, 2, 0, Math.PI * 2); ctx.fill();
+            // Temp dial
+            ctx.strokeStyle = "#888"; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(fryX + fryW - 16, fryY + fryH + fryDepth * 0.5, 3, 0, Math.PI * 2); ctx.stroke();
+            ctx.strokeStyle = "#f44"; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(fryX + fryW - 16, fryY + fryH + fryDepth * 0.5); ctx.lineTo(fryX + fryW - 14, fryY + fryH + 1); ctx.stroke();
+            // Main body top
+            ctx.fillStyle = "#6a6a6a";
+            ctx.beginPath(); ctx.roundRect(fryX, fryY, fryW, fryH, 4); ctx.fill();
+            // Steel highlight
+            ctx.fillStyle = "rgba(255,255,255,0.10)";
+            ctx.beginPath(); ctx.roundRect(fryX + 2, fryY + 2, fryW - 4, fryH * 0.12, 2); ctx.fill();
+            ctx.fillStyle = "rgba(0,0,0,0.10)";
+            ctx.fillRect(fryX + 2, fryY + fryH - 3, fryW - 4, 3);
+            // Oil basin with glossy gradient
+            const oilG = ctx.createLinearGradient(fryX, fryY + fryH * 0.15, fryX, fryY + fryH * 0.85);
+            oilG.addColorStop(0, "#d4a840"); oilG.addColorStop(0.4, "#c89830"); oilG.addColorStop(1, "#b08020");
+            ctx.fillStyle = oilG; ctx.globalAlpha = 0.65;
+            ctx.beginPath(); ctx.roundRect(fryX + 4, fryY + fryH * 0.15, fryW - 8, fryH * 0.7, 3); ctx.fill();
+            ctx.globalAlpha = 1;
+            // Oil surface shine
+            ctx.fillStyle = "rgba(255,240,180,0.15)";
+            ctx.beginPath(); ctx.ellipse(fryX + fryW * 0.4, fryY + fryH * 0.3, fryW * 0.25, fryH * 0.08, -0.2, 0, Math.PI * 2); ctx.fill();
+            // Bubbles — upward only
+            ctx.fillStyle = "rgba(220,190,100,0.45)";
+            for (let b = 0; b < 7; b++) {
+                const bx = fryX + 8 + ((b * 0.14 + 0.08) * (fryW - 16)) + Math.sin(Date.now() * 0.001 + b * 2.1) * 4;
+                const by = fryY + fryH * 0.7 - Math.abs(Math.sin(Date.now() * 0.003 + b * 1.7)) * fryH * 0.4;
+                ctx.beginPath(); ctx.arc(bx, by, 2 + Math.sin(Date.now() * 0.005 + b) * 1.2, 0, Math.PI * 2); ctx.fill();
+            }
+            // Basket handle
+            ctx.strokeStyle = "#888"; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(fryX + fryW * 0.3, fryY - 3); ctx.lineTo(fryX + fryW * 0.7, fryY - 3); ctx.stroke();
+            // Basket mesh hint
+            ctx.strokeStyle = "rgba(150,150,150,0.3)"; ctx.lineWidth = 0.5;
+            for (let bm = 0; bm < 4; bm++) {
+                const bmx = fryX + fryW * 0.35 + bm * fryW * 0.08;
+                ctx.beginPath(); ctx.moveTo(bmx, fryY + fryH * 0.2); ctx.lineTo(bmx, fryY + fryH * 0.75); ctx.stroke();
+            }
+
+            // -- Heat lamp over fryer --
+            ctx.fillStyle = "#cc6600"; ctx.globalAlpha = 0.3;
+            ctx.beginPath(); ctx.ellipse(fryX + fryW * 0.5, fryY - 6, fryW * 0.3, 8, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 1;
+
+            // -- Griddle (right) — 3D box with spatulas --
+            const grdX = wW * 0.58, grdY = wH * 0.03, grdW = wW * 0.24, grdH = wH * 0.08;
+            const grdDepth = 8;
+            // Side panel
+            ctx.fillStyle = "#444";
+            ctx.beginPath(); ctx.moveTo(grdX + grdW, grdY); ctx.lineTo(grdX + grdW + grdDepth, grdY + grdDepth);
+            ctx.lineTo(grdX + grdW + grdDepth, grdY + grdH + grdDepth); ctx.lineTo(grdX + grdW, grdY + grdH); ctx.closePath(); ctx.fill();
+            // Front panel
+            ctx.fillStyle = "#4a4a4a";
+            ctx.beginPath(); ctx.moveTo(grdX, grdY + grdH); ctx.lineTo(grdX + grdDepth, grdY + grdH + grdDepth);
+            ctx.lineTo(grdX + grdW + grdDepth, grdY + grdH + grdDepth); ctx.lineTo(grdX + grdW, grdY + grdH); ctx.closePath(); ctx.fill();
+            // Legs
+            ctx.fillStyle = "#3a3a3a";
+            ctx.fillRect(grdX + 4, grdY + grdH + grdDepth, 4, 6);
+            ctx.fillRect(grdX + grdW - 8, grdY + grdH + grdDepth, 4, 6);
+            // Temp meter on front
+            ctx.fillStyle = "#333"; ctx.beginPath(); ctx.roundRect(grdX + grdW * 0.4, grdY + grdH + 1, grdW * 0.2, grdDepth - 2, 1); ctx.fill();
+            ctx.fillStyle = "#ff6633"; ctx.fillRect(grdX + grdW * 0.42, grdY + grdH + 2, grdW * 0.12, 2);
+            ctx.fillStyle = "#66ff66"; ctx.fillRect(grdX + grdW * 0.42, grdY + grdH + 5, grdW * 0.06, 1);
+            // Top surface
+            const grdG = ctx.createLinearGradient(grdX, grdY, grdX + grdW, grdY + grdH);
+            grdG.addColorStop(0, "#585858"); grdG.addColorStop(0.5, "#505050"); grdG.addColorStop(1, "#484848");
+            ctx.fillStyle = grdG;
+            ctx.beginPath(); ctx.roundRect(grdX, grdY, grdW, grdH, 3); ctx.fill();
+            // Grill lines
+            ctx.strokeStyle = "rgba(80,50,30,0.25)"; ctx.lineWidth = 2;
+            for (let s = 0; s < 6; s++) {
+                const sx = grdX + 8 + s * (grdW - 16) / 5;
+                ctx.beginPath(); ctx.moveTo(sx, grdY + 6); ctx.lineTo(sx, grdY + grdH - 6); ctx.stroke();
+            }
+            // Grease gutter
+            ctx.fillStyle = "rgba(100,70,30,0.2)";
+            ctx.fillRect(grdX, grdY + grdH - 4, grdW, 4);
+            // Patties
+            const pattyColors = ["#8a5030", "#7a4525", "#905535"];
+            for (let p = 0; p < 3; p++) {
+                ctx.fillStyle = pattyColors[p];
+                ctx.beginPath(); ctx.ellipse(grdX + grdW * 0.25 + p * grdW * 0.25, grdY + grdH * 0.5, 8, 6, 0, 0, Math.PI * 2); ctx.fill();
+                // Sizzle marks
+                ctx.strokeStyle = "rgba(60,30,10,0.3)"; ctx.lineWidth = 0.8;
+                ctx.beginPath(); ctx.moveTo(grdX + grdW * 0.22 + p * grdW * 0.25, grdY + grdH * 0.5);
+                ctx.lineTo(grdX + grdW * 0.28 + p * grdW * 0.25, grdY + grdH * 0.5); ctx.stroke();
+            }
+            // Spatula 1 (left)
+            ctx.save(); ctx.translate(grdX + grdW * 0.12, grdY + grdH * 0.3); ctx.rotate(-0.3);
+            ctx.fillStyle = "#888"; ctx.fillRect(-2, -18, 4, 14);
+            ctx.fillStyle = "#aaa"; ctx.beginPath(); ctx.roundRect(-6, -4, 12, 8, 2); ctx.fill();
+            ctx.fillStyle = "#555"; ctx.fillRect(-1, -18, 2, 5);
+            ctx.restore();
+            // Spatula 2 (right)
+            ctx.save(); ctx.translate(grdX + grdW * 0.88, grdY + grdH * 0.25); ctx.rotate(0.2);
+            ctx.fillStyle = "#888"; ctx.fillRect(-2, -16, 4, 12);
+            ctx.fillStyle = "#aaa"; ctx.beginPath(); ctx.roundRect(-6, -4, 12, 7, 2); ctx.fill();
+            ctx.fillStyle = "#555"; ctx.fillRect(-1, -16, 2, 4);
+            ctx.restore();
+            // Power indicator
+            ctx.fillStyle = "#444"; ctx.beginPath(); ctx.arc(grdX + grdW - 10, grdY + grdH - 8, 5, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "#ff6633"; ctx.beginPath(); ctx.arc(grdX + grdW - 10, grdY + grdH - 8, 2, 0, Math.PI * 2); ctx.fill();
+
+            // -- Wire rack shelf --
+            ctx.strokeStyle = "#999"; ctx.lineWidth = 1;
+            const rackX = wW * 0.36, rackY = wH * 0.03, rackW = wW * 0.18, rackH = wH * 0.04;
+            ctx.strokeRect(rackX, rackY, rackW, rackH);
+            for (let w = 0; w < 5; w++) {
+                const wx = rackX + w * rackW / 4;
+                ctx.beginPath(); ctx.moveTo(wx, rackY); ctx.lineTo(wx, rackY + rackH); ctx.stroke();
+            }
+            // Items on rack
+            ctx.fillStyle = "#ddd"; ctx.beginPath(); ctx.roundRect(rackX + 4, rackY + 2, 14, rackH - 4, 2); ctx.fill();
+            ctx.fillStyle = "#ccc"; ctx.beginPath(); ctx.roundRect(rackX + 22, rackY + 4, 12, rackH - 6, 2); ctx.fill();
+
+            // -- Refrigerator door --
+            ctx.fillStyle = "#c0c0c0";
+            ctx.beginPath(); ctx.roundRect(wW * 0.88, wH * 0.02, wW * 0.08, wH * 0.12, 3); ctx.fill();
+            ctx.fillStyle = "#aaa";
+            ctx.beginPath(); ctx.roundRect(wW * 0.895, wH * 0.04, 4, wH * 0.06, 2); ctx.fill();
+            ctx.fillStyle = "rgba(255,255,255,0.08)";
+            ctx.fillRect(wW * 0.882, wH * 0.022, wW * 0.076, 3);
+
+            // -- Prep counter (center-low) --
+            const prepX = wW * 0.34, prepY = wH * 0.09, prepW = wW * 0.20, prepH = wH * 0.06;
+            ctx.fillStyle = "#b8b8b8";
+            ctx.beginPath(); ctx.roundRect(prepX, prepY, prepW, prepH, 3); ctx.fill();
+            ctx.fillStyle = "rgba(255,255,255,0.06)";
+            ctx.fillRect(prepX + 2, prepY + 2, prepW - 4, 3);
+            ctx.fillStyle = "#c4a060";
+            ctx.beginPath(); ctx.roundRect(prepX + prepW * 0.15, prepY + prepH * 0.2, prepW * 0.35, prepH * 0.6, 2); ctx.fill();
+            ctx.strokeStyle = "rgba(160,120,60,0.3)"; ctx.lineWidth = 0.5;
+            for (let g = 0; g < 4; g++) {
+                const gy = prepY + prepH * 0.25 + g * prepH * 0.12;
+                ctx.beginPath(); ctx.moveTo(prepX + prepW * 0.17, gy); ctx.lineTo(prepX + prepW * 0.48, gy); ctx.stroke();
+            }
+            ctx.fillStyle = "#ddd"; ctx.beginPath(); ctx.roundRect(prepX + prepW * 0.58, prepY + prepH * 0.15, prepW * 0.16, prepH * 0.3, 2); ctx.fill();
+            ctx.fillStyle = "#e44"; ctx.fillRect(prepX + prepW * 0.60, prepY + prepH * 0.20, prepW * 0.12, prepH * 0.1);
+            ctx.fillStyle = "#ddd"; ctx.beginPath(); ctx.roundRect(prepX + prepW * 0.78, prepY + prepH * 0.15, prepW * 0.16, prepH * 0.3, 2); ctx.fill();
+            ctx.fillStyle = "#4a4"; ctx.fillRect(prepX + prepW * 0.80, prepY + prepH * 0.20, prepW * 0.12, prepH * 0.1);
+
+            // -- Sink (kitchen, below griddle) — box-style with dish stack + faucet --
+            const snkX = wW * 0.60, snkY = wH * 0.16, snkW = wW * 0.18, snkH = wH * 0.04;
+            const snkDepth = 6;
+            // Front panel (3D)
+            ctx.fillStyle = "#b0b0b0";
+            ctx.beginPath(); ctx.moveTo(snkX, snkY + snkH); ctx.lineTo(snkX + snkDepth * 0.5, snkY + snkH + snkDepth);
+            ctx.lineTo(snkX + snkW + snkDepth * 0.5, snkY + snkH + snkDepth); ctx.lineTo(snkX + snkW, snkY + snkH); ctx.closePath(); ctx.fill();
+            // Cabinet door lines
+            ctx.strokeStyle = "rgba(0,0,0,0.1)"; ctx.lineWidth = 0.5;
+            ctx.beginPath(); ctx.moveTo(snkX + snkW * 0.33, snkY + snkH + 1); ctx.lineTo(snkX + snkW * 0.33 + 2, snkY + snkH + snkDepth); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(snkX + snkW * 0.66, snkY + snkH + 1); ctx.lineTo(snkX + snkW * 0.66 + 2, snkY + snkH + snkDepth); ctx.stroke();
+            // Main body top
+            ctx.fillStyle = "#c8c8c8";
+            ctx.beginPath(); ctx.roundRect(snkX, snkY, snkW, snkH, 4); ctx.fill();
+            // Two basins
+            ctx.fillStyle = "#aaddee"; ctx.globalAlpha = 0.5;
+            ctx.beginPath(); ctx.roundRect(snkX + 4, snkY + snkH * 0.15, snkW * 0.40, snkH * 0.6, 3); ctx.fill();
+            ctx.beginPath(); ctx.roundRect(snkX + snkW * 0.50, snkY + snkH * 0.15, snkW * 0.40, snkH * 0.6, 3); ctx.fill();
+            ctx.globalAlpha = 1;
+            // Soap bubbles
+            ctx.fillStyle = "rgba(200,230,255,0.35)";
+            for (let sb = 0; sb < 5; sb++) {
+                const sbx = snkX + 8 + Math.sin(Date.now() * 0.002 + sb * 1.3) * (snkW * 0.15) + snkW * 0.12;
+                const sby = snkY + snkH * 0.25 + Math.cos(Date.now() * 0.003 + sb * 1.7) * snkH * 0.12;
+                ctx.beginPath(); ctx.arc(sbx, sby, 2 + Math.sin(Date.now() * 0.004 + sb) * 1, 0, Math.PI * 2); ctx.fill();
+            }
+            // Dish stack (right side)
+            ctx.fillStyle = "#e8e0d0";
+            for (let ds = 0; ds < 5; ds++) {
+                ctx.beginPath(); ctx.ellipse(snkX + snkW + 14, snkY + snkH * 0.7 - ds * 3, 10, 3, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = "rgba(0,0,0,0.08)"; ctx.lineWidth = 0.5;
+                ctx.beginPath(); ctx.ellipse(snkX + snkW + 14, snkY + snkH * 0.7 - ds * 3, 10, 3, 0, 0, Math.PI * 2); ctx.stroke();
+            }
+            // Dirty dish stack (left side)
+            ctx.fillStyle = "#d8c8a8";
+            for (let ds = 0; ds < 4; ds++) {
+                ctx.beginPath(); ctx.ellipse(snkX - 12, snkY + snkH * 0.8 - ds * 3.5, 9, 3, 0.1, 0, Math.PI * 2); ctx.fill();
+            }
+            ctx.fillStyle = "#cc6633";
+            ctx.beginPath(); ctx.ellipse(snkX - 12, snkY + snkH * 0.8 - 14, 7, 2.5, -0.1, 0, Math.PI * 2); ctx.fill();
+            // Gooseneck faucet
+            ctx.strokeStyle = "#999"; ctx.lineWidth = 3; ctx.lineCap = "round";
+            const faucetCx = snkX + snkW * 0.5;
+            ctx.beginPath();
+            ctx.moveTo(faucetCx, snkY + snkH * 0.15);
+            ctx.lineTo(faucetCx, snkY - 8);
+            ctx.quadraticCurveTo(faucetCx + 8, snkY - 12, faucetCx + 10, snkY - 2);
+            ctx.stroke();
+            ctx.fillStyle = "#aaa";
+            ctx.beginPath(); ctx.arc(faucetCx + 10, snkY - 1, 2, 0, Math.PI * 2); ctx.fill();
+            ctx.lineCap = "butt";
+            // Handles (hot/cold)
+            ctx.fillStyle = "#cc3333";
+            ctx.beginPath(); ctx.arc(faucetCx - 8, snkY + snkH * 0.12, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "#3366cc";
+            ctx.beginPath(); ctx.arc(faucetCx + 8, snkY + snkH * 0.12, 3, 0, Math.PI * 2); ctx.fill();
+            // Drying rack
+            ctx.strokeStyle = "#aaa"; ctx.lineWidth = 1;
+            const drX = snkX + snkW * 0.6, drY = snkY - 6, drW2 = snkW * 0.35, drH2 = 6;
+            ctx.strokeRect(drX, drY, drW2, drH2);
+            for (let dw = 0; dw < 4; dw++) {
+                ctx.beginPath(); ctx.moveTo(drX + dw * drW2 / 3, drY); ctx.lineTo(drX + dw * drW2 / 3, drY + drH2); ctx.stroke();
+            }
+
+            // === Counter divider — clearly visible service counter ===
+            // Counter top surface (thick wood grain)
+            ctx.fillStyle = "#7a5e3c";
+            ctx.fillRect(0, counterTop - 10, wW, 20);
+            ctx.strokeStyle = "rgba(90,60,30,0.3)"; ctx.lineWidth = 0.6;
+            for (let wl = 0; wl < 12; wl++) {
+                const wy = counterTop - 9 + wl * 1.6;
+                ctx.beginPath(); ctx.moveTo(0, wy); ctx.lineTo(wW, wy); ctx.stroke();
+            }
+            // Stainless steel serving rail
+            ctx.fillStyle = "#d0d0d0";
+            ctx.fillRect(0, counterTop - 12, wW, 3);
+            ctx.fillStyle = "rgba(255,255,255,0.45)";
+            ctx.fillRect(0, counterTop - 12, wW, 1);
+            ctx.fillStyle = "#bbb";
+            ctx.fillRect(0, counterTop + 10, wW, 2);
+            // Glass sneeze guard
+            ctx.fillStyle = "rgba(200,220,240,0.15)";
+            ctx.fillRect(0, counterTop - 35, wW, 25);
+            ctx.strokeStyle = "rgba(180,200,220,0.25)"; ctx.lineWidth = 0.5;
+            ctx.strokeRect(0, counterTop - 35, wW, 25);
+            // "ORDER HERE" sign
+            ctx.save();
+            ctx.fillStyle = "#cc3333";
+            const signW = wW * 0.12, signH = wH * 0.018;
+            const signX = wW * 0.5 - signW / 2, signY = counterTop - 33;
+            ctx.beginPath(); ctx.roundRect(signX, signY, signW, signH, 3); ctx.fill();
+            ctx.fillStyle = "#fff";
+            ctx.font = `700 ${Math.round(wW * 0.012)}px 'Zen Maru Gothic'`;
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText("ORDER HERE", wW * 0.5, signY + signH * 0.5);
+            ctx.restore();
+            // Down arrows
+            ctx.fillStyle = "rgba(204,51,51,0.5)";
+            for (let ar = 0; ar < 3; ar++) {
+                const ax = wW * (0.42 + ar * 0.08);
+                const ay = counterTop - 12 + Math.sin(Date.now() * 0.003 + ar) * 2;
+                ctx.beginPath(); ctx.moveTo(ax - 4, ay); ctx.lineTo(ax + 4, ay); ctx.lineTo(ax, ay + 5); ctx.closePath(); ctx.fill();
+            }
+            // Pole lights at counter ends
+            ctx.fillStyle = "#c8a848";
+            ctx.beginPath(); ctx.roundRect(wW * 0.04, counterTop - 20, 4, 32, 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(wW * 0.04 + 2, counterTop - 22, 5, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "rgba(255,240,180,0.15)";
+            ctx.beginPath(); ctx.arc(wW * 0.04 + 2, counterTop - 22, 14, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "#c8a848";
+            ctx.beginPath(); ctx.roundRect(wW * 0.94, counterTop - 20, 4, 32, 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(wW * 0.94 + 2, counterTop - 22, 5, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "rgba(255,240,180,0.15)";
+            ctx.beginPath(); ctx.arc(wW * 0.94 + 2, counterTop - 22, 14, 0, Math.PI * 2); ctx.fill();
+
+            // === Counter area ===
+            ctx.fillStyle = "#e0d5c5";
+            ctx.fillRect(0, counterTop + 12, wW, counterBottom - counterTop - 12);
+
+            // -- Register (on counter) — compact with touch screen + card terminal --
+            const regX = wW * 0.10, regY = wH * 0.215, regW = wW * 0.08, regH = wH * 0.035;
+            // Base unit
+            ctx.fillStyle = "#444";
+            ctx.beginPath(); ctx.roundRect(regX, regY, regW, regH, 3); ctx.fill();
+            ctx.fillStyle = "#555";
+            ctx.beginPath(); ctx.roundRect(regX + 1, regY + 1, regW - 2, regH * 0.35, 2); ctx.fill();
+            // Touch screen
+            ctx.fillStyle = "#44aa66";
+            ctx.beginPath(); ctx.roundRect(regX + 3, regY + 3, regW - 6, regH * 0.28, 1); ctx.fill();
+            ctx.fillStyle = "rgba(255,255,255,0.15)";
+            ctx.fillRect(regX + 4, regY + 4, (regW - 8) * 0.5, 2);
+            // Number pad (small)
+            for (let kr = 0; kr < 2; kr++) {
+                for (let kc = 0; kc < 3; kc++) {
+                    ctx.fillStyle = "#666";
+                    ctx.beginPath(); ctx.roundRect(regX + 3 + kc * (regW * 0.25), regY + regH * 0.45 + kr * regH * 0.18, regW * 0.2, regH * 0.13, 1); ctx.fill();
+                }
+            }
+            // Receipt printer
+            ctx.fillStyle = "#f5f5e8";
+            ctx.beginPath(); ctx.roundRect(regX + regW + 2, regY + 2, regW * 0.3, regH * 0.6, 1); ctx.fill();
+            ctx.strokeStyle = "rgba(0,0,0,0.1)"; ctx.lineWidth = 0.3;
+            for (let rl = 0; rl < 3; rl++) { ctx.beginPath(); ctx.moveTo(regX + regW + 3, regY + 4 + rl * 3); ctx.lineTo(regX + regW + regW * 0.28, regY + 4 + rl * 3); ctx.stroke(); }
+            // Card terminal (beside register)
+            ctx.fillStyle = "#333";
+            ctx.beginPath(); ctx.roundRect(regX - regW * 0.35, regY + regH * 0.2, regW * 0.3, regH * 0.6, 2); ctx.fill();
+            ctx.fillStyle = "#2266aa";
+            ctx.beginPath(); ctx.roundRect(regX - regW * 0.32, regY + regH * 0.25, regW * 0.24, regH * 0.2, 1); ctx.fill();
+
+            // -- Tray stack (on counter) --
+            ctx.fillStyle = "#b06030";
+            for (let ts = 0; ts < 4; ts++) {
+                ctx.beginPath(); ctx.roundRect(wW * 0.24, wH * 0.222 + ts * 2.5, wW * 0.05, 2, 1); ctx.fill();
+            }
+
+            // -- Cup dispenser (on counter) --
+            ctx.fillStyle = "#ddd";
+            ctx.beginPath(); ctx.roundRect(wW * 0.32, wH * 0.215, 12, wH * 0.03, 3); ctx.fill();
+            ctx.fillStyle = "#f8f0e0";
+            for (let cu = 0; cu < 3; cu++) {
+                ctx.beginPath(); ctx.arc(wW * 0.32 + 6, wH * 0.22 + cu * 5, 3.5, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // -- Condiment station (on counter) --
+            ctx.fillStyle = "#e8e0d0";
+            ctx.beginPath(); ctx.roundRect(wW * 0.40, wH * 0.22, wW * 0.08, wH * 0.02, 2); ctx.fill();
+            const condColors = ["#cc2222", "#ddaa00", "#228822"];
+            for (let cd = 0; cd < 3; cd++) {
+                ctx.fillStyle = condColors[cd];
+                ctx.beginPath(); ctx.roundRect(wW * 0.41 + cd * wW * 0.025, wH * 0.222, 6, wH * 0.014, 2); ctx.fill();
+            }
+
+            // -- Drink machine (on counter) --
+            const dmX = wW * 0.55, dmY = wH * 0.21, dmW = wW * 0.12, dmH = wH * 0.05;
+            ctx.fillStyle = "#606060";
+            ctx.beginPath(); ctx.roundRect(dmX, dmY, dmW, dmH, 4); ctx.fill();
+            ctx.fillStyle = "rgba(255,255,255,0.05)";
+            ctx.fillRect(dmX + 2, dmY + 2, dmW - 4, 4);
+            const dColors = ["#cc3333", "#3366cc", "#33aa33"];
+            for (let d = 0; d < 3; d++) {
+                const dx = dmX + dmW * 0.12 + d * dmW * 0.28;
+                ctx.fillStyle = dColors[d];
+                ctx.beginPath(); ctx.roundRect(dx, dmY + dmH * 0.12, dmW * 0.22, dmH * 0.35, 2); ctx.fill();
+                ctx.fillStyle = "#888";
+                ctx.beginPath(); ctx.roundRect(dx + dmW * 0.07, dmY + dmH * 0.5, dmW * 0.08, dmH * 0.08, 1); ctx.fill();
+            }
+            ctx.fillStyle = "#555";
+            ctx.beginPath(); ctx.roundRect(dmX + 4, dmY + dmH * 0.7, dmW - 8, dmH * 0.12, 2); ctx.fill();
+            ctx.fillStyle = "#bbddee"; ctx.globalAlpha = 0.6;
+            ctx.beginPath(); ctx.roundRect(dmX + dmW * 0.1, dmY + dmH * 0.85, dmW * 0.8, dmH * 0.12, 2); ctx.fill();
+            ctx.globalAlpha = 1;
+
+            // === Counter bottom divider ===
+            ctx.fillStyle = "#8b7355";
+            ctx.fillRect(0, counterBottom - 3, wW, 6);
+            ctx.fillStyle = "#a08860";
+            ctx.fillRect(0, counterBottom - 4, wW, 2);
+
+            // -- Fluorescent lights (counter) --
+            for (let li = 0; li < 3; li++) {
+                const lx = wW * (0.2 + li * 0.3), ly = wH * 0.215;
+                const lgr = ctx.createRadialGradient(lx, ly, 0, lx, ly, wH * 0.03);
+                lgr.addColorStop(0, "rgba(255,255,240,0.08)"); lgr.addColorStop(1, "rgba(255,255,240,0)");
+                ctx.fillStyle = lgr;
+                ctx.fillRect(lx - wW * 0.05, ly, wW * 0.10, wH * 0.03);
+                ctx.fillStyle = "#f8f8f0";
+                ctx.beginPath(); ctx.roundRect(lx - wW * 0.025, ly, wW * 0.05, 3, 2); ctx.fill();
+            }
+
+            // === Menu board (illuminated/backlit) ===
+            const mbX = wW * 0.30, mbY = wH * 0.002, mbW = wW * 0.40, mbH = wH * 0.025;
+            // Backlight glow
+            const mbGlow = ctx.createRadialGradient(wW * 0.5, mbY + mbH * 0.5, 0, wW * 0.5, mbY + mbH * 0.5, mbW * 0.6);
+            mbGlow.addColorStop(0, "rgba(255,240,180,0.12)");
+            mbGlow.addColorStop(1, "rgba(255,240,180,0)");
+            ctx.fillStyle = mbGlow;
+            ctx.fillRect(mbX - mbW * 0.1, mbY - 8, mbW * 1.2, mbH + 16);
+            // Board frame
+            ctx.fillStyle = "#3a2818";
+            ctx.beginPath(); ctx.roundRect(mbX - 5, mbY - 5, mbW + 10, mbH + 10, 4); ctx.fill();
+            // Backlit panel
+            const mbBg = ctx.createLinearGradient(mbX, mbY, mbX, mbY + mbH);
+            mbBg.addColorStop(0, "#1a1a1a"); mbBg.addColorStop(0.5, "#222"); mbBg.addColorStop(1, "#1a1a1a");
+            ctx.fillStyle = mbBg;
+            ctx.beginPath(); ctx.roundRect(mbX, mbY, mbW, mbH, 2); ctx.fill();
+            // Light strip at top edge
+            ctx.fillStyle = "rgba(255,240,200,0.25)";
+            ctx.fillRect(mbX + 4, mbY + 1, mbW - 8, 2);
+            // "MENU" title (glowing)
+            ctx.save();
+            ctx.shadowColor = "rgba(255,200,50,0.6)"; ctx.shadowBlur = 8;
+            ctx.fillStyle = "#ffcc00";
+            ctx.font = `700 ${Math.round(wW * 0.02)}px 'Zen Maru Gothic'`;
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText("MENU", wW * 0.5, mbY + mbH * 0.32);
+            ctx.restore();
+            // Menu items (glowing white)
+            ctx.save();
+            ctx.shadowColor = "rgba(255,255,255,0.4)"; ctx.shadowBlur = 4;
+            ctx.fillStyle = "rgba(255,255,255,0.85)";
+            ctx.font = `600 ${Math.round(wW * 0.01)}px 'Zen Maru Gothic'`;
+            const menuItems = ["SET A ¥500", "SET B ¥600", "SET C ¥700", "DRINK ¥200"];
+            for (let mi = 0; mi < menuItems.length; mi++) {
+                const mix = mbX + mbW * (0.13 + mi * 0.22);
+                ctx.fillText(menuItems[mi], mix, mbY + mbH * 0.72);
+            }
+            ctx.restore();
+
+            // === Customer waiting area (0.40~0.55) ===
+            ctx.fillStyle = "#e5ddd2";
+            ctx.fillRect(0, customerTop, wW, seatingTop - customerTop);
+
+            // -- Stanchion poles + rope --
+            ctx.fillStyle = "#c8a848";
+            const stanchionH = (seatingTop - customerTop) * 0.7;
+            for (let sp = 0; sp < 4; sp++) {
+                const sx = wW * (0.20 + sp * 0.20), sy = customerTop + 5;
+                ctx.beginPath(); ctx.arc(sx, sy, 4, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.roundRect(sx - 2, sy, 4, stanchionH, 2); ctx.fill();
+                ctx.fillStyle = "#b89838";
+                ctx.beginPath(); ctx.ellipse(sx, sy + stanchionH + 2, 6, 3, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = "#c8a848";
+            }
+            ctx.strokeStyle = "rgba(180,140,80,0.35)"; ctx.lineWidth = 2; ctx.setLineDash([8, 4]);
+            for (let rp = 0; rp < 3; rp++) {
+                const rx1 = wW * (0.20 + rp * 0.20), rx2 = wW * (0.40 + rp * 0.20);
+                ctx.beginPath(); ctx.moveTo(rx1, customerTop + 9); ctx.lineTo(rx2, customerTop + 9); ctx.stroke();
+            }
+            ctx.setLineDash([]);
+
+            // === Seating area (0.55~0.80) ===
+            ctx.fillStyle = "#d8c8b0";
+            ctx.fillRect(0, seatingTop, wW, entranceTop - seatingTop);
+
+            // -- Booth tables (4 booths) --
+            const boothPositions = [
+                { x: 0.12, y: 0.58 }, { x: 0.12, y: 0.68 },
+                { x: 0.62, y: 0.58 }, { x: 0.62, y: 0.68 }
+            ];
+            boothPositions.forEach(bp => {
+                const bx = wW * bp.x, by = wH * bp.y;
+                const bw = wW * 0.24, bh = wH * 0.08;
+                // Left bench
+                ctx.fillStyle = "#cc4444";
+                ctx.beginPath(); ctx.roundRect(bx, by + 2, 12, bh - 4, 3); ctx.fill();
+                ctx.fillStyle = "#aa3333";
+                ctx.beginPath(); ctx.roundRect(bx + 2, by + 4, 8, bh - 8, 2); ctx.fill();
+                // Right bench
+                ctx.fillStyle = "#cc4444";
+                ctx.beginPath(); ctx.roundRect(bx + bw - 12, by + 2, 12, bh - 4, 3); ctx.fill();
+                ctx.fillStyle = "#aa3333";
+                ctx.beginPath(); ctx.roundRect(bx + bw - 10, by + 4, 8, bh - 8, 2); ctx.fill();
+                // Table
+                ctx.fillStyle = "#c4a060";
+                ctx.beginPath(); ctx.roundRect(bx + 16, by + bh * 0.15, bw - 32, bh * 0.7, 3); ctx.fill();
+                ctx.fillStyle = "rgba(255,255,255,0.08)";
+                ctx.fillRect(bx + 18, by + bh * 0.17, bw - 36, 3);
+                // Tray/food on some tables
+                if (bp.y < 0.65) {
+                    ctx.fillStyle = "#b06030";
+                    ctx.beginPath(); ctx.roundRect(bx + bw * 0.35, by + bh * 0.3, bw * 0.2, bh * 0.3, 2); ctx.fill();
+                    ctx.fillStyle = "#dd9933";
+                    ctx.beginPath(); ctx.ellipse(bx + bw * 0.45, by + bh * 0.45, 6, 4, 0, 0, Math.PI * 2); ctx.fill();
+                }
+            });
+
+            // -- Round tables (3) with chairs --
+            const roundTablePositions = [
+                { x: 0.42, y: 0.60 }, { x: 0.42, y: 0.72 }, { x: 0.88, y: 0.65 }
+            ];
+            roundTablePositions.forEach(rt => {
+                const rx = wW * rt.x, ry = wH * rt.y;
+                // Table
+                ctx.fillStyle = "#c4a060";
+                ctx.beginPath(); ctx.arc(rx, ry, 18, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = "rgba(255,255,255,0.08)";
+                ctx.beginPath(); ctx.arc(rx, ry, 16, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = "#c4a060";
+                ctx.beginPath(); ctx.arc(rx, ry, 14, 0, Math.PI * 2); ctx.fill();
+                // Chairs
+                for (let ch = 0; ch < 4; ch++) {
+                    const ca = (Math.PI * 2 * ch) / 4 + 0.3;
+                    const cx = rx + Math.cos(ca) * 28, cy = ry + Math.sin(ca) * 28;
+                    ctx.fillStyle = "#8a7050";
+                    ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2); ctx.fill();
+                    ctx.fillStyle = "#7a6040";
+                    ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2); ctx.fill();
+                }
+            });
+
+            // -- Pendant lights over seating --
+            const pendantPositions = [
+                { x: 0.24, y: 0.57 }, { x: 0.24, y: 0.67 },
+                { x: 0.74, y: 0.57 }, { x: 0.74, y: 0.67 },
+                { x: 0.42, y: 0.59 }, { x: 0.42, y: 0.71 }
+            ];
+            pendantPositions.forEach(pp => {
+                const px = wW * pp.x, py = wH * pp.y;
+                const lgr = ctx.createRadialGradient(px, py, 0, px, py, 40);
+                lgr.addColorStop(0, "rgba(255,240,200,0.12)");
+                lgr.addColorStop(1, "rgba(255,240,200,0)");
+                ctx.fillStyle = lgr;
+                ctx.beginPath(); ctx.arc(px, py, 40, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = "#d4a040";
+                ctx.beginPath(); ctx.ellipse(px, py - 2, 6, 3, 0, 0, Math.PI * 2); ctx.fill();
+            });
+
+            // -- Wall windows in seating area --
+            for (let wi = 0; wi < 3; wi++) {
+                const wx = wW * (0.05 + wi * 0.35), wy = seatingTop + 8;
+                const ww = wW * 0.14, wwh = wH * 0.04;
+                // Window frame
+                ctx.fillStyle = "#a09080";
+                ctx.beginPath(); ctx.roundRect(wx - 2, wy - 2, ww + 4, wwh + 4, 2); ctx.fill();
+                // Sky gradient
+                const skyG = ctx.createLinearGradient(wx, wy, wx, wy + wwh);
+                skyG.addColorStop(0, "#88bbee"); skyG.addColorStop(1, "#aaddff");
+                ctx.fillStyle = skyG;
+                ctx.beginPath(); ctx.roundRect(wx, wy, ww, wwh, 1); ctx.fill();
+                // Window divider
+                ctx.fillStyle = "#a09080";
+                ctx.fillRect(wx + ww / 2 - 1, wy, 2, wwh);
+                ctx.fillRect(wx, wy + wwh / 2 - 1, ww, 2);
+            }
+
+            // -- Wall paintings/posters in seating area --
+            const seatingPosters = [
+                { x: 0.50, y: 0.56, w: 0.06, h: 0.03, c: "#cc8844" },
+                { x: 0.90, y: 0.57, w: 0.05, h: 0.04, c: "#4488cc" }
+            ];
+            seatingPosters.forEach(p => {
+                ctx.fillStyle = "#f8f0e0";
+                ctx.beginPath(); ctx.roundRect(wW * p.x - 1, wH * p.y - 1, wW * p.w + 2, wH * p.h + 2, 1); ctx.fill();
+                ctx.fillStyle = p.c; ctx.globalAlpha = 0.6;
+                ctx.fillRect(wW * p.x + 2, wH * p.y + 2, wW * p.w - 2, wH * p.h - 2);
+                ctx.globalAlpha = 1;
+            });
+
+            // === Entrance area (0.80~1.0) ===
+            ctx.fillStyle = "#c8b090";
+            ctx.fillRect(0, entranceTop, wW, wH - entranceTop);
+
+            // -- Welcome mat --
+            ctx.fillStyle = "#556b2f";
+            ctx.beginPath(); ctx.roundRect(wW * 0.38, wH * 0.92, wW * 0.24, wH * 0.04, 3); ctx.fill();
+            ctx.fillStyle = "rgba(255,255,255,0.15)";
+            ctx.font = `700 ${Math.round(wW * 0.018)}px 'Zen Maru Gothic'`;
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText("WELCOME", wW * 0.5, wH * 0.94);
+
+            // -- Glass double doors --
+            const doorW = wW * 0.15, doorH = wH * 0.10;
+            const doorLX = wW * 0.35, doorRX = wW * 0.52, doorY = wH * 0.82;
+            // Left door
+            ctx.fillStyle = "rgba(180,210,240,0.25)";
+            ctx.beginPath(); ctx.roundRect(doorLX, doorY, doorW, doorH, 3); ctx.fill();
+            ctx.strokeStyle = "#999"; ctx.lineWidth = 1.5;
+            ctx.strokeRect(doorLX, doorY, doorW, doorH);
+            // Door handle
+            ctx.fillStyle = "#c0c0c0";
+            ctx.beginPath(); ctx.roundRect(doorLX + doorW - 10, doorY + doorH * 0.35, 4, doorH * 0.3, 2); ctx.fill();
+            // Right door
+            ctx.fillStyle = "rgba(180,210,240,0.25)";
+            ctx.beginPath(); ctx.roundRect(doorRX, doorY, doorW, doorH, 3); ctx.fill();
+            ctx.strokeStyle = "#999"; ctx.lineWidth = 1.5;
+            ctx.strokeRect(doorRX, doorY, doorW, doorH);
+            ctx.fillStyle = "#c0c0c0";
+            ctx.beginPath(); ctx.roundRect(doorRX + 6, doorY + doorH * 0.35, 4, doorH * 0.3, 2); ctx.fill();
+            // Push bar
+            ctx.fillStyle = "#aaa";
+            ctx.beginPath(); ctx.roundRect(doorLX + 8, doorY + doorH * 0.45, doorW - 16, 3, 1); ctx.fill();
+            ctx.beginPath(); ctx.roundRect(doorRX + 8, doorY + doorH * 0.45, doorW - 16, 3, 1); ctx.fill();
+
+            // -- Umbrella stand --
+            ctx.fillStyle = "#555";
+            ctx.beginPath(); ctx.roundRect(wW * 0.28, wH * 0.84, 14, wH * 0.05, 3); ctx.fill();
+            ctx.fillStyle = "#3366aa";
+            ctx.beginPath(); ctx.roundRect(wW * 0.28 + 2, wH * 0.84, 3, wH * 0.04, 1); ctx.fill();
+            ctx.fillStyle = "#cc4444";
+            ctx.beginPath(); ctx.roundRect(wW * 0.28 + 8, wH * 0.84, 3, wH * 0.035, 1); ctx.fill();
+
+            // -- Business hours sign --
+            ctx.fillStyle = "#f8f0e0";
+            ctx.beginPath(); ctx.roundRect(wW * 0.72, wH * 0.83, wW * 0.08, wH * 0.04, 2); ctx.fill();
+            ctx.fillStyle = "#333";
+            ctx.font = `${Math.round(wW * 0.008)}px 'Zen Maru Gothic'`;
+            ctx.textAlign = "center";
+            ctx.fillText("OPEN", wW * 0.76, wH * 0.845);
+            ctx.fillText("10:00-22:00", wW * 0.76, wH * 0.86);
+
+            // -- Trash/recycling bins --
+            const binColors = ["#666", "#336699", "#996633"];
+            for (let bi = 0; bi < 3; bi++) {
+                const bx = wW * 0.82 + bi * 18, by = wH * 0.88;
+                ctx.fillStyle = binColors[bi];
+                ctx.beginPath(); ctx.roundRect(bx, by, 14, wH * 0.04, 2); ctx.fill();
+                ctx.fillStyle = "rgba(255,255,255,0.15)";
+                ctx.beginPath(); ctx.roundRect(bx + 2, by + 2, 10, 4, 1); ctx.fill();
+            }
+
+            // -- Takeout counter --
+            ctx.fillStyle = "#b8a888";
+            ctx.beginPath(); ctx.roundRect(wW * 0.08, wH * 0.84, wW * 0.14, wH * 0.05, 3); ctx.fill();
+            ctx.fillStyle = "#f5f0e0";
+            ctx.beginPath(); ctx.roundRect(wW * 0.10, wH * 0.85, wW * 0.04, wH * 0.02, 2); ctx.fill();
+            ctx.fillStyle = "#f5f0e0";
+            ctx.beginPath(); ctx.roundRect(wW * 0.15, wH * 0.85, wW * 0.04, wH * 0.025, 2); ctx.fill();
+
+            // -- Potted plants (entrance) --
+            const plantPositions = [{ x: 0.08, y: 0.92 }, { x: 0.92, y: 0.92 }];
+            plantPositions.forEach(pp => {
+                const px = wW * pp.x, py = wH * pp.y;
+                ctx.fillStyle = "#b06030";
+                ctx.beginPath(); ctx.moveTo(px - 8, py + 6); ctx.lineTo(px + 8, py + 6);
+                ctx.lineTo(px + 6, py + 16); ctx.lineTo(px - 6, py + 16); ctx.closePath(); ctx.fill();
+                ctx.fillStyle = "#338833";
+                for (let lf = 0; lf < 5; lf++) {
+                    const la = (Math.PI * 2 * lf) / 5 - Math.PI / 2;
+                    ctx.beginPath(); ctx.ellipse(px + Math.cos(la) * 8, py + Math.sin(la) * 6 - 2, 7, 4, la, 0, Math.PI * 2); ctx.fill();
+                }
+            });
+
+            // -- Fluorescent lights (seating + entrance) --
+            for (let li = 0; li < 2; li++) {
+                const lx = wW * (0.3 + li * 0.4), ly = wH * 0.56;
+                ctx.fillStyle = "#f8f8f0";
+                ctx.beginPath(); ctx.roundRect(lx - wW * 0.03, ly, wW * 0.06, 4, 2); ctx.fill();
+            }
+            {
+                const lx = wW * 0.5, ly = wH * 0.81;
+                ctx.fillStyle = "#f8f8f0";
+                ctx.beginPath(); ctx.roundRect(lx - wW * 0.04, ly, wW * 0.08, 4, 2); ctx.fill();
+            }
+
+            // === Kitchen wall details ===
+            ctx.fillStyle = "#a09080";
+            ctx.fillRect(0, 0, wW, 3);
+            ctx.fillRect(0, 0, 3, kitchenBottom);
+            ctx.fillRect(wW - 3, 0, 3, kitchenBottom);
+
+            // Wall posters (kitchen)
+            const posterData = [{x: 0.03, y: 0.01, w: 0.06, h: 0.04, c: "#cc4444"}, {x: 0.90, y: 0.015, w: 0.05, h: 0.03, c: "#4488cc"}];
+            posterData.forEach(p => {
+                ctx.fillStyle = "#f8f0e0";
+                ctx.beginPath(); ctx.roundRect(wW * p.x - 1, wH * p.y - 1, wW * p.w + 2, wH * p.h + 2, 1); ctx.fill();
+                ctx.fillStyle = p.c; ctx.globalAlpha = 0.6;
+                ctx.fillRect(wW * p.x + 2, wH * p.y + 2, wW * p.w - 2, wH * p.h - 2);
+                ctx.globalAlpha = 1;
+            });
+
+            // Clock
+            const clkX = wW * 0.94, clkY = wH * 0.025;
+            ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(clkX, clkY, 10, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = "#555"; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(clkX, clkY, 10, 0, Math.PI * 2); ctx.stroke();
+            for (let h = 0; h < 12; h++) {
+                const ha = (Math.PI * 2 * h) / 12 - Math.PI / 2;
+                ctx.fillStyle = "#555";
+                ctx.beginPath(); ctx.arc(clkX + Math.cos(ha) * 8, clkY + Math.sin(ha) * 8, 0.8, 0, Math.PI * 2); ctx.fill();
+            }
+            const now = Date.now();
+            const minAngle = ((now / 60000) % 60) / 60 * Math.PI * 2 - Math.PI / 2;
+            const hrAngle = ((now / 3600000) % 12) / 12 * Math.PI * 2 - Math.PI / 2;
+            ctx.strokeStyle = "#333"; ctx.lineWidth = 1.2; ctx.lineCap = "round";
+            ctx.beginPath(); ctx.moveTo(clkX, clkY); ctx.lineTo(clkX + Math.cos(hrAngle) * 5, clkY + Math.sin(hrAngle) * 5); ctx.stroke();
+            ctx.strokeStyle = "#333"; ctx.lineWidth = 0.8;
+            ctx.beginPath(); ctx.moveTo(clkX, clkY); ctx.lineTo(clkX + Math.cos(minAngle) * 7, clkY + Math.sin(minAngle) * 7); ctx.stroke();
+            ctx.lineCap = "butt";
+
+            // Fire extinguisher
+            ctx.fillStyle = "#cc2222";
+            ctx.beginPath(); ctx.roundRect(wW * 0.02, wH * 0.10, 8, 16, 3); ctx.fill();
+            ctx.fillStyle = "#222";
+            ctx.beginPath(); ctx.roundRect(wW * 0.02 + 1, wH * 0.10 - 3, 6, 4, 2); ctx.fill();
+
+            // Employee notice board
+            ctx.fillStyle = "#c4a870";
+            ctx.beginPath(); ctx.roundRect(wW * 0.86, wH * 0.10, wW * 0.08, wH * 0.05, 2); ctx.fill();
+            ctx.fillStyle = "#f5f0e0";
+            for (let n = 0; n < 3; n++) {
+                ctx.beginPath(); ctx.roundRect(wW * 0.87 + n * wW * 0.02, wH * 0.105 + n * wH * 0.01, wW * 0.02, wH * 0.015, 1); ctx.fill();
+            }
+            ctx.fillStyle = "#cc4444";
+            for (let n = 0; n < 3; n++) {
+                ctx.beginPath(); ctx.arc(wW * 0.88 + n * wW * 0.02, wH * 0.105 + n * wH * 0.01, 1.5, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // === NPCs ===
+            updatePartTimeNpcs();
+            partTimeNpcs.forEach(npc => drawTopDownNpc(npc, ctx));
+        }
+
+        function handlePartTimeChoice(clickedDrop) {
+            if (!clickedDrop.activityLabels) return;
+            playTitleToneConfirmSound();
+            selectedToys.push({ id: clickedDrop.activityId, name: clickedDrop.activityName, labels: clickedDrop.activityLabels });
+            disposeToneDrops();
+            toneDrops = [];
+            partTimeObstacles = [];
+            fadeScreenTo(1, 1200);
+            setTimeout(() => {
+                isTopDownScene = false;
+                topDownCameraX = 0;
+                topDownCameraY = 0;
+                fadeScreenTo(0, 1000);
+            }, 1200);
+        }
+
+        // ======== JOB HUNT PHASE (就活フェーズ) ========
+        const JOBHUNT_TIMBRES = {
+            "bright-chime":     { wave: "sine",     attack: 0.005, decay: 0.18, sustain: 0.15, release: 0.12 },
+            "bright-sparkle":   { wave: "triangle", attack: 0.001, decay: 0.15, sustain: 0.10, release: 0.10, filterType: "highpass", filterFreq: 1500 },
+            "bright-bell":      { wave: "sine",     attack: 0.001, decay: 0.20, sustain: 0.12, release: 0.12 },
+            "polite-pad":       { wave: "triangle", attack: 0.02,  decay: 0.20, sustain: 0.18, release: 0.15, vibratoFreq: 2.0, vibratoDepth: 0.03 },
+            "polite-piano":     { wave: "sine",     attack: 0.005, decay: 0.22, sustain: 0.12, release: 0.12 },
+            "polite-soft":      { wave: "sine",     attack: 0.02,  decay: 0.18, sustain: 0.15, release: 0.12, filterType: "lowpass", filterFreq: 1200 },
+            "passion-brass":    { wave: "sawtooth", attack: 0.01,  decay: 0.15, sustain: 0.15, release: 0.10, filterType: "lowpass", filterFreq: 1400 },
+            "passion-drive":    { wave: "square",   attack: 0.005, decay: 0.12, sustain: 0.12, release: 0.08, filterType: "bandpass", filterFreq: 1000 },
+            "passion-shout":    { wave: "sawtooth", attack: 0.001, decay: 0.10, sustain: 0.10, release: 0.08, filterType: "lowpass", filterFreq: 2000 }
+        };
+        const JOBHUNT_FACILITY_TIMBRES = {
+            "bright":     ["bright-chime", "bright-sparkle", "bright-bell"],
+            "polite":     ["polite-pad",   "polite-piano",   "polite-soft"],
+            "passionate": ["passion-brass", "passion-drive",  "passion-shout"]
+        };
+        const JOBHUNT_PATTERN_STYLES = {
+            "bright-chime": "formal-accent", "bright-sparkle": "crisp-staccato", "bright-bell": "formal-accent",
+            "polite-pad": "dramatic-swell", "polite-piano": "formal-accent", "polite-soft": "dramatic-swell",
+            "passion-brass": "dramatic-swell", "passion-drive": "crisp-staccato", "passion-shout": "crisp-staccato"
+        };
+        const JOBHUNT_DROPS = [
+            { id: "bright",     name: "明るく話す",  nameEn: "Speak Brightly", color: "hsl(45, 60%, 60%)",  labels: { social: 4, optimistic: 3 },    xFrac: 0.25, yFrac: 0.42,
+              requiredLabel: { key: "social", threshold: 8 } },
+            { id: "polite",     name: "丁寧に話す",  nameEn: "Speak Politely", color: "hsl(210, 45%, 60%)", labels: { study: 4, focused: 3 },         xFrac: 0.50, yFrac: 0.38,
+              requiredLabel: { key: "study", threshold: 8 } },
+            { id: "passionate", name: "情熱的に話す", nameEn: "Speak Passionately", color: "hsl(0, 55%, 58%)",   labels: { expressive: 4, creative: 3 },  xFrac: 0.75, yFrac: 0.42,
+              requiredLabel: { key: "expressive", threshold: 8 } }
+        ];
+
+        function createJobHuntSynth(timbreName) {
+            const cfg = JOBHUNT_TIMBRES[timbreName];
+            if (!cfg) return { synth: null, effects: [] };
+            const effects = [];
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: cfg.wave },
+                envelope: { attack: cfg.attack, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release }
+            });
+            synth.volume.value = -100;
+            if (cfg.filterType && cfg.vibratoFreq) {
+                const filter = new Tone.Filter({ type: cfg.filterType, frequency: cfg.filterFreq, Q: 1.5 });
+                const vibrato = new Tone.Vibrato({ frequency: cfg.vibratoFreq, depth: cfg.vibratoDepth });
+                effects.push(filter, vibrato);
+                synth.chain(filter, vibrato, Tone.Destination);
+            } else if (cfg.filterType) {
+                const filter = new Tone.Filter({ type: cfg.filterType, frequency: cfg.filterFreq, Q: 1.5 });
+                effects.push(filter);
+                synth.chain(filter, Tone.Destination);
+            } else if (cfg.vibratoFreq) {
+                const vibrato = new Tone.Vibrato({ frequency: cfg.vibratoFreq, depth: cfg.vibratoDepth });
+                effects.push(vibrato);
+                synth.chain(vibrato, Tone.Destination);
+            } else {
+                synth.toDestination();
+            }
+            return { synth, effects };
+        }
+
+        function startJobHuntPhase() {
+            currentScene = SCENE.JOB_HUNT;
+            isTopDownScene = true;
+            jobHuntInterviewRound = 1;
+            jobHuntCameraZoom = 1.0;
+            jobHuntViewMode = "topdown";
+            jobHuntTransitioning = false;
+            jobHuntSideScrollWorldW = 0;
+            jobHuntDropTopDownPositions = [];
+            worldWidth = Math.max(width * 1.3, 1000);
+            worldHeight = Math.max(height * 1.8, 1000);
+            baby = new Child(babyColorScheme);
+            baby.isTopDown = true;
+            baby.outfit = "suit";
+            baby.x = worldWidth * 0.5;
+            baby.y = worldHeight * 0.68;
+            cameraX = 0;
+            topDownCameraX = Math.max(0, Math.min(baby.x - width / 2, worldWidth - width));
+            topDownCameraY = Math.max(0, Math.min(baby.y - height / 2, worldHeight - height));
+            // Collision obstacles
+            const wW = worldWidth, wH = worldHeight;
+            const wallY = wH * 0.52, wallThick = 18;
+            const doorX = wW * 0.38, doorW = wW * 0.24;
+            const dskX = wW * 0.15, dskY = wH * 0.32, dskW = wW * 0.70, dskH = wH * 0.04;
+            jobHuntObstacles = [
+                { x: dskX, y: dskY, w: dskW, h: dskH },
+                { x: 0, y: wallY - wallThick / 2, w: doorX, h: wallThick },
+                { x: doorX + doorW, y: wallY - wallThick / 2, w: wW - doorX - doorW, h: wallThick },
+            ];
+            initJobHuntNpcs();
+            initJobHuntDrops();
+            initCarryHatLayer(); initCarrySnareLayer(); initCarryCymbalLayer();
+            initCarryBassLayer(); initCarryKeyboardLayer();
+            initCarryKeys2Layer();
+            startBaseGroove(); buildScoreHud(); updateScoreToggleUi();
+            orbWorldX = baby.x;
+            orbWorldY = baby.y;
+            orbParticles = [];
+        }
+
+        function initJobHuntNpcs() {
+            jobHuntNpcs = [];
+            // Interviewers (behind desk, top area — 3 interviewers, just above desk)
+            for (let i = 0; i < 3; i++) {
+                jobHuntNpcs.push({
+                    x: worldWidth * (0.25 + i * 0.25),
+                    y: worldHeight * 0.29,
+                    targetX: 0, targetY: 0,
+                    moveTimer: 0,
+                    speed: 0,
+                    walkCycle: Math.random() * Math.PI * 2,
+                    bodyHue: 220 + randInt(-10, 10),
+                    limbHue: 220 + randInt(-10, 10),
+                    isInterviewer: true,
+                    scale: 1.0,
+                    skinTone: `hsl(25, ${58 + randInt(0, 20)}%, ${78 + randInt(0, 10)}%)`,
+                    hairColor: `hsl(${randInt(15, 45)}, ${30 + randInt(0, 25)}%, ${35 + randInt(0, 25)}%)`,
+                    faceType: randInt(0, 4),
+                    isBoy: Math.random() < 0.5,
+                    hairStyle: randInt(0, 2),
+                    cheekColor: "hsl(350, 62%, 78%)"
+                });
+            }
+            // Waiting job hunters in hallway (3 people) — seated on pipe chairs, tightly packed along wall
+            const chairSpacing = 0.065;
+            const chairStartX = 0.10;
+            for (let i = 0; i < 3; i++) {
+                jobHuntNpcs.push({
+                    x: worldWidth * (chairStartX + i * chairSpacing),
+                    y: worldHeight * 0.565,
+                    targetX: 0, targetY: 0,
+                    moveTimer: 0,
+                    speed: 0,
+                    walkCycle: Math.random() * Math.PI * 2,
+                    bodyHue: 220 + randInt(-15, 15),
+                    limbHue: 220 + randInt(-15, 15),
+                    isInterviewer: false,
+                    isWaiting: true,
+                    fidgetSpeed: 0.02 + Math.random() * 0.03,
+                    scale: 1.0,
+                    skinTone: `hsl(25, ${58 + randInt(0, 20)}%, ${78 + randInt(0, 10)}%)`,
+                    hairColor: `hsl(${randInt(15, 45)}, ${30 + randInt(0, 25)}%, ${35 + randInt(0, 25)}%)`,
+                    faceType: randInt(0, 4),
+                    isBoy: Math.random() < 0.5,
+                    hairStyle: randInt(0, 2),
+                    cheekColor: "hsl(350, 62%, 78%)"
+                });
+            }
+        }
+
+        function updateJobHuntNpcs() {
+            jobHuntNpcs.forEach(npc => {
+                if (npc.isInterviewer) {
+                    npc.walkCycle += 0.01; // minimal movement
+                } else {
+                    // Fidgeting (leg bounce)
+                    npc.walkCycle += npc.fidgetSpeed || 0.025;
+                }
+            });
+        }
+
+        function drawJobHuntNpc(npc, ctx) {
+            // Soft ambient shadow beneath seated NPCs
+            if (npc.isInterviewer || npc.isWaiting) {
+                ctx.save();
+                ctx.fillStyle = "rgba(0,0,0,0.045)";
+                ctx.beginPath(); ctx.ellipse(npc.x, npc.y + 18, 14, 4, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+            }
+            ctx.save();
+            ctx.translate(npc.x, npc.y);
+
+            const s = npc.scale || 0.7;
+            const t = npc.walkCycle || 0;
+            const isSeated = npc.isInterviewer || npc.isWaiting;
+            const dir = -(npc.dir || 1);
+            ctx.scale(dir * s, s);
+
+            const skinColor = npc.skinTone || "hsl(25, 58%, 80%)";
+            const hairColor = npc.hairColor || "#333";
+            const cheekColor = npc.cheekColor || "hsl(350, 62%, 78%)";
+            const faceType = npc.faceType != null ? npc.faceType : 0;
+            const isBoy = npc.isBoy != null ? npc.isBoy : true;
+            const hairStyle = npc.hairStyle != null ? npc.hairStyle : 0;
+            const suitHue = npc.bodyHue || 220;
+            const suitColor = `hsl(${suitHue}, 35%, 35%)`;
+            const pantsColor = `hsl(${suitHue}, 30%, 28%)`;
+            const tieColor = npc.isInterviewer ? "#883333" : "#333388";
+            const tieKnotColor = npc.isInterviewer ? "#772828" : "#282877";
+            const shoeColor = "#333";
+            const soleColor = "#222";
+
+            let legSwingL, legSwingR, kneeL, kneeR, armSwingL, armSwingR, headBobA, verticalBob;
+            if (isSeated) {
+                verticalBob = 0;
+                // Seated pose: thighs forward, knees bent 90deg down
+                legSwingL = 1.2; legSwingR = 1.2; kneeL = -1.5; kneeR = -1.5;
+                armSwingL = npc.isInterviewer ? Math.sin(t * 2) * 0.15 - 0.1 : -0.05;
+                armSwingR = -0.05;
+                headBobA = npc.isInterviewer ? Math.sin(t * 2) * 0.03 : Math.sin(t * 3) * 0.01;
+            } else {
+                verticalBob = Math.abs(Math.sin(t)) * 2.5;
+                legSwingL = Math.sin(t) * 0.26;
+                legSwingR = Math.sin(t + Math.PI) * 0.26;
+                kneeL = Math.max(0, -legSwingL) * 0.4;
+                kneeR = Math.max(0, -legSwingR) * 0.4;
+                armSwingL = Math.sin(t + Math.PI) * 0.22;
+                armSwingR = Math.sin(t) * 0.22;
+                headBobA = Math.sin(t * 2) * 0.02;
+            }
+            ctx.translate(0, -verticalBob);
+
+            const dp = (x, y, ang, fn) => { ctx.save(); ctx.translate(x, y); ctx.rotate(ang); fn(ctx); ctx.restore(); };
+
+            const drawLeg = (x, y, upperAng, kneeAng) => {
+                dp(x, y, upperAng, c => {
+                    c.fillStyle = pantsColor;
+                    c.beginPath(); c.roundRect(-7, -3, 14, 25, 5); c.fill();
+                    dp(0, 17, kneeAng, c2 => {
+                        c2.fillStyle = pantsColor;
+                        c2.beginPath(); c2.roundRect(-6, -4, 12, 22, 4); c2.fill();
+                        c2.fillStyle = shoeColor;
+                        c2.beginPath(); c2.ellipse(2, 20, 10, 5.5, 0, 0, Math.PI * 2); c2.fill();
+                        c2.beginPath(); c2.roundRect(-5, 16, 12, 5, [3,3,0,0]); c2.fill();
+                        c2.fillStyle = soleColor;
+                        c2.beginPath(); c2.moveTo(-6, 21); c2.lineTo(12, 21); c2.lineTo(11, 24); c2.lineTo(-5, 24); c2.closePath(); c2.fill();
+                    });
+                });
+            };
+            const drawArm = (x, y, swingAng) => {
+                dp(x, y, swingAng, c => {
+                    // Upper arm (sleeve)
+                    c.fillStyle = suitColor;
+                    c.beginPath(); c.roundRect(-5.5, -2, 11, 10, 4); c.fill();
+                    // Forearm (sleeve - long sleeve suit)
+                    c.fillStyle = suitColor;
+                    c.beginPath(); c.roundRect(-4.5, 8, 9, 12, 4); c.fill();
+                    // Cuff shadow
+                    c.fillStyle = "rgba(0,0,0,0.06)";
+                    c.beginPath(); c.roundRect(-4.5, 17, 9, 3, [0,0,2,2]); c.fill();
+                    dp(0, 20, 0.12, c2 => {
+                        c2.fillStyle = skinColor;
+                        c2.beginPath(); c2.roundRect(-3.5, 0, 7, 11, 3.5); c2.fill();
+                        c2.beginPath(); c2.ellipse(0, 12, 4.5, 3.5, 0, 0, Math.PI * 2); c2.fill();
+                    });
+                });
+            };
+
+            // === Draw order: back-leg → back-arm → body → pants → front-leg → front-arm → head ===
+            drawLeg(-8, -7, legSwingL, kneeL);
+            drawArm(-15, -54, armSwingL);
+
+            // Body — suit jacket
+            ctx.fillStyle = suitColor;
+            ctx.beginPath(); ctx.roundRect(-17, -58, 34, 32, 8); ctx.fill();
+            // White shirt V
+            ctx.fillStyle = "#e8e8e8";
+            ctx.beginPath(); ctx.moveTo(-6, -58); ctx.lineTo(0, -48); ctx.lineTo(6, -58); ctx.closePath(); ctx.fill();
+            // Lapel lines
+            ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 0.8;
+            ctx.beginPath(); ctx.moveTo(-8, -58); ctx.lineTo(-4, -44); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(8, -58); ctx.lineTo(4, -44); ctx.stroke();
+            // Tie
+            ctx.fillStyle = tieColor;
+            ctx.beginPath(); ctx.moveTo(-2, -56); ctx.lineTo(0, -40); ctx.lineTo(2, -56); ctx.closePath(); ctx.fill();
+            ctx.fillStyle = tieKnotColor;
+            ctx.beginPath(); ctx.ellipse(0, -56, 2.5, 1.8, 0, 0, Math.PI * 2); ctx.fill();
+            // Pocket square (interviewers only)
+            if (npc.isInterviewer) {
+                ctx.fillStyle = "#e8e8e8";
+                ctx.beginPath(); ctx.roundRect(4, -52, 6, 4, 1); ctx.fill();
+            }
+
+            // Pants
+            ctx.fillStyle = pantsColor;
+            ctx.beginPath(); ctx.roundRect(-16, -28, 32, 24, [0,0,6,6]); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(-8, -7, 10, 9, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(8, -7, 10, 9, 0, 0, Math.PI * 2); ctx.fill();
+
+            drawLeg(8, -7, legSwingR, kneeR);
+            drawArm(15, -54, armSwingR);
+
+            // Head
+            dp(0, -72, headBobA, c => {
+                c.scale(-1, 1);
+                const HR = 21;
+                // BACK HAIR
+                c.fillStyle = hairColor;
+                if (isBoy) {
+                    if (hairStyle === 1) { c.beginPath(); c.arc(0, -1, HR + 5, Math.PI * 0.95, Math.PI * 0.05, false); c.closePath(); c.fill(); }
+                    else if (hairStyle === 2) { c.beginPath(); c.arc(0, -1, HR + 2, Math.PI, 0, false); c.closePath(); c.fill(); }
+                } else {
+                    if (hairStyle === 0) {
+                        c.beginPath(); c.arc(0, -1, HR + 4, Math.PI, 0, false); c.closePath(); c.fill();
+                        c.beginPath(); c.roundRect(-HR - 5, -6, 9, 22, 4); c.fill();
+                        c.beginPath(); c.roundRect(HR - 4, -6, 9, 22, 4); c.fill();
+                    } else if (hairStyle === 1) {
+                        c.beginPath(); c.arc(0, -1, HR + 3, Math.PI, 0, false); c.closePath(); c.fill();
+                        c.beginPath(); c.ellipse(-20, -8, 8, 14, -0.2, 0, Math.PI * 2); c.fill();
+                        c.beginPath(); c.ellipse(20, -8, 8, 14, 0.2, 0, Math.PI * 2); c.fill();
+                    } else {
+                        c.beginPath(); c.arc(0, -1, HR + 4, Math.PI, 0, false); c.closePath(); c.fill();
+                        c.beginPath(); c.ellipse(-18, -4, 7, 16, 0.25, 0, Math.PI * 2); c.fill();
+                    }
+                }
+                // FACE BASE
+                c.fillStyle = skinColor;
+                c.beginPath(); c.arc(0, 0, HR, 0, Math.PI * 2); c.fill();
+                // Ears
+                c.beginPath(); c.arc(-18, 3, 5.5, 0, Math.PI * 2); c.fill();
+                c.beginPath(); c.arc(18, 3, 5.5, 0, Math.PI * 2); c.fill();
+                // FRONT HAIR
+                c.fillStyle = hairColor;
+                if (isBoy) {
+                    if (hairStyle === 0) {
+                        c.beginPath(); c.arc(0, -1, HR + 3, Math.PI, 0, false); c.closePath(); c.fill();
+                        c.fillStyle = skinColor;
+                        c.beginPath(); c.arc(0, 0, HR, 0, Math.PI * 2); c.fill();
+                        c.beginPath(); c.arc(-18, 3, 5.5, 0, Math.PI * 2); c.fill();
+                        c.beginPath(); c.arc(18, 3, 5.5, 0, Math.PI * 2); c.fill();
+                        c.fillStyle = hairColor;
+                        c.beginPath(); c.moveTo(-17, -21); c.lineTo(-17, -13);
+                        c.quadraticCurveTo(-8, -16, 0, -13);
+                        c.quadraticCurveTo(8, -16, 17, -13);
+                        c.lineTo(17, -21); c.closePath(); c.fill();
+                    } else if (hairStyle === 1) {
+                        c.beginPath(); c.moveTo(-19, -21); c.lineTo(-19, -10);
+                        c.quadraticCurveTo(-10, -13, 0, -10); c.quadraticCurveTo(10, -13, 19, -10);
+                        c.lineTo(19, -21); c.closePath(); c.fill();
+                    } else {
+                        c.globalAlpha = 0.45;
+                        c.beginPath(); c.moveTo(-16, -21); c.lineTo(-16, -17); c.lineTo(16, -17); c.lineTo(16, -21); c.closePath(); c.fill();
+                        c.globalAlpha = 1;
+                    }
+                } else {
+                    if (hairStyle === 0) {
+                        c.beginPath(); c.moveTo(-18, -21); c.lineTo(-18, -11); c.lineTo(18, -11); c.lineTo(18, -21); c.closePath(); c.fill();
+                    } else if (hairStyle === 1) {
+                        c.beginPath(); c.moveTo(-17, -21); c.lineTo(-17, -11); c.lineTo(17, -11); c.lineTo(17, -21); c.closePath(); c.fill();
+                        c.fillStyle = "hsl(345, 65%, 65%)";
+                        [[-20, -14], [20, -14]].forEach(([rx, ry]) => {
+                            c.beginPath(); c.ellipse(rx - 4, ry, 4, 2.5, -0.3, 0, Math.PI * 2); c.fill();
+                            c.beginPath(); c.ellipse(rx + 4, ry, 4, 2.5, 0.3, 0, Math.PI * 2); c.fill();
+                            c.beginPath(); c.arc(rx, ry, 1.5, 0, Math.PI * 2); c.fill();
+                        });
+                    } else {
+                        c.beginPath(); c.moveTo(-15, -21); c.lineTo(-15, -12);
+                        c.quadraticCurveTo(0, -10, 17, -13); c.lineTo(17, -21); c.closePath(); c.fill();
+                    }
+                }
+                // FEATURES
+                drawBabyFace(c, faceType, skinColor, cheekColor, null, false);
+            });
+
+            ctx.restore();
+        }
+
+        function initJobHuntDrops() {
+            disposeToneDrops();
+            toneDrops = [];
+            if (!baseRhythmInfo || !inheritedChordProgression) return;
+            for (let i = 0; i < JOBHUNT_DROPS.length; i++) {
+                const fac = JOBHUNT_DROPS[i];
+                const timbres = JOBHUNT_FACILITY_TIMBRES[fac.id] || ["bright-chime"];
+                const pick = randInt(0, timbres.length - 1);
+                const timbreName = timbres[pick];
+                const patternStyle = JOBHUNT_PATTERN_STYLES[timbreName] || "formal-accent";
+                const variant = randInt(0, 1);
+                const kbBundle = buildKeyboardLine(baseRhythmInfo, patternStyle, inheritedChordProgression, variant);
+                const kb = createJobHuntSynth(timbreName);
+                toneDrops.push({
+                    x: worldWidth * fac.xFrac,
+                    y: worldHeight * fac.yFrac,
+                    pattern: kbBundle.pattern,
+                    velocityPattern: null,
+                    proximityVol: -100,
+                    isHovered: false,
+                    overlapAlpha: 0,
+                    instrument: "keyboard",
+                    keyboardSynth: kb.synth,
+                    keyboardEffects: kb.effects,
+                    keyboardNotes: kbBundle.notes,
+                    keyboardAttacks: kbBundle.attacks,
+                    keyboardDurations: kbBundle.durations,
+                    keyboardSustainType: kbBundle.sustainType,
+                    activityId: fac.id,
+                    activityName: fac.name,
+                    activityNameEn: fac.nameEn || null,
+                    dropColor: fac.color,
+                    activityLabels: fac.labels,
+                    requiredLabel: fac.requiredLabel || null,
+                    jobHuntTimbre: timbreName,
+                    ripples: []
+                });
+            }
+            primeToneDrops();
+        }
+
+        function drawJobHuntBackground() {
+            const wW = worldWidth, wH = worldHeight;
+            const wallY = wH * 0.52;
+            const wallThick = 18;
+            const deskY = wH * 0.32;
+            const dskX = wW * 0.15, dskW = wW * 0.70, dskH = wH * 0.04;
+
+            // ======== INTERVIEW ROOM (top 52%) ========
+            // Wall background — cream two-tone (upper lighter, lower wainscot)
+            const wainscotY = wH * 0.38;
+            ctx.fillStyle = "#f0ebe0";
+            ctx.fillRect(0, 0, wW, wallY);
+            // Lower wainscot area — slightly darker
+            ctx.fillStyle = "#e8e0d0";
+            ctx.fillRect(0, wainscotY, wW, wallY - wainscotY);
+            // Wainscot rail
+            ctx.fillStyle = "#c8b898";
+            ctx.fillRect(0, wainscotY - 1, wW, 3);
+            // Baseboard at wall/floor boundary (interview room side)
+            ctx.fillStyle = "#8a7a60";
+            ctx.fillRect(0, wallY - wallThick / 2 - 4, wW, 4);
+
+            // Carpet
+            const carpetG = ctx.createLinearGradient(0, wainscotY + 10, 0, wallY);
+            carpetG.addColorStop(0, "#c4b090"); carpetG.addColorStop(1, "#bba880");
+            ctx.fillStyle = carpetG;
+            ctx.fillRect(0, wainscotY + 10, wW, wallY - wainscotY - 10);
+            // Diamond pattern on carpet
+            ctx.strokeStyle = "rgba(160,140,110,0.12)"; ctx.lineWidth = 0.5;
+            const carpStep = 18;
+            for (let ty = Math.floor(wainscotY + 10); ty < wallY; ty += carpStep) {
+                for (let tx = 0; tx < wW; tx += carpStep) {
+                    ctx.beginPath();
+                    ctx.moveTo(tx + carpStep / 2, ty); ctx.lineTo(tx + carpStep, ty + carpStep / 2);
+                    ctx.lineTo(tx + carpStep / 2, ty + carpStep); ctx.lineTo(tx, ty + carpStep / 2);
+                    ctx.closePath(); ctx.stroke();
+                }
+            }
+
+            // -- Downlights --
+            for (let dl = 0; dl < 4; dl++) {
+                const dlx = wW * (0.15 + dl * 0.23), dly = wH * 0.01;
+                const dlg = ctx.createRadialGradient(dlx, dly, 0, dlx, dly, wH * 0.16);
+                dlg.addColorStop(0, "rgba(255,250,230,0.10)"); dlg.addColorStop(1, "rgba(255,250,230,0)");
+                ctx.fillStyle = dlg;
+                ctx.fillRect(dlx - wW * 0.08, dly, wW * 0.16, wH * 0.16);
+                ctx.fillStyle = "rgba(255,250,240,0.6)";
+                ctx.beginPath(); ctx.arc(dlx, dly + 3, 4, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // -- Interviewer chairs (behind desk — office chairs, drawn BEFORE desk so legs hidden) --
+            for (let ic = 0; ic < 3; ic++) {
+                const cx = wW * (0.25 + ic * 0.25), cy = wH * 0.29;
+                // Star-base (5 casters)
+                ctx.fillStyle = "#444";
+                for (let cs = 0; cs < 5; cs++) {
+                    const ca = (Math.PI * 2 * cs) / 5 - Math.PI / 2;
+                    const bx = cx + Math.cos(ca) * 12, by = cy + 16 + Math.sin(ca) * 5;
+                    ctx.beginPath(); ctx.arc(bx, by, 2.5, 0, Math.PI * 2); ctx.fill();
+                    ctx.strokeStyle = "#555"; ctx.lineWidth = 1.2;
+                    ctx.beginPath(); ctx.moveTo(cx, cy + 14); ctx.lineTo(bx, by); ctx.stroke();
+                }
+                // Stem
+                ctx.fillStyle = "#555";
+                ctx.fillRect(cx - 2.5, cy + 8, 5, 8);
+                // Seat
+                ctx.fillStyle = "#505050";
+                ctx.beginPath(); ctx.roundRect(cx - 14, cy, 28, 10, 4); ctx.fill();
+                ctx.fillStyle = "rgba(255,255,255,0.06)";
+                ctx.fillRect(cx - 12, cy + 1, 24, 3);
+                // Back (tall, curved)
+                ctx.fillStyle = "#606060";
+                ctx.beginPath(); ctx.roundRect(cx - 12, cy - 18, 24, 18, [6, 6, 0, 0]); ctx.fill();
+                // Back mesh lines
+                ctx.strokeStyle = "rgba(255,255,255,0.06)"; ctx.lineWidth = 0.5;
+                for (let ml = 0; ml < 3; ml++) { ctx.beginPath(); ctx.moveTo(cx - 10, cy - 15 + ml * 5); ctx.lineTo(cx + 10, cy - 15 + ml * 5); ctx.stroke(); }
+                // Armrests
+                ctx.fillStyle = "#4a4a4a";
+                ctx.beginPath(); ctx.roundRect(cx - 18, cy + 2, 6, 5, 2); ctx.fill();
+                ctx.beginPath(); ctx.roundRect(cx + 12, cy + 2, 6, 5, 2); ctx.fill();
+            }
+
+            // -- Draw interviewer NPCs BEFORE desk (so desk covers their lower bodies) --
+            updateJobHuntNpcs();
+            jobHuntNpcs.forEach(npc => { if (npc.isInterviewer) drawJobHuntNpc(npc, ctx); });
+
+            // -- Interview desk with wood grain + front face + desk LEGS --
+            const dskDepth = 8;
+            // Desk legs (4 legs, drawn first so top surface covers their tops)
+            ctx.fillStyle = "#5a3c1a";
+            const legW = 5, legH = 30;
+            const legInset = 20;
+            // Front left leg
+            ctx.beginPath(); ctx.roundRect(dskX + legInset, deskY + dskH + dskDepth, legW, legH, 2); ctx.fill();
+            // Front right leg
+            ctx.beginPath(); ctx.roundRect(dskX + dskW - legInset - legW, deskY + dskH + dskDepth, legW, legH, 2); ctx.fill();
+            // Back left leg (partially hidden)
+            ctx.fillStyle = "#4a2c10";
+            ctx.beginPath(); ctx.roundRect(dskX + legInset + 2, deskY - 2, legW - 1, 4, 1); ctx.fill();
+            // Back right leg (partially hidden)
+            ctx.beginPath(); ctx.roundRect(dskX + dskW - legInset - legW + 2, deskY - 2, legW - 1, 4, 1); ctx.fill();
+            // Front face (desk thickness)
+            ctx.fillStyle = "#6a4c2a";
+            ctx.fillRect(dskX, deskY + dskH, dskW, dskDepth);
+            // Bottom edge shadow
+            ctx.fillStyle = "rgba(0,0,0,0.08)";
+            ctx.fillRect(dskX + 2, deskY + dskH + dskDepth, dskW - 4, 3);
+            // Top surface
+            ctx.fillStyle = "#7a5c3a";
+            ctx.beginPath(); ctx.roundRect(dskX, deskY, dskW, dskH, 3); ctx.fill();
+            // Wood grain
+            ctx.strokeStyle = "rgba(100,70,40,0.12)"; ctx.lineWidth = 0.5;
+            for (let wl = 0; wl < 6; wl++) {
+                const wy = deskY + 3 + wl * (dskH - 6) / 5;
+                ctx.beginPath(); ctx.moveTo(dskX + 4, wy); ctx.lineTo(dskX + dskW - 4, wy); ctx.stroke();
+            }
+            // Front edge highlight
+            ctx.fillStyle = "rgba(255,255,255,0.06)";
+            ctx.fillRect(dskX + 2, deskY + 1, dskW - 4, 3);
+            // Desk items: documents, cup, pen, name plate
+            ctx.fillStyle = "#f0ece0";
+            ctx.beginPath(); ctx.roundRect(dskX + dskW * 0.08, deskY + dskH * 0.15, dskW * 0.08, dskH * 0.7, 1); ctx.fill();
+            ctx.beginPath(); ctx.roundRect(dskX + dskW * 0.18, deskY + dskH * 0.2, dskW * 0.08, dskH * 0.6, 1); ctx.fill();
+            ctx.strokeStyle = "rgba(0,0,0,0.08)"; ctx.lineWidth = 0.3;
+            for (let dl = 0; dl < 3; dl++) { ctx.beginPath(); ctx.moveTo(dskX + dskW * 0.09, deskY + dskH * 0.25 + dl * dskH * 0.15); ctx.lineTo(dskX + dskW * 0.15, deskY + dskH * 0.25 + dl * dskH * 0.15); ctx.stroke(); }
+            // Coffee cup
+            ctx.fillStyle = "#f8f4f0";
+            ctx.beginPath(); ctx.ellipse(dskX + dskW * 0.42, deskY + dskH * 0.5, 6, 5, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "#8a5030"; ctx.globalAlpha = 0.5;
+            ctx.beginPath(); ctx.ellipse(dskX + dskW * 0.42, deskY + dskH * 0.5, 4.5, 3.8, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 1;
+            // Pen
+            ctx.fillStyle = "#222";
+            ctx.save(); ctx.translate(dskX + dskW * 0.55, deskY + dskH * 0.45); ctx.rotate(0.3);
+            ctx.fillRect(-1, -10, 2.5, 20); ctx.restore();
+            // Name plate
+            ctx.fillStyle = "#c8a848";
+            ctx.beginPath(); ctx.roundRect(dskX + dskW * 0.70, deskY + dskH * 0.2, dskW * 0.10, dskH * 0.55, 2); ctx.fill();
+            ctx.fillStyle = "#333";
+            ctx.font = `${Math.round(wW * 0.008)}px 'Zen Maru Gothic'`;
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText("面接官", dskX + dskW * 0.75, deskY + dskH * 0.5);
+
+            // -- Water pitcher and glasses on desk --
+            const pitcherX = dskX + dskW * 0.88, pitcherY = deskY + dskH * 0.2;
+            // Pitcher body
+            ctx.fillStyle = "rgba(180,210,240,0.35)";
+            ctx.beginPath(); ctx.roundRect(pitcherX - 5, pitcherY, 10, 14, 3); ctx.fill();
+            ctx.strokeStyle = "rgba(140,180,220,0.4)"; ctx.lineWidth = 0.8;
+            ctx.beginPath(); ctx.roundRect(pitcherX - 5, pitcherY, 10, 14, 3); ctx.stroke();
+            // Water level
+            ctx.fillStyle = "rgba(160,200,240,0.25)";
+            ctx.fillRect(pitcherX - 4, pitcherY + 4, 8, 9);
+            // Handle
+            ctx.strokeStyle = "rgba(140,180,220,0.5)"; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(pitcherX + 7, pitcherY + 7, 4, -Math.PI / 2, Math.PI / 2); ctx.stroke();
+            // Glasses (2 small tumblers)
+            for (let gi = 0; gi < 2; gi++) {
+                const gx = pitcherX - 16 - gi * 12;
+                ctx.fillStyle = "rgba(200,220,240,0.3)";
+                ctx.beginPath(); ctx.roundRect(gx - 3, pitcherY + 4, 6, 8, 1); ctx.fill();
+                ctx.strokeStyle = "rgba(160,190,220,0.35)"; ctx.lineWidth = 0.5;
+                ctx.beginPath(); ctx.roundRect(gx - 3, pitcherY + 4, 6, 8, 1); ctx.stroke();
+            }
+
+            // -- Subtle shadow under desk --
+            ctx.fillStyle = "rgba(0,0,0,0.06)";
+            ctx.beginPath();
+            ctx.ellipse(dskX + dskW / 2, deskY + dskH + dskDepth + legH + 4, dskW * 0.48, 6, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // -- Shadow under interviewer chairs --
+            for (let ic = 0; ic < 3; ic++) {
+                const cx = wW * (0.25 + ic * 0.25), cy = wH * 0.29;
+                ctx.fillStyle = "rgba(0,0,0,0.05)";
+                ctx.beginPath(); ctx.ellipse(cx, cy + 22, 16, 4, 0, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // -- Player chair (pipe chair style) --
+            const pcx = wW * 0.50, pcy = wH * 0.42;
+            // Metal legs
+            ctx.strokeStyle = "#999"; ctx.lineWidth = 2; ctx.lineCap = "round";
+            ctx.beginPath(); ctx.moveTo(pcx - 10, pcy + 12); ctx.lineTo(pcx - 12, pcy + 22); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(pcx + 10, pcy + 12); ctx.lineTo(pcx + 12, pcy + 22); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(pcx - 8, pcy - 4); ctx.lineTo(pcx - 10, pcy - 10); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(pcx + 8, pcy - 4); ctx.lineTo(pcx + 10, pcy - 10); ctx.stroke();
+            ctx.lineCap = "butt";
+            // Seat (cloth cushion)
+            ctx.fillStyle = "#7090a8";
+            ctx.beginPath(); ctx.roundRect(pcx - 11, pcy + 2, 22, 10, 3); ctx.fill();
+            ctx.fillStyle = "rgba(255,255,255,0.08)";
+            ctx.fillRect(pcx - 9, pcy + 3, 18, 3);
+            // Back (cloth)
+            ctx.fillStyle = "#6080a0";
+            ctx.beginPath(); ctx.roundRect(pcx - 10, pcy - 8, 20, 10, [4, 4, 0, 0]); ctx.fill();
+
+            // -- Wall paintings (framed) --
+            const paintings = [
+                { x: 0.05, y: 0.015, w: 0.06, h: 0.04, c1: "#6a8ab0", c2: "#88aad0" },
+                { x: 0.88, y: 0.02, w: 0.07, h: 0.045, c1: "#a08860", c2: "#c0a880" },
+                { x: 0.16, y: 0.02, w: 0.05, h: 0.035, c1: "#80a070", c2: "#a0c090" }
+            ];
+            paintings.forEach(p => {
+                ctx.fillStyle = "#6a5a40";
+                ctx.beginPath(); ctx.roundRect(wW * p.x - 2, wH * p.y - 2, wW * p.w + 4, wH * p.h + 4, 2); ctx.fill();
+                const pg = ctx.createLinearGradient(wW * p.x, wH * p.y, wW * p.x + wW * p.w, wH * p.y + wH * p.h);
+                pg.addColorStop(0, p.c1); pg.addColorStop(1, p.c2);
+                ctx.fillStyle = pg;
+                ctx.fillRect(wW * p.x, wH * p.y, wW * p.w, wH * p.h);
+            });
+
+            // -- Company logo on wall with name --
+            ctx.fillStyle = "rgba(100,120,160,0.15)";
+            ctx.beginPath(); ctx.arc(wW * 0.50, wH * 0.025, wW * 0.02, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = "rgba(100,120,160,0.25)"; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.arc(wW * 0.50, wH * 0.025, wW * 0.02, 0, Math.PI * 2); ctx.stroke();
+            // Inner logo mark
+            ctx.fillStyle = "rgba(100,120,160,0.2)";
+            ctx.beginPath(); ctx.arc(wW * 0.50, wH * 0.025, wW * 0.012, 0, Math.PI * 2); ctx.fill();
+            // Company name text below logo
+            ctx.fillStyle = "rgba(80,100,140,0.3)";
+            ctx.font = `600 ${Math.round(wW * 0.009)}px 'Zen Maru Gothic'`;
+            ctx.textAlign = "center"; ctx.textBaseline = "top";
+            ctx.fillText("トーン株式会社", wW * 0.50, wH * 0.025 + wW * 0.022);
+
+            // -- Wall-mounted AC unit --
+            const acX = wW * 0.78, acY = wH * 0.005;
+            ctx.fillStyle = "#eee";
+            ctx.beginPath(); ctx.roundRect(acX, acY, wW * 0.12, wH * 0.018, 3); ctx.fill();
+            ctx.strokeStyle = "rgba(200,200,200,0.6)"; ctx.lineWidth = 0.8;
+            ctx.beginPath(); ctx.roundRect(acX, acY, wW * 0.12, wH * 0.018, 3); ctx.stroke();
+            // Vent slats
+            ctx.strokeStyle = "rgba(180,180,180,0.4)"; ctx.lineWidth = 0.5;
+            for (let vs = 0; vs < 4; vs++) {
+                const vy = acY + wH * 0.005 + vs * wH * 0.003;
+                ctx.beginPath(); ctx.moveTo(acX + 4, vy); ctx.lineTo(acX + wW * 0.12 - 4, vy); ctx.stroke();
+            }
+            // LED indicator
+            ctx.fillStyle = "#4a4"; ctx.beginPath(); ctx.arc(acX + 8, acY + 4, 1.5, 0, Math.PI * 2); ctx.fill();
+
+            // -- Bookshelf / filing cabinet in corner --
+            const bsX = wW * 0.02, bsY = wH * 0.08, bsW = wW * 0.04, bsH = wH * 0.28;
+            // Cabinet body
+            ctx.fillStyle = "#8a7a5a";
+            ctx.beginPath(); ctx.roundRect(bsX, bsY, bsW, bsH, 2); ctx.fill();
+            // Shelves
+            ctx.fillStyle = "#7a6a4a";
+            for (let sh = 0; sh < 4; sh++) {
+                const sy = bsY + (sh + 1) * bsH / 5;
+                ctx.fillRect(bsX + 1, sy, bsW - 2, 2);
+            }
+            // Books on shelves (colored spines)
+            const bookColors = ["#4a6a8a", "#8a4a4a", "#4a8a4a", "#8a7a3a", "#6a4a8a", "#3a7a8a"];
+            for (let sh = 0; sh < 4; sh++) {
+                const shelfY = bsY + sh * bsH / 5 + 3;
+                const shelfH = bsH / 5 - 5;
+                let bx = bsX + 2;
+                for (let b = 0; b < 4 + (sh % 2); b++) {
+                    const bw = 3 + (b * 7 + sh * 3) % 4;
+                    ctx.fillStyle = bookColors[(b + sh * 2) % bookColors.length];
+                    ctx.fillRect(bx, shelfY, bw, shelfH);
+                    bx += bw + 1;
+                    if (bx > bsX + bsW - 4) break;
+                }
+            }
+
+            // -- Potted plants --
+            const drawPlant = (px, py) => {
+                ctx.fillStyle = "#b06030";
+                ctx.beginPath(); ctx.moveTo(px - 7, py + 4); ctx.lineTo(px + 7, py + 4);
+                ctx.lineTo(px + 5, py + 14); ctx.lineTo(px - 5, py + 14); ctx.closePath(); ctx.fill();
+                ctx.fillStyle = "#2d8833";
+                for (let lf = 0; lf < 6; lf++) {
+                    const la = (Math.PI * 2 * lf) / 6 - Math.PI / 2;
+                    ctx.beginPath(); ctx.ellipse(px + Math.cos(la) * 8, py + Math.sin(la) * 6 - 2, 6, 3.5, la, 0, Math.PI * 2); ctx.fill();
+                }
+            };
+            drawPlant(wW * 0.04, wH * 0.44);
+            drawPlant(wW * 0.96, wH * 0.44);
+
+            // -- Clock --
+            const clkX = wW * 0.94, clkY = wH * 0.035, clkR = 12;
+            ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(clkX, clkY, clkR, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = "#666"; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(clkX, clkY, clkR, 0, Math.PI * 2); ctx.stroke();
+            for (let h = 0; h < 12; h++) {
+                const ha = (Math.PI * 2 * h) / 12 - Math.PI / 2;
+                ctx.fillStyle = "#444";
+                ctx.beginPath(); ctx.arc(clkX + Math.cos(ha) * (clkR - 2.5), clkY + Math.sin(ha) * (clkR - 2.5), 1, 0, Math.PI * 2); ctx.fill();
+            }
+            const now = Date.now();
+            const secAngle = ((now / 1000) % 60) / 60 * Math.PI * 2 - Math.PI / 2;
+            const minAngle = ((now / 60000) % 60) / 60 * Math.PI * 2 - Math.PI / 2;
+            const hrAngle = ((now / 3600000) % 12) / 12 * Math.PI * 2 - Math.PI / 2;
+            ctx.lineCap = "round";
+            ctx.strokeStyle = "#333"; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(clkX, clkY); ctx.lineTo(clkX + Math.cos(hrAngle) * (clkR * 0.5), clkY + Math.sin(hrAngle) * (clkR * 0.5)); ctx.stroke();
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(clkX, clkY); ctx.lineTo(clkX + Math.cos(minAngle) * (clkR * 0.7), clkY + Math.sin(minAngle) * (clkR * 0.7)); ctx.stroke();
+            ctx.strokeStyle = "#cc3333"; ctx.lineWidth = 0.6;
+            ctx.beginPath(); ctx.moveTo(clkX, clkY); ctx.lineTo(clkX + Math.cos(secAngle) * (clkR * 0.8), clkY + Math.sin(secAngle) * (clkR * 0.8)); ctx.stroke();
+            ctx.lineCap = "butt";
+            ctx.fillStyle = "#333"; ctx.beginPath(); ctx.arc(clkX, clkY, 1.5, 0, Math.PI * 2); ctx.fill();
+
+            // -- Whiteboard --
+            const wbX = wW * 0.72, wbY = wH * 0.015, wbW = wW * 0.10, wbH = wH * 0.05;
+            ctx.fillStyle = "#f0f0f0";
+            ctx.beginPath(); ctx.roundRect(wbX, wbY, wbW, wbH, 2); ctx.fill();
+            ctx.strokeStyle = "#bbb"; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.roundRect(wbX, wbY, wbW, wbH, 2); ctx.stroke();
+            ctx.strokeStyle = "rgba(50,100,200,0.3)"; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(wbX + 6, wbY + wbH - 6); ctx.lineTo(wbX + wbW - 6, wbY + wbH - 6); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(wbX + 6, wbY + wbH - 6); ctx.lineTo(wbX + 6, wbY + 6); ctx.stroke();
+            ctx.strokeStyle = "rgba(200,50,50,0.3)";
+            ctx.beginPath();
+            ctx.moveTo(wbX + 8, wbY + wbH - 10);
+            ctx.lineTo(wbX + wbW * 0.35, wbY + wbH * 0.3);
+            ctx.lineTo(wbX + wbW * 0.6, wbY + wbH * 0.5);
+            ctx.lineTo(wbX + wbW - 8, wbY + 8);
+            ctx.stroke();
+
+            // ======== WALL + DOOR DIVIDER ========
+            // Wall body
+            ctx.fillStyle = "#605848";
+            ctx.fillRect(0, wallY - wallThick / 2, wW, wallThick);
+            // Top/bottom trim lines
+            ctx.fillStyle = "#504838";
+            ctx.fillRect(0, wallY - wallThick / 2, wW, 3);
+            ctx.fillRect(0, wallY + wallThick / 2 - 3, wW, 3);
+            // Wall texture — subtle vertical stripes
+            ctx.strokeStyle = "rgba(255,255,255,0.03)"; ctx.lineWidth = 1;
+            for (let ws = 0; ws < wW; ws += 12) {
+                ctx.beginPath(); ctx.moveTo(ws, wallY - wallThick / 2); ctx.lineTo(ws, wallY + wallThick / 2); ctx.stroke();
+            }
+            // Door frame
+            const doorX = wW * 0.38, doorW = wW * 0.24;
+            ctx.fillStyle = "#8a7a58";
+            ctx.beginPath(); ctx.roundRect(doorX - 4, wallY - wallThick / 2 - 3, doorW + 8, wallThick + 6, 2); ctx.fill();
+            // Door opening (lighter floor visible through)
+            ctx.fillStyle = "#c8c0a8";
+            ctx.fillRect(doorX, wallY - wallThick / 2, doorW, wallThick);
+            // Small transom window above door
+            ctx.fillStyle = "rgba(180,210,240,0.35)";
+            ctx.beginPath(); ctx.roundRect(doorX + doorW * 0.15, wallY - wallThick / 2 - 12, doorW * 0.7, 9, 2); ctx.fill();
+            ctx.strokeStyle = "rgba(100,80,60,0.4)"; ctx.lineWidth = 0.8;
+            ctx.beginPath(); ctx.roundRect(doorX + doorW * 0.15, wallY - wallThick / 2 - 12, doorW * 0.7, 9, 2); ctx.stroke();
+            // Vertical divider in transom
+            ctx.beginPath(); ctx.moveTo(doorX + doorW * 0.5, wallY - wallThick / 2 - 12); ctx.lineTo(doorX + doorW * 0.5, wallY - wallThick / 2 - 3); ctx.stroke();
+            // 面接室 sign
+            ctx.fillStyle = "#f0ece0";
+            ctx.beginPath(); ctx.roundRect(doorX + doorW * 0.3, wallY - wallThick / 2 - 24, doorW * 0.4, 11, 2); ctx.fill();
+            ctx.fillStyle = "#444";
+            ctx.font = `600 ${Math.round(wW * 0.012)}px 'Zen Maru Gothic'`;
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText("面接室", doorX + doorW * 0.5, wallY - wallThick / 2 - 18);
+
+            // ======== HALLWAY (bottom 48%) ========
+            const hallTop = wallY + wallThick / 2;
+            // Floor with tile grid
+            const hallG = ctx.createLinearGradient(0, hallTop, 0, wH);
+            hallG.addColorStop(0, "#d0c8bb"); hallG.addColorStop(1, "#c4bba8");
+            ctx.fillStyle = hallG;
+            ctx.fillRect(0, hallTop, wW, wH - hallTop);
+            // Tile grid lines
+            ctx.strokeStyle = "rgba(180,170,150,0.18)"; ctx.lineWidth = 0.5;
+            const tileSize = 24;
+            for (let ty = hallTop; ty < wH; ty += tileSize) {
+                ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(wW, ty); ctx.stroke();
+            }
+            for (let tx = 0; tx < wW; tx += tileSize) {
+                ctx.beginPath(); ctx.moveTo(tx, hallTop); ctx.lineTo(tx, wH); ctx.stroke();
+            }
+            // Gloss streaks
+            ctx.fillStyle = "rgba(255,255,255,0.04)";
+            ctx.fillRect(wW * 0.1, hallTop, wW * 0.05, wH - hallTop);
+            ctx.fillRect(wW * 0.5, hallTop, wW * 0.04, wH - hallTop);
+
+            // -- Shoe scuff marks on hallway floor --
+            ctx.fillStyle = "rgba(80,70,60,0.04)";
+            const scuffs = [[0.30, 0.62], [0.45, 0.70], [0.55, 0.58], [0.65, 0.75], [0.20, 0.68], [0.75, 0.64], [0.40, 0.80]];
+            scuffs.forEach(([sx, sy]) => {
+                ctx.beginPath(); ctx.ellipse(wW * sx, wH * sy, 6 + Math.random() * 4, 2, (sx * 10) % 1.5, 0, Math.PI * 2); ctx.fill();
+            });
+
+            // -- Floor direction arrows leading to interview room door --
+            ctx.fillStyle = "rgba(100,90,70,0.08)";
+            const arrowCX = doorX + doorW / 2;
+            for (let ai = 0; ai < 3; ai++) {
+                const ay = wH * (0.72 - ai * 0.06);
+                ctx.beginPath();
+                ctx.moveTo(arrowCX, ay - 6);
+                ctx.lineTo(arrowCX + 8, ay + 2);
+                ctx.lineTo(arrowCX + 3, ay + 2);
+                ctx.lineTo(arrowCX + 3, ay + 8);
+                ctx.lineTo(arrowCX - 3, ay + 8);
+                ctx.lineTo(arrowCX - 3, ay + 2);
+                ctx.lineTo(arrowCX - 8, ay + 2);
+                ctx.closePath(); ctx.fill();
+            }
+
+            // Hallway bottom wall
+            ctx.fillStyle = "#d8d0c0";
+            ctx.fillRect(0, wH - 6, wW, 6);
+            ctx.fillStyle = "#8a7a60";
+            ctx.fillRect(0, wH - 6, wW, 2);
+
+            // -- Ceiling fluorescent lights for hallway (with subtle flicker) --
+            for (let fl = 0; fl < 3; fl++) {
+                const flx = wW * (0.15 + fl * 0.3), fly = hallTop + 2;
+                // Slight flicker on middle light
+                const flicker = (fl === 1) ? 0.92 + 0.08 * Math.sin(Date.now() * 0.005 + fl) : 1.0;
+                ctx.globalAlpha = flicker;
+                ctx.fillStyle = "#f0f0e8";
+                ctx.beginPath(); ctx.roundRect(flx - wW * 0.06, fly, wW * 0.12, 5, 2); ctx.fill();
+                const flg = ctx.createRadialGradient(flx, fly + 3, 0, flx, fly + 3, wH * 0.08);
+                flg.addColorStop(0, "rgba(255,255,240,0.06)"); flg.addColorStop(1, "rgba(255,255,240,0)");
+                ctx.fillStyle = flg;
+                ctx.fillRect(flx - wW * 0.06, fly, wW * 0.12, wH * 0.08);
+                ctx.globalAlpha = 1;
+                // Light fixture housing detail
+                ctx.strokeStyle = "rgba(180,180,170,0.3)"; ctx.lineWidth = 0.5;
+                ctx.beginPath(); ctx.roundRect(flx - wW * 0.06, fly, wW * 0.12, 5, 2); ctx.stroke();
+            }
+
+            // -- Door handle detail on interview room door --
+            const dhX = doorX + doorW - 12, dhY = wallY;
+            ctx.fillStyle = "#b8a878";
+            ctx.beginPath(); ctx.roundRect(dhX, dhY - 3, 8, 6, 2); ctx.fill();
+            ctx.fillStyle = "#d4c49a";
+            ctx.beginPath(); ctx.arc(dhX + 4, dhY, 2, 0, Math.PI * 2); ctx.fill();
+
+            // -- Coat hooks on wall above waiting area --
+            const hookWallY = hallTop + 3;
+            for (let hi = 0; hi < 4; hi++) {
+                const hx = wW * (0.08 + hi * 0.055);
+                // Hook plate
+                ctx.fillStyle = "#aaa";
+                ctx.beginPath(); ctx.roundRect(hx - 2, hookWallY, 4, 6, 1); ctx.fill();
+                // Hook
+                ctx.strokeStyle = "#999"; ctx.lineWidth = 1.5; ctx.lineCap = "round";
+                ctx.beginPath(); ctx.arc(hx, hookWallY + 8, 3, 0, Math.PI); ctx.stroke();
+                ctx.lineCap = "butt";
+            }
+
+            // -- Side table with magazines near waiting chairs --
+            const stX = wW * (0.10 + 3 * 0.065 + 0.03), stY = wH * 0.565;
+            // Table legs
+            ctx.fillStyle = "#8a7a5a";
+            ctx.fillRect(stX - 8, stY + 10, 2, 12);
+            ctx.fillRect(stX + 6, stY + 10, 2, 12);
+            // Table top
+            ctx.fillStyle = "#9a8a6a";
+            ctx.beginPath(); ctx.roundRect(stX - 10, stY + 6, 20, 5, 2); ctx.fill();
+            // Magazines
+            ctx.fillStyle = "#d04040";
+            ctx.beginPath(); ctx.roundRect(stX - 6, stY + 2, 8, 5, 1); ctx.fill();
+            ctx.fillStyle = "#4060b0";
+            ctx.beginPath(); ctx.roundRect(stX - 3, stY, 7, 5, 1); ctx.fill();
+
+            // -- Fire extinguisher --
+            const feX = wW * 0.92, feY = wH * 0.70;
+            // Body (red cylinder)
+            ctx.fillStyle = "#cc3333";
+            ctx.beginPath(); ctx.roundRect(feX - 4, feY, 8, 18, 2); ctx.fill();
+            // Top nozzle
+            ctx.fillStyle = "#222";
+            ctx.beginPath(); ctx.roundRect(feX - 2, feY - 3, 4, 4, 1); ctx.fill();
+            // Pressure gauge
+            ctx.fillStyle = "#eee";
+            ctx.beginPath(); ctx.arc(feX, feY + 5, 2.5, 0, Math.PI * 2); ctx.fill();
+            // Handle
+            ctx.strokeStyle = "#222"; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(feX + 2, feY - 1); ctx.lineTo(feX + 5, feY + 3); ctx.stroke();
+
+            // -- Reception window/counter on opposite wall --
+            const rcX = wW * 0.55, rcY = hallTop + 2, rcW = wW * 0.18, rcH = wH * 0.06;
+            // Counter body
+            ctx.fillStyle = "#b0a080";
+            ctx.beginPath(); ctx.roundRect(rcX, rcY, rcW, rcH, 2); ctx.fill();
+            // Window opening (frosted glass)
+            ctx.fillStyle = "rgba(200,220,240,0.25)";
+            ctx.beginPath(); ctx.roundRect(rcX + 4, rcY + 2, rcW - 8, rcH * 0.55, 2); ctx.fill();
+            ctx.strokeStyle = "rgba(160,140,110,0.4)"; ctx.lineWidth = 0.8;
+            ctx.beginPath(); ctx.roundRect(rcX + 4, rcY + 2, rcW - 8, rcH * 0.55, 2); ctx.stroke();
+            // Counter ledge
+            ctx.fillStyle = "#a09070";
+            ctx.fillRect(rcX - 2, rcY + rcH - 4, rcW + 4, 4);
+            // "受付" label
+            ctx.fillStyle = "rgba(80,70,50,0.4)";
+            ctx.font = `600 ${Math.round(wW * 0.008)}px 'Zen Maru Gothic'`;
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText("受付", rcX + rcW / 2, rcY + rcH * 0.35);
+
+            // -- Trash can near water cooler --
+            const tcX = wW * 0.90, tcY = wH * 0.60;
+            ctx.fillStyle = "#888";
+            ctx.beginPath();
+            ctx.moveTo(tcX - 5, tcY); ctx.lineTo(tcX + 5, tcY);
+            ctx.lineTo(tcX + 4, tcY + 14); ctx.lineTo(tcX - 4, tcY + 14);
+            ctx.closePath(); ctx.fill();
+            // Rim
+            ctx.fillStyle = "#999";
+            ctx.fillRect(tcX - 6, tcY - 1, 12, 2);
+
+            // -- Waiting pipe chairs (3 individual chairs, tightly packed along wall) --
+            const chairSpacing = 0.065;
+            const chairStartX = 0.10;
+            for (let i = 0; i < 3; i++) {
+                const cx = wW * (chairStartX + i * chairSpacing), cy = wH * 0.565;
+                // Metal legs (pipe chair style)
+                ctx.strokeStyle = "#999"; ctx.lineWidth = 2; ctx.lineCap = "round";
+                // Front legs
+                ctx.beginPath(); ctx.moveTo(cx - 10, cy + 12); ctx.lineTo(cx - 12, cy + 22); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx + 10, cy + 12); ctx.lineTo(cx + 12, cy + 22); ctx.stroke();
+                // Back legs
+                ctx.beginPath(); ctx.moveTo(cx - 8, cy - 4); ctx.lineTo(cx - 10, cy - 10); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx + 8, cy - 4); ctx.lineTo(cx + 10, cy - 10); ctx.stroke();
+                ctx.lineCap = "butt";
+                // Seat cushion
+                ctx.fillStyle = "#7090a8";
+                ctx.beginPath(); ctx.roundRect(cx - 12, cy + 2, 24, 10, 3); ctx.fill();
+                ctx.fillStyle = "rgba(255,255,255,0.08)";
+                ctx.fillRect(cx - 10, cy + 3, 20, 3);
+                // Back cushion
+                ctx.fillStyle = "#6080a0";
+                ctx.beginPath(); ctx.roundRect(cx - 11, cy - 8, 22, 10, [4, 4, 0, 0]); ctx.fill();
+            }
+
+            // -- Water cooler --
+            const wcX = wW * 0.94, wcY = wH * 0.58;
+            ctx.fillStyle = "#e0e8f0";
+            ctx.beginPath(); ctx.roundRect(wcX - 6, wcY, 12, 22, 3); ctx.fill();
+            ctx.fillStyle = "#6090cc"; ctx.globalAlpha = 0.6;
+            ctx.beginPath(); ctx.roundRect(wcX - 4, wcY - 12, 8, 14, [4, 4, 0, 0]); ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = "#cc4444"; ctx.beginPath(); ctx.arc(wcX - 2, wcY + 10, 2, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "#4444cc"; ctx.beginPath(); ctx.arc(wcX + 2, wcY + 10, 2, 0, Math.PI * 2); ctx.fill();
+
+            // -- Bulletin board --
+            const bbX = wW * 0.04, bbY = hallTop + 5, bbW = wW * 0.08, bbH = wH * 0.07;
+            ctx.fillStyle = "#c4a870";
+            ctx.beginPath(); ctx.roundRect(bbX, bbY, bbW, bbH, 2); ctx.fill();
+            ctx.fillStyle = "rgba(180,150,100,0.3)";
+            for (let ci = 0; ci < 8; ci++) {
+                ctx.beginPath(); ctx.arc(bbX + 3 + (ci * bbW / 8), bbY + 3 + (ci % 3) * bbH / 3, 2 + (ci % 2) * 1.5, 0, Math.PI * 2); ctx.fill();
+            }
+            const paperColors = ["#f0ece0", "#e8e0d0", "#f5f0e0"];
+            for (let pp = 0; pp < 3; pp++) {
+                ctx.fillStyle = paperColors[pp];
+                ctx.beginPath(); ctx.roundRect(bbX + 4 + pp * bbW * 0.3, bbY + 3 + (pp % 2) * bbH * 0.25, bbW * 0.25, bbH * 0.5, 1); ctx.fill();
+                ctx.fillStyle = pp === 0 ? "#cc4444" : pp === 1 ? "#44aa44" : "#4488cc";
+                ctx.beginPath(); ctx.arc(bbX + 4 + pp * bbW * 0.3 + bbW * 0.12, bbY + 4 + (pp % 2) * bbH * 0.25, 2, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // -- Emergency exit sign --
+            ctx.fillStyle = "#228833";
+            ctx.beginPath(); ctx.roundRect(wW * 0.88, hallTop + 3, wW * 0.05, wH * 0.02, 2); ctx.fill();
+            ctx.fillStyle = "#fff";
+            ctx.font = `600 ${Math.round(wW * 0.008)}px sans-serif`;
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText("EXIT", wW * 0.905, hallTop + 3 + wH * 0.01);
+
+            // ======== Waiting NPCs (hallway, drawn after hallway elements) ========
+            jobHuntNpcs.forEach(npc => { if (!npc.isInterviewer) drawJobHuntNpc(npc, ctx); });
+
+            // Interview round indicator
+            if (currentScene === SCENE.JOB_HUNT2) {
+                ctx.save();
+                ctx.fillStyle = "rgba(200,180,100,0.85)";
+                ctx.font = `700 ${Math.round(wW * 0.025)}px 'Zen Maru Gothic'`;
+                ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                ctx.fillText("二次面接", wW * 0.5, wH * 0.50);
+                ctx.restore();
+            }
+        }
+
+        // ======== Side-scroll interview room transition ========
+
+        function triggerJobHuntEnterInterview() {
+            jobHuntTransitioning = true;
+            // Save top-down state
+            jobHuntSavedTopDownX = baby.x;
+            jobHuntSavedTopDownY = baby.y;
+            jobHuntSavedCamX = topDownCameraX;
+            jobHuntSavedCamY = topDownCameraY;
+            remapDropsToSideScroll();
+
+            sceneFade.style.background = '#fff';
+            fadeScreenTo(1, 400);
+            setTimeout(() => {
+                jobHuntViewMode = "sidescroll";
+                jobHuntSideScrollWorldW = 2400;
+                // Position baby near left door
+                baby.x = 90;
+                baby.y = height * ROOM_WALL_RATIO;
+                baby.isTopDown = false;
+                cameraX = 0;
+                orbParticles = [];
+                fadeScreenTo(0, 500);
+                setTimeout(() => { jobHuntTransitioning = false; }, 500);
+            }, 400);
+        }
+
+        function triggerJobHuntExitInterview() {
+            jobHuntTransitioning = true;
+            sceneFade.style.background = '#fff';
+            fadeScreenTo(1, 400);
+            setTimeout(() => {
+                jobHuntViewMode = "topdown";
+                baby.isTopDown = true;
+                // Place baby just below the door in top-down
+                const doorX = worldWidth * 0.38, doorW = worldWidth * 0.24;
+                const wallY = worldHeight * 0.52;
+                baby.x = doorX + doorW / 2;
+                baby.y = wallY + 30;
+                topDownCameraX = jobHuntSavedCamX;
+                topDownCameraY = jobHuntSavedCamY;
+                jobHuntCameraZoom = 1.0;
+                restoreDropsToTopDown();
+                orbParticles = [];
+                fadeScreenTo(0, 500);
+                setTimeout(() => { jobHuntTransitioning = false; }, 500);
+            }, 400);
+        }
+
+        function remapDropsToSideScroll() {
+            jobHuntDropTopDownPositions = toneDrops.map(d => ({ x: d.x, y: d.y }));
+            const floorY = height * ROOM_WALL_RATIO + TONE_FLOOR_OFFSET;
+            // Fixed pixel positions — independent of window width (based on wW=2400)
+            const xPositions = [1272, 1512, 1752];
+            for (let i = 0; i < toneDrops.length; i++) {
+                toneDrops[i].x = xPositions[i] || (1272 + i * 240);
+                toneDrops[i].y = floorY;
+            }
+        }
+
+        function restoreDropsToTopDown() {
+            for (let i = 0; i < toneDrops.length && i < jobHuntDropTopDownPositions.length; i++) {
+                toneDrops[i].x = jobHuntDropTopDownPositions[i].x;
+                toneDrops[i].y = jobHuntDropTopDownPositions[i].y;
+            }
+        }
+
+        function updateJobHuntSideScrollCamera() {
+            if (!baby) return;
+            const wW = jobHuntSideScrollWorldW;
+            const chairX = wW * 0.40;
+            // When baby reaches the chair area, lock camera to show interviewers + tones
+            const interviewFocusX = wW * 0.65;  // center of the interview cluster
+            const focusCamTarget = interviewFocusX - width * 0.55; // put cluster right-of-center
+
+            if (baby.x >= chairX - 20) {
+                // Smoothly pan to interview focus
+                const target = Math.max(0, Math.min(focusCamTarget, wW - width));
+                cameraX += (target - cameraX) * 0.06;
+            } else {
+                // Normal follow when walking around left side
+                const leftTrigger = width * 0.3;
+                const rightTrigger = width * 0.7;
+                const babyScreenX = baby.x - cameraX;
+                if (babyScreenX > rightTrigger) cameraX = baby.x - rightTrigger;
+                if (babyScreenX < leftTrigger) cameraX = baby.x - leftTrigger;
+            }
+            const maxCamera = Math.max(0, wW - width);
+            cameraX = Math.max(0, Math.min(cameraX, maxCamera));
+        }
+
+        function drawJobHuntSideScrollBg() {
+            const wW = jobHuntSideScrollWorldW;
+            const wallH = height * ROOM_WALL_RATIO;
+            const floorY = wallH;
+
+            // ======== WALL BACKGROUND ========
+            // Upper wall — cream
+            const wallG = ctx.createLinearGradient(0, 0, 0, wallH * 0.65);
+            wallG.addColorStop(0, "#f0ebe0");
+            wallG.addColorStop(1, "#ebe5d8");
+            ctx.fillStyle = wallG;
+            ctx.fillRect(0, 0, wW, wallH * 0.65);
+
+            // Lower wainscoting — darker
+            ctx.fillStyle = "#e0d8c8";
+            ctx.fillRect(0, wallH * 0.65, wW, wallH * 0.35);
+            // Wainscot rail
+            ctx.fillStyle = "#c8b898";
+            ctx.fillRect(0, wallH * 0.65 - 1, wW, 3);
+            // Wainscot panel rectangles
+            ctx.strokeStyle = "rgba(195,185,170,0.3)"; ctx.lineWidth = 1.5;
+            for (let x = 20; x < wW; x += 140) {
+                ctx.beginPath();
+                ctx.roundRect(x, wallH * 0.65 + 10, 110, wallH * 0.35 - 22, 3);
+                ctx.stroke();
+            }
+
+            // Crown molding
+            ctx.fillStyle = "rgba(220,215,205,0.5)";
+            ctx.fillRect(0, 0, wW, 5);
+            ctx.fillStyle = "rgba(200,195,185,0.35)";
+            ctx.fillRect(0, 5, wW, 2);
+
+            // Baseboard
+            ctx.fillStyle = "rgba(140,120,90,0.55)";
+            ctx.fillRect(0, floorY - 8, wW, 8);
+            ctx.fillStyle = "rgba(170,150,120,0.3)";
+            ctx.fillRect(0, floorY - 10, wW, 3);
+
+            // ======== FLOOR ========
+            // Dark carpet
+            const carpG = ctx.createLinearGradient(0, floorY, 0, height);
+            carpG.addColorStop(0, "#6a6050");
+            carpG.addColorStop(1, "#5a5040");
+            ctx.fillStyle = carpG;
+            ctx.fillRect(0, floorY, wW, height - floorY);
+            // Diamond pattern
+            ctx.strokeStyle = "rgba(100,90,70,0.12)"; ctx.lineWidth = 0.5;
+            const cs = 22;
+            for (let ty = floorY; ty < height; ty += cs) {
+                for (let tx = 0; tx < wW; tx += cs) {
+                    ctx.beginPath();
+                    ctx.moveTo(tx + cs / 2, ty); ctx.lineTo(tx + cs, ty + cs / 2);
+                    ctx.lineTo(tx + cs / 2, ty + cs); ctx.lineTo(tx, ty + cs / 2);
+                    ctx.closePath(); ctx.stroke();
+                }
+            }
+
+            // ======== DOWNLIGHTS ========
+            for (let dl = 0; dl < 5; dl++) {
+                const dlx = wW * (0.1 + dl * 0.2), dly = 2;
+                const dlg = ctx.createRadialGradient(dlx, dly, 0, dlx, dly, wallH * 0.4);
+                dlg.addColorStop(0, "rgba(255,250,230,0.10)"); dlg.addColorStop(1, "rgba(255,250,230,0)");
+                ctx.fillStyle = dlg;
+                ctx.fillRect(dlx - wallH * 0.3, dly, wallH * 0.6, wallH * 0.4);
+                // Light fixture
+                ctx.fillStyle = "rgba(255,250,240,0.6)";
+                ctx.beginPath(); ctx.arc(dlx, dly + 3, 4, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // ======== DOOR (left edge, x: 0–80) ========
+            // Door frame
+            ctx.fillStyle = "#8a7a58";
+            ctx.beginPath(); ctx.roundRect(2, wallH * 0.12, 72, floorY - wallH * 0.12 + 4, 3); ctx.fill();
+            // Door opening (hallway visible through)
+            ctx.fillStyle = "#c8c0a8";
+            ctx.fillRect(6, wallH * 0.15, 64, floorY - wallH * 0.15);
+            // Hallway hint gradient
+            const hallG = ctx.createLinearGradient(6, 0, 70, 0);
+            hallG.addColorStop(0, "#d0c8bb"); hallG.addColorStop(1, "#c4bba8");
+            ctx.fillStyle = hallG;
+            ctx.fillRect(6, wallH * 0.15, 64, floorY - wallH * 0.15);
+            // Door handle
+            ctx.fillStyle = "#b8a878";
+            ctx.beginPath(); ctx.roundRect(60, floorY * 0.55, 8, 12, 3); ctx.fill();
+            ctx.fillStyle = "#d4c49a";
+            ctx.beginPath(); ctx.arc(64, floorY * 0.55 + 6, 2, 0, Math.PI * 2); ctx.fill();
+            // 面接室 sign above door
+            ctx.fillStyle = "#f0ece0";
+            ctx.beginPath(); ctx.roundRect(14, wallH * 0.08, 48, 16, 3); ctx.fill();
+            ctx.fillStyle = "#444";
+            ctx.font = "600 11px 'Zen Maru Gothic'";
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText("面接室", 38, wallH * 0.08 + 8);
+
+            // ======== POTTED PLANT & COAT RACK (left side) ========
+            // Potted plant
+            const ppx = 80, ppy = floorY - 8;
+            ctx.fillStyle = "#b06030";
+            ctx.beginPath();
+            ctx.moveTo(ppx - 10, ppy + 6); ctx.lineTo(ppx + 10, ppy + 6);
+            ctx.lineTo(ppx + 8, ppy + 20); ctx.lineTo(ppx - 8, ppy + 20);
+            ctx.closePath(); ctx.fill();
+            ctx.fillStyle = "#2d8833";
+            for (let lf = 0; lf < 7; lf++) {
+                const la = (Math.PI * 2 * lf) / 7 - Math.PI / 2;
+                ctx.beginPath(); ctx.ellipse(ppx + Math.cos(la) * 12, ppy + Math.sin(la) * 8 - 4, 8, 5, la, 0, Math.PI * 2); ctx.fill();
+            }
+            // Coat rack
+            const crx = 130, cry = floorY - 5;
+            ctx.strokeStyle = "#555"; ctx.lineWidth = 3; ctx.lineCap = "round";
+            ctx.beginPath(); ctx.moveTo(crx, cry); ctx.lineTo(crx, cry - 60); ctx.stroke();
+            // Hooks
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(crx - 12, cry - 55); ctx.lineTo(crx, cry - 50); ctx.lineTo(crx + 12, cry - 55); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(crx - 8, cry - 45); ctx.lineTo(crx, cry - 40); ctx.lineTo(crx + 8, cry - 45); ctx.stroke();
+            // Base
+            ctx.lineWidth = 2.5;
+            ctx.beginPath(); ctx.moveTo(crx - 15, cry); ctx.lineTo(crx + 15, cry); ctx.stroke();
+            ctx.lineCap = "butt";
+
+            // ======== PLAYER'S PIPE CHAIR (x: ~40%, facing interviewers) ========
+            const pcx = wW * 0.40, pcy = floorY - 5;
+            // Metal legs
+            ctx.strokeStyle = "#999"; ctx.lineWidth = 2; ctx.lineCap = "round";
+            ctx.beginPath(); ctx.moveTo(pcx - 10, pcy); ctx.lineTo(pcx - 14, pcy + 15); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(pcx + 10, pcy); ctx.lineTo(pcx + 14, pcy + 15); ctx.stroke();
+            ctx.lineCap = "butt";
+            // Seat
+            ctx.fillStyle = "#7090a8";
+            ctx.beginPath(); ctx.roundRect(pcx - 14, pcy - 8, 28, 10, 3); ctx.fill();
+            ctx.fillStyle = "rgba(255,255,255,0.08)";
+            ctx.fillRect(pcx - 12, pcy - 7, 24, 3);
+            // Back
+            ctx.fillStyle = "#6080a0";
+            ctx.beginPath(); ctx.roundRect(pcx - 12, pcy - 40, 24, 32, [4, 4, 0, 0]); ctx.fill();
+
+            // ======== INTERVIEWERS (drawn BEFORE desk, aligned with tone drops) ========
+            // Tone drops at 53%, 63%, 73% — interviewers sit at matching positions
+            updateJobHuntNpcs();
+            const interviewerXPositions = [wW * 0.53, wW * 0.63, wW * 0.73];
+            const interviewerY = floorY - 5;
+            const interviewerNpcs = jobHuntNpcs.filter(n => n.isInterviewer);
+            for (let i = 0; i < interviewerNpcs.length && i < 3; i++) {
+                const npc = interviewerNpcs[i];
+                // Temporarily set position for side-scroll drawing
+                const savedX = npc.x, savedY = npc.y;
+                npc.x = interviewerXPositions[i];
+                npc.y = interviewerY;
+                drawJobHuntNpc(npc, ctx);
+                npc.x = savedX; npc.y = savedY;
+            }
+
+            // ======== INTERVIEW DESK (spans tone cluster area: ~48%–78%) ========
+            const dskX = wW * 0.48, dskW = wW * 0.30;
+            const dskTopY = floorY - 30;
+            const dskH = 12, dskDepth = 22;
+            // Desk legs
+            ctx.fillStyle = "#5a3c1a";
+            const legW = 5, legH = 28;
+            ctx.beginPath(); ctx.roundRect(dskX + 15, dskTopY + dskH, legW, legH, 2); ctx.fill();
+            ctx.beginPath(); ctx.roundRect(dskX + dskW - 20, dskTopY + dskH, legW, legH, 2); ctx.fill();
+            // Front face (desk thickness — visible from side)
+            ctx.fillStyle = "#6a4c2a";
+            ctx.fillRect(dskX, dskTopY + dskH, dskW, dskDepth);
+            // Bottom edge shadow
+            ctx.fillStyle = "rgba(0,0,0,0.08)";
+            ctx.fillRect(dskX + 2, dskTopY + dskH + dskDepth, dskW - 4, 3);
+            // Top surface
+            ctx.fillStyle = "#7a5c3a";
+            ctx.beginPath(); ctx.roundRect(dskX, dskTopY, dskW, dskH, 3); ctx.fill();
+            // Wood grain
+            ctx.strokeStyle = "rgba(100,70,40,0.12)"; ctx.lineWidth = 0.5;
+            for (let wl = 0; wl < 5; wl++) {
+                const wy = dskTopY + 2 + wl * (dskH - 4) / 4;
+                ctx.beginPath(); ctx.moveTo(dskX + 4, wy); ctx.lineTo(dskX + dskW - 4, wy); ctx.stroke();
+            }
+            // Front edge highlight
+            ctx.fillStyle = "rgba(255,255,255,0.06)";
+            ctx.fillRect(dskX + 2, dskTopY + 1, dskW - 4, 3);
+            // Desk items
+            ctx.fillStyle = "#f0ece0";
+            ctx.beginPath(); ctx.roundRect(dskX + 20, dskTopY + 2, 18, 8, 1); ctx.fill();
+            ctx.beginPath(); ctx.roundRect(dskX + 45, dskTopY + 3, 16, 7, 1); ctx.fill();
+            // Coffee cup
+            ctx.fillStyle = "#f8f4f0";
+            ctx.beginPath(); ctx.ellipse(dskX + dskW * 0.5, dskTopY + 5, 5, 4, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "#8a5030"; ctx.globalAlpha = 0.5;
+            ctx.beginPath(); ctx.ellipse(dskX + dskW * 0.5, dskTopY + 5, 3.5, 2.8, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 1;
+            // Name plate
+            ctx.fillStyle = "#c8a848";
+            ctx.beginPath(); ctx.roundRect(dskX + dskW * 0.75, dskTopY + 2, 22, 8, 2); ctx.fill();
+            ctx.fillStyle = "#333";
+            ctx.font = "600 7px 'Zen Maru Gothic'";
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText("面接官", dskX + dskW * 0.75 + 11, dskTopY + 6);
+
+            // ======== INTERVIEWER CHAIRS (behind desk, office-style) ========
+            for (let ic = 0; ic < 3; ic++) {
+                const cx = interviewerXPositions[ic], cy = floorY + 5;
+                // Star base
+                ctx.fillStyle = "#444";
+                for (let cs = 0; cs < 5; cs++) {
+                    const ca = (Math.PI * 2 * cs) / 5 - Math.PI / 2;
+                    const bx = cx + Math.cos(ca) * 10, by = cy + Math.sin(ca) * 4;
+                    ctx.beginPath(); ctx.arc(bx, by, 2, 0, Math.PI * 2); ctx.fill();
+                }
+            }
+
+            // ======== WALL DECORATIONS ========
+            // Whiteboard (behind interviewers on wall)
+            const wbX = wW * 0.56, wbY = wallH * 0.12, wbW = wW * 0.18, wbH = wallH * 0.28;
+            ctx.fillStyle = "#f0f0f0";
+            ctx.beginPath(); ctx.roundRect(wbX, wbY, wbW, wbH, 2); ctx.fill();
+            ctx.strokeStyle = "#bbb"; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.roundRect(wbX, wbY, wbW, wbH, 2); ctx.stroke();
+            // Whiteboard content sketch
+            ctx.strokeStyle = "rgba(50,100,200,0.3)"; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(wbX + 8, wbY + wbH - 10); ctx.lineTo(wbX + wbW - 8, wbY + wbH - 10); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(wbX + 8, wbY + wbH - 10); ctx.lineTo(wbX + 8, wbY + 8); ctx.stroke();
+            ctx.strokeStyle = "rgba(200,50,50,0.25)";
+            ctx.beginPath();
+            ctx.moveTo(wbX + 10, wbY + wbH - 14);
+            ctx.lineTo(wbX + wbW * 0.4, wbY + wbH * 0.3);
+            ctx.lineTo(wbX + wbW * 0.65, wbY + wbH * 0.5);
+            ctx.lineTo(wbX + wbW - 10, wbY + 12);
+            ctx.stroke();
+
+            // Company logo plaque (above desk area)
+            const lgX = wW * 0.65, lgY = wallH * 0.06;
+            ctx.fillStyle = "rgba(100,120,160,0.15)";
+            ctx.beginPath(); ctx.arc(lgX, lgY, 18, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = "rgba(100,120,160,0.25)"; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.arc(lgX, lgY, 18, 0, Math.PI * 2); ctx.stroke();
+            ctx.fillStyle = "rgba(100,120,160,0.2)";
+            ctx.beginPath(); ctx.arc(lgX, lgY, 10, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "rgba(80,100,140,0.3)";
+            ctx.font = "600 8px 'Zen Maru Gothic'";
+            ctx.textAlign = "center"; ctx.textBaseline = "top";
+            ctx.fillText("トーン株式会社", lgX, lgY + 20);
+
+            // Clock (right wall)
+            const clkX = wW * 0.85, clkY = wallH * 0.18, clkR = 16;
+            ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(clkX, clkY, clkR, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = "#666"; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(clkX, clkY, clkR, 0, Math.PI * 2); ctx.stroke();
+            for (let h = 0; h < 12; h++) {
+                const ha = (Math.PI * 2 * h) / 12 - Math.PI / 2;
+                ctx.fillStyle = "#444";
+                ctx.beginPath(); ctx.arc(clkX + Math.cos(ha) * (clkR - 3), clkY + Math.sin(ha) * (clkR - 3), 1.2, 0, Math.PI * 2); ctx.fill();
+            }
+            const now = Date.now();
+            const secAngle = ((now / 1000) % 60) / 60 * Math.PI * 2 - Math.PI / 2;
+            const minAngle = ((now / 60000) % 60) / 60 * Math.PI * 2 - Math.PI / 2;
+            const hrAngle = ((now / 3600000) % 12) / 12 * Math.PI * 2 - Math.PI / 2;
+            ctx.lineCap = "round";
+            ctx.strokeStyle = "#333"; ctx.lineWidth = 1.8;
+            ctx.beginPath(); ctx.moveTo(clkX, clkY); ctx.lineTo(clkX + Math.cos(hrAngle) * (clkR * 0.5), clkY + Math.sin(hrAngle) * (clkR * 0.5)); ctx.stroke();
+            ctx.lineWidth = 1.2;
+            ctx.beginPath(); ctx.moveTo(clkX, clkY); ctx.lineTo(clkX + Math.cos(minAngle) * (clkR * 0.7), clkY + Math.sin(minAngle) * (clkR * 0.7)); ctx.stroke();
+            ctx.strokeStyle = "#cc3333"; ctx.lineWidth = 0.6;
+            ctx.beginPath(); ctx.moveTo(clkX, clkY); ctx.lineTo(clkX + Math.cos(secAngle) * (clkR * 0.8), clkY + Math.sin(secAngle) * (clkR * 0.8)); ctx.stroke();
+            ctx.lineCap = "butt";
+            ctx.fillStyle = "#333"; ctx.beginPath(); ctx.arc(clkX, clkY, 1.8, 0, Math.PI * 2); ctx.fill();
+
+            // Wall paintings (left wall, near door)
+            const paintings = [
+                { x: wW * 0.12, y: wallH * 0.18, w: 40, h: 28, c1: "#6a8ab0", c2: "#88aad0" },
+                { x: wW * 0.24, y: wallH * 0.22, w: 35, h: 24, c1: "#a08860", c2: "#c0a880" }
+            ];
+            paintings.forEach(p => {
+                ctx.fillStyle = "#6a5a40";
+                ctx.beginPath(); ctx.roundRect(p.x - 2, p.y - 2, p.w + 4, p.h + 4, 2); ctx.fill();
+                const pg = ctx.createLinearGradient(p.x, p.y, p.x + p.w, p.y + p.h);
+                pg.addColorStop(0, p.c1); pg.addColorStop(1, p.c2);
+                ctx.fillStyle = pg;
+                ctx.fillRect(p.x, p.y, p.w, p.h);
+            });
+
+            // AC unit on wall
+            const acX = wW * 0.82, acY = wallH * 0.05;
+            ctx.fillStyle = "#eee";
+            ctx.beginPath(); ctx.roundRect(acX, acY, 80, 16, 3); ctx.fill();
+            ctx.strokeStyle = "rgba(200,200,200,0.6)"; ctx.lineWidth = 0.8;
+            ctx.beginPath(); ctx.roundRect(acX, acY, 80, 16, 3); ctx.stroke();
+            ctx.strokeStyle = "rgba(180,180,180,0.4)"; ctx.lineWidth = 0.5;
+            for (let vs = 0; vs < 4; vs++) {
+                const vy = acY + 4 + vs * 3;
+                ctx.beginPath(); ctx.moveTo(acX + 4, vy); ctx.lineTo(acX + 76, vy); ctx.stroke();
+            }
+            ctx.fillStyle = "#4a4"; ctx.beginPath(); ctx.arc(acX + 8, acY + 5, 1.5, 0, Math.PI * 2); ctx.fill();
+
+            // ======== RIGHT CORNER (x: ~90%–100%): filing cabinet, plant ========
+            // Filing cabinet
+            const fcX = wW * 0.93, fcY = floorY - 55;
+            ctx.fillStyle = "#8a8a8a";
+            ctx.beginPath(); ctx.roundRect(fcX, fcY, 36, 55, 2); ctx.fill();
+            // Drawers
+            for (let dr = 0; dr < 3; dr++) {
+                const dy = fcY + 3 + dr * 17;
+                ctx.fillStyle = "#7a7a7a";
+                ctx.beginPath(); ctx.roundRect(fcX + 3, dy, 30, 14, 1); ctx.fill();
+                ctx.fillStyle = "#999";
+                ctx.beginPath(); ctx.roundRect(fcX + 15, dy + 5, 6, 3, 1); ctx.fill();
+            }
+            // Potted plant in corner
+            const rpx = wW * 0.97, rpy = floorY - 8;
+            ctx.fillStyle = "#b06030";
+            ctx.beginPath();
+            ctx.moveTo(rpx - 8, rpy + 4); ctx.lineTo(rpx + 8, rpy + 4);
+            ctx.lineTo(rpx + 6, rpy + 16); ctx.lineTo(rpx - 6, rpy + 16);
+            ctx.closePath(); ctx.fill();
+            ctx.fillStyle = "#2d8833";
+            for (let lf = 0; lf < 6; lf++) {
+                const la = (Math.PI * 2 * lf) / 6 - Math.PI / 2;
+                ctx.beginPath(); ctx.ellipse(rpx + Math.cos(la) * 10, rpy + Math.sin(la) * 7 - 2, 7, 4, la, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // ======== "← 廊下" exit hint near left door ========
+            if (baby && baby.x < 140) {
+                ctx.save();
+                ctx.globalAlpha = 0.6 + 0.2 * Math.sin(Date.now() * 0.004);
+                ctx.fillStyle = "#fff";
+                ctx.font = "700 14px 'Zen Maru Gothic'";
+                ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                ctx.fillText("← 廊下", 40, floorY + 35);
+                ctx.restore();
+            }
+
+            // Interview round indicator for JOB_HUNT2
+            if (currentScene === SCENE.JOB_HUNT2) {
+                ctx.save();
+                ctx.fillStyle = "rgba(200,180,100,0.6)";
+                ctx.font = "700 18px 'Zen Maru Gothic'";
+                ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                ctx.fillText("二次面接", wW * 0.5, wallH * 0.08);
+                ctx.restore();
+            }
+        }
+
+        function handleJobHuntChoice(clickedDrop) {
+            if (jobHuntTransitioning) return;
+            if (!clickedDrop.activityLabels) return;
+            if (clickedDrop.consumed) return; // Already used modifier
+            playTitleToneConfirmSound();
+            selectedToys.push({ id: clickedDrop.activityId, name: clickedDrop.activityName, labels: clickedDrop.activityLabels });
+
+            // Second interview condition check (round 1)
+            if (jobHuntInterviewRound === 1 && clickedDrop.requiredLabel) {
+                const totals = {};
+                selectedToys.forEach(t => {
+                    if (!t.labels) return;
+                    Object.entries(t.labels).forEach(([k, v]) => {
+                        totals[k] = (totals[k] || 0) + v;
+                    });
+                });
+                const currentVal = totals[clickedDrop.requiredLabel.key] || 0;
+                if (currentVal >= clickedDrop.requiredLabel.threshold) {
+                    triggerSecondInterview(clickedDrop);
+                    return;
+                }
+            }
+
+            // Round 2: modifier tone — confirm the replacement permanently
+            if (jobHuntInterviewRound === 2 && clickedDrop.instrument === "modifier" && !clickedDrop.consumed) {
+                // Preview is already applied by hover → just make it permanent
+                // If hover preview wasn't active, apply the replacement now
+                if (modifierPreviewDrop !== clickedDrop) {
+                    const stepsPerBar = baseRhythmInfo.beatsPerBar * STEPS_PER_BEAT;
+                    const stepsPerPage = scoreHudState.stepsPerPage;
+                    const absStart = stepsPerPage + clickedDrop.targetBarOnPage2 * stepsPerBar;
+                    const d = clickedDrop;
+                    for (let s = 0; s < stepsPerBar; s++) {
+                        const idx = absStart + s;
+                        // Keys (keyboard) is NOT replaced — only bass, drums, cymbal, keys2
+                        if (inheritedBassPattern && d.replacementBassPattern) inheritedBassPattern[idx] = d.replacementBassPattern[s];
+                        if (inheritedBassNotes && d.replacementBassNotes) inheritedBassNotes[idx] = d.replacementBassNotes[s];
+                        if (inheritedBassAttacks && d.replacementBassAttacks) inheritedBassAttacks[idx] = d.replacementBassAttacks[s];
+                        if (inheritedBassDurations && d.replacementBassDurations) inheritedBassDurations[idx] = d.replacementBassDurations[s];
+                        if (baseRhythmInfo.kickPattern && d.replacementKick) baseRhythmInfo.kickPattern[idx] = d.replacementKick[s];
+                        if (inheritedHatPattern && d.replacementHat) inheritedHatPattern[idx] = d.replacementHat[s];
+                        if (inheritedSnarePattern && d.replacementSnare) inheritedSnarePattern[idx] = d.replacementSnare[s];
+                        if (inheritedCymbalPattern && d.replacementCymbal) inheritedCymbalPattern[idx] = d.replacementCymbal[s];
+                        if (inheritedCymbalVelocity && d.replacementCymbalVelocity) inheritedCymbalVelocity[idx] = d.replacementCymbalVelocity[s];
+                        if (inheritedKeys2Pattern && d.replacementK2Pattern) inheritedKeys2Pattern[idx] = d.replacementK2Pattern[s];
+                        if (inheritedKeys2Notes && d.replacementK2Notes) inheritedKeys2Notes[idx] = d.replacementK2Notes[s];
+                        if (inheritedKeys2Attacks && d.replacementK2Attacks) inheritedKeys2Attacks[idx] = d.replacementK2Attacks[s];
+                        if (inheritedKeys2Durations && d.replacementK2Durations) inheritedKeys2Durations[idx] = d.replacementK2Durations[s];
+                        if (inheritedKeys2SustainType && d.replacementK2SustainType) inheritedKeys2SustainType[idx] = d.replacementK2SustainType[s];
+                    }
+                }
+                // Clear preview state — the change is now permanent, no revert possible
+                modifierPreviewDrop = null;
+                modifierPreviewOriginal = null;
+
+                // Mark consumed
+                clickedDrop.consumed = true;
+
+                // Add permanent bar highlight (page 1 = page2 in 0-indexed)
+                scoreHudState.barHighlights.push({
+                    page: 1,
+                    barIndex: clickedDrop.targetBarOnPage2,
+                    color: clickedDrop.dropColor
+                });
+
+                // Re-render score HUD
+                renderScoreRows(null);
+
+                // Check if all modifier tones consumed → advance phase
+                const allConsumed = toneDrops.filter(d => d.instrument === "modifier").every(d => d.consumed);
+                if (allConsumed) {
+                    setTimeout(() => {
+                        disposeToneDrops();
+                        toneDrops = [];
+                        jobHuntViewMode = "topdown";
+                        if (baby) baby.isTopDown = true;
+                        fadeScreenTo(1, 1200);
+                        setTimeout(() => {
+                            isTopDownScene = false;
+                            fadeScreenTo(0, 1000);
+                        }, 1200);
+                    }, 2000);
+                }
+                return;
+            }
+
+            // Condition not met (round 1) → next phase
+            disposeToneDrops();
+            toneDrops = [];
+            jobHuntViewMode = "topdown";
+            if (baby) baby.isTopDown = true;
+            fadeScreenTo(1, 1200);
+            setTimeout(() => {
+                isTopDownScene = false;
+                fadeScreenTo(0, 1000);
+            }, 1200);
+        }
+
+        function triggerSecondInterview(selectedDrop) {
+            // Preserve the clicked tone's keyboard line as Keys2 (not main keyboard)
+            if (selectedDrop && selectedDrop.instrument === "keyboard") {
+                inheritedKeys2Pattern = selectedDrop.pattern ? selectedDrop.pattern.slice() : inheritedKeys2Pattern;
+                inheritedKeys2Notes = selectedDrop.keyboardNotes ? selectedDrop.keyboardNotes.slice() : inheritedKeys2Notes;
+                inheritedKeys2Attacks = selectedDrop.keyboardAttacks ? selectedDrop.keyboardAttacks.slice() : inheritedKeys2Attacks;
+                inheritedKeys2Durations = selectedDrop.keyboardDurations ? selectedDrop.keyboardDurations.slice() : inheritedKeys2Durations;
+                inheritedKeys2SustainType = selectedDrop.keyboardSustainType ? selectedDrop.keyboardSustainType.slice() : inheritedKeys2SustainType;
+                // Recreate carry Keys2 synth with JOB_HUNT timbre
+                disposeCarryKeys2Layer();
+                const kb = createJobHuntSynth(selectedDrop.jobHuntTimbre || "bright-chime");
+                carryKeys2Synth = kb.synth;
+                carryKeys2Effects = kb.effects;
+                if (carryKeys2Synth) carryKeys2Synth.volume.value = -18;
+            }
+            disposeToneDrops();
+            toneDrops = [];
+
+            // Celebratory sparkle particles
+            const sparkles = [];
+            for (let i = 0; i < 40; i++) {
+                sparkles.push({
+                    x: width * 0.5 + (Math.random() - 0.5) * width * 0.6,
+                    y: height * 0.5 + (Math.random() - 0.5) * height * 0.3,
+                    vx: (Math.random() - 0.5) * 3,
+                    vy: -Math.random() * 2.5 - 0.5,
+                    size: Math.random() * 4 + 2,
+                    hue: Math.random() * 60 + 30, // gold-yellow range
+                    life: 1.0,
+                    decay: 0.003 + Math.random() * 0.004
+                });
+            }
+
+            // Flash + text animation
+            secondInterviewText = {
+                textJa: "一次面接通過！",
+                textEn: "First Interview Passed!",
+                alpha: 0, scale: 0.5, sparkles: sparkles,
+                shimmer: 0
+            };
+            let frame = 0;
+            const animateText = () => {
+                frame++;
+                if (secondInterviewText) secondInterviewText.shimmer = frame;
+                if (frame < 40) {
+                    // Zoom in with easing
+                    const t = frame / 40;
+                    const ease = 1 - Math.pow(1 - t, 3);
+                    secondInterviewText.alpha = ease;
+                    secondInterviewText.scale = 0.3 + ease * 0.9;
+                } else if (frame < 120) {
+                    // Hold with gentle pulse
+                    secondInterviewText.alpha = 1;
+                    secondInterviewText.scale = 1.2 + Math.sin(frame * 0.08) * 0.04;
+                } else if (frame < 160) {
+                    secondInterviewText.alpha = Math.max(0, secondInterviewText.alpha - 0.03);
+                } else {
+                    secondInterviewText = null;
+                    fadeScreenTo(1, 800);
+                    setTimeout(() => {
+                        startJobHunt2Phase();
+                        fadeScreenTo(0, 800);
+                    }, 800);
+                    return;
+                }
+                // Update sparkles
+                if (secondInterviewText && secondInterviewText.sparkles) {
+                    secondInterviewText.sparkles.forEach(s => {
+                        s.x += s.vx;
+                        s.y += s.vy;
+                        s.vy += 0.02;
+                        s.life -= s.decay;
+                    });
+                }
+                requestAnimationFrame(animateText);
+            };
+            // White flash
+            sceneFade.style.background = '#fff';
+            fadeScreenTo(0.7, 200);
+            setTimeout(() => {
+                fadeScreenTo(0, 400);
+                sceneFade.style.background = '#fff';
+                animateText();
+            }, 300);
+        }
+
+        function startJobHunt2Phase() {
+            currentScene = SCENE.JOB_HUNT2;
+            isTopDownScene = true;
+            jobHuntInterviewRound = 2;
+            jobHuntViewMode = "topdown";
+            jobHuntTransitioning = false;
+            jobHuntDropTopDownPositions = [];
+            modifierPreviewDrop = null;
+            modifierPreviewOriginal = null;
+            worldWidth = Math.max(width * 1.3, 1000);
+            worldHeight = Math.max(height * 1.8, 1000);
+            // Recompute obstacles for new world size
+            const wW = worldWidth, wH = worldHeight;
+            const wallY = wH * 0.52, wallThick = 18;
+            const doorX = wW * 0.38, doorW = wW * 0.24;
+            const dskX = wW * 0.15, dskY = wH * 0.32, dskW = wW * 0.70, dskH = wH * 0.04;
+            jobHuntObstacles = [
+                { x: dskX, y: dskY, w: dskW, h: dskH },
+                { x: 0, y: wallY - wallThick / 2, w: doorX, h: wallThick },
+                { x: doorX + doorW, y: wallY - wallThick / 2, w: wW - doorX - doorW, h: wallThick },
+            ];
+            // Reset baby to hallway for second interview
+            if (baby) {
+                baby.isTopDown = true;
+                baby.x = worldWidth * 0.5;
+                baby.y = worldHeight * 0.68;
+            }
+            initJobHunt2Drops();
+            buildScoreHud();
+            updateScoreToggleUi();
+        }
+
+        function initJobHunt2Drops() {
+            disposeToneDrops();
+            toneDrops = [];
+            if (!baseRhythmInfo || !inheritedChordProgression) return;
+
+            const stepsPerPage = baseRhythmInfo.beatsPerBar * baseRhythmInfo.bars * STEPS_PER_BEAT;
+            const stepsPerBar = baseRhythmInfo.beatsPerBar * STEPS_PER_BEAT;
+            scoreHudState.pageCount = 2;
+            scoreHudState.currentPage = 0;
+            scoreHudState.stepsPerPage = stepsPerPage;
+            scoreHudState.barHighlights = [];
+
+            // Double the base patterns for pagination (page1 = original, page2 = copy)
+            if (baseRhythmInfo.kickPattern) {
+                baseRhythmInfo._originalKick = baseRhythmInfo._originalKick || baseRhythmInfo.kickPattern.slice();
+                baseRhythmInfo.kickPattern = [...baseRhythmInfo._originalKick, ...baseRhythmInfo._originalKick];
+            }
+            if (inheritedHatPattern) {
+                inheritedHatPattern = [...inheritedHatPattern.slice(0, stepsPerPage), ...inheritedHatPattern.slice(0, stepsPerPage)];
+            }
+            if (inheritedSnarePattern) {
+                inheritedSnarePattern = [...inheritedSnarePattern.slice(0, stepsPerPage), ...inheritedSnarePattern.slice(0, stepsPerPage)];
+            }
+            if (inheritedBassPattern) {
+                inheritedBassPattern = [...inheritedBassPattern.slice(0, stepsPerPage), ...inheritedBassPattern.slice(0, stepsPerPage)];
+                if (inheritedBassNotes) inheritedBassNotes = [...inheritedBassNotes.slice(0, stepsPerPage), ...inheritedBassNotes.slice(0, stepsPerPage)];
+                if (inheritedBassAttacks) inheritedBassAttacks = [...inheritedBassAttacks.slice(0, stepsPerPage), ...inheritedBassAttacks.slice(0, stepsPerPage)];
+                if (inheritedBassDurations) inheritedBassDurations = [...inheritedBassDurations.slice(0, stepsPerPage), ...inheritedBassDurations.slice(0, stepsPerPage)];
+            }
+            if (inheritedKeyboardPattern) {
+                inheritedKeyboardPattern = [...inheritedKeyboardPattern.slice(0, stepsPerPage), ...inheritedKeyboardPattern.slice(0, stepsPerPage)];
+                if (inheritedKeyboardNotes) inheritedKeyboardNotes = [...inheritedKeyboardNotes.slice(0, stepsPerPage), ...inheritedKeyboardNotes.slice(0, stepsPerPage)];
+                if (inheritedKeyboardAttacks) inheritedKeyboardAttacks = [...inheritedKeyboardAttacks.slice(0, stepsPerPage), ...inheritedKeyboardAttacks.slice(0, stepsPerPage)];
+                if (inheritedKeyboardDurations) inheritedKeyboardDurations = [...inheritedKeyboardDurations.slice(0, stepsPerPage), ...inheritedKeyboardDurations.slice(0, stepsPerPage)];
+                if (inheritedKeyboardSustainType) inheritedKeyboardSustainType = [...inheritedKeyboardSustainType.slice(0, stepsPerPage), ...inheritedKeyboardSustainType.slice(0, stepsPerPage)];
+            }
+            if (inheritedKeys2Pattern) {
+                inheritedKeys2Pattern = [...inheritedKeys2Pattern.slice(0, stepsPerPage), ...inheritedKeys2Pattern.slice(0, stepsPerPage)];
+                if (inheritedKeys2Notes) inheritedKeys2Notes = [...inheritedKeys2Notes.slice(0, stepsPerPage), ...inheritedKeys2Notes.slice(0, stepsPerPage)];
+                if (inheritedKeys2Attacks) inheritedKeys2Attacks = [...inheritedKeys2Attacks.slice(0, stepsPerPage), ...inheritedKeys2Attacks.slice(0, stepsPerPage)];
+                if (inheritedKeys2Durations) inheritedKeys2Durations = [...inheritedKeys2Durations.slice(0, stepsPerPage), ...inheritedKeys2Durations.slice(0, stepsPerPage)];
+                if (inheritedKeys2SustainType) inheritedKeys2SustainType = [...inheritedKeys2SustainType.slice(0, stepsPerPage), ...inheritedKeys2SustainType.slice(0, stepsPerPage)];
+            }
+            if (inheritedCymbalPattern) {
+                inheritedCymbalPattern = [...inheritedCymbalPattern.slice(0, stepsPerPage), ...inheritedCymbalPattern.slice(0, stepsPerPage)];
+                if (inheritedCymbalVelocity) inheritedCymbalVelocity = [...inheritedCymbalVelocity.slice(0, stepsPerPage), ...inheritedCymbalVelocity.slice(0, stepsPerPage)];
+            }
+
+            // 3 modifier tones — each replaces bar 3 or bar 4 of page 2
+            const drops2 = [
+                { id: "bright2",     name: "自信を持って", nameEn: "With Confidence",  color: "hsl(50, 65%, 58%)",  labels: { social: 5, optimistic: 4 },   xFrac: 0.25, yFrac: 0.42 },
+                { id: "polite2",     name: "論理的に",    nameEn: "Logically",        color: "hsl(215, 50%, 58%)", labels: { study: 5, focused: 4 },        xFrac: 0.50, yFrac: 0.38 },
+                { id: "passionate2", name: "熱意を込めて", nameEn: "With Passion",     color: "hsl(5, 60%, 56%)",   labels: { expressive: 5, creative: 4 }, xFrac: 0.75, yFrac: 0.42 }
+            ];
+            const styleMap = { "bright2": "formal-accent", "polite2": "dramatic-swell", "passionate2": "crisp-staccato" };
+
+            // Assign each tone to bar index 2 or 3 (= bar 3 or 4 of page 2)
+            // Ensure at least one targets each bar for variety
+            const barPool = [2, 3, randInt(0, 1) ? 2 : 3];
+            // Shuffle
+            for (let i = barPool.length - 1; i > 0; i--) {
+                const j = randInt(0, i);
+                [barPool[i], barPool[j]] = [barPool[j], barPool[i]];
+            }
+
+            // Bass style mapping per mood
+            const bassStyleMap = { "bright2": "energetic", "polite2": "soft", "passionate2": "groovy" };
+
+            for (let i = 0; i < drops2.length; i++) {
+                const fac = drops2[i];
+                const targetBar = barPool[i]; // 0-indexed bar on page 2 (2 = bar3, 3 = bar4)
+                const barStart = targetBar * stepsPerBar;
+                const barEnd = barStart + stepsPerBar;
+                const variant = randInt(0, 1);
+
+                // Generate replacement for instruments EXCEPT Keys (keyboard stays unchanged)
+                // Keys2 (different variant for variety)
+                const k2Bundle = inheritedKeys2Pattern ? buildKeyboardLine(baseRhythmInfo, styleMap[fac.id], inheritedChordProgression, 1 - variant) : null;
+                // Bass
+                const bassBundle = inheritedBassPattern ? buildBassLine(baseRhythmInfo, bassStyleMap[fac.id] || "energetic", inheritedChordProgression, variant) : null;
+                // Drums — generate new hat/snare patterns, extract the target bar
+                const hatBar = buildHiHatPattern(baseRhythmInfo, randInt(0, 3));
+                const snareBundle = buildSnarePattern(baseRhythmInfo, randInt(0, 3));
+
+                // Build kick variation for the bar (flip some hits)
+                let kickBar = null;
+                if (baseRhythmInfo.kickPattern) {
+                    kickBar = baseRhythmInfo.kickPattern.slice(barStart, barEnd);
+                    // Vary: toggle 1-2 hits to create an accent feel
+                    const flipCount = randInt(1, 2);
+                    for (let f = 0; f < flipCount; f++) {
+                        const idx = randInt(0, kickBar.length - 1);
+                        kickBar[idx] = !kickBar[idx];
+                    }
+                }
+                // Cymbal variation
+                const cymbalBundle = inheritedCymbalPattern ? buildCymbalPattern(baseRhythmInfo, randInt(0, 3)) : null;
+
+                toneDrops.push({
+                    x: worldWidth * fac.xFrac,
+                    y: worldHeight * fac.yFrac,
+                    instrument: "modifier",
+                    targetBarOnPage2: targetBar,
+                    // Bass replacement
+                    replacementBassPattern: bassBundle ? bassBundle.pattern.slice(barStart, barEnd) : null,
+                    replacementBassNotes: bassBundle && bassBundle.notes ? bassBundle.notes.slice(barStart, barEnd) : null,
+                    replacementBassAttacks: bassBundle && bassBundle.attacks ? bassBundle.attacks.slice(barStart, barEnd) : null,
+                    replacementBassDurations: bassBundle && bassBundle.durations ? bassBundle.durations.slice(barStart, barEnd) : null,
+                    replacementBassSustainType: bassBundle && bassBundle.sustainType ? bassBundle.sustainType.slice(barStart, barEnd) : null,
+                    // Drum replacements
+                    replacementKick: kickBar,
+                    replacementHat: hatBar ? hatBar.slice(barStart, barEnd) : null,
+                    replacementSnare: snareBundle ? snareBundle.pattern.slice(barStart, barEnd) : null,
+                    // Cymbal replacement
+                    replacementCymbal: cymbalBundle ? cymbalBundle.pattern.slice(barStart, barEnd) : null,
+                    replacementCymbalVelocity: cymbalBundle ? cymbalBundle.velocity.slice(barStart, barEnd) : null,
+                    // Keys2 replacement
+                    replacementK2Pattern: k2Bundle ? k2Bundle.pattern.slice(barStart, barEnd) : null,
+                    replacementK2Notes: k2Bundle && k2Bundle.notes ? k2Bundle.notes.slice(barStart, barEnd) : null,
+                    replacementK2Attacks: k2Bundle && k2Bundle.attacks ? k2Bundle.attacks.slice(barStart, barEnd) : null,
+                    replacementK2Durations: k2Bundle && k2Bundle.durations ? k2Bundle.durations.slice(barStart, barEnd) : null,
+                    replacementK2SustainType: k2Bundle && k2Bundle.sustainType ? k2Bundle.sustainType.slice(barStart, barEnd) : null,
+                    consumed: false,
+                    proximityVol: -100,
+                    isHovered: false,
+                    overlapAlpha: 0,
+                    activityId: fac.id,
+                    activityName: fac.name,
+                    activityNameEn: fac.nameEn || null,
+                    dropColor: fac.color,
+                    activityLabels: fac.labels,
+                    ripples: [],
+                    pattern: null,
+                    keyboardSynth: null,
+                    keyboardEffects: null
+                });
+            }
+
+            primeToneDrops();
+        }
+
+        // Modifier tone hover preview: temporarily swap bar data so player can audition
+        function updateModifierTonePreview() {
+            if (currentScene !== SCENE.JOB_HUNT2 || jobHuntInterviewRound !== 2) return;
+            if (!baseRhythmInfo) return;
+
+            // Find the hovered unconsumed modifier
+            let hoveredMod = null;
+            toneDrops.forEach(d => {
+                if (d.instrument === "modifier" && d.isHovered && !d.consumed) hoveredMod = d;
+            });
+
+            // Same drop still hovered — nothing to do
+            if (hoveredMod === modifierPreviewDrop) return;
+
+            const stepsPerBar = baseRhythmInfo.beatsPerBar * STEPS_PER_BEAT;
+            const stepsPerPage = scoreHudState.stepsPerPage;
+
+            // Revert previous preview if any
+            if (modifierPreviewDrop && modifierPreviewOriginal) {
+                const prev = modifierPreviewDrop;
+                const orig = modifierPreviewOriginal;
+                const absStart = stepsPerPage + prev.targetBarOnPage2 * stepsPerBar;
+                for (let s = 0; s < stepsPerBar; s++) {
+                    const idx = absStart + s;
+                    // Keys (keyboard) is NOT reverted — it was never changed
+                    if (orig.bassPattern) inheritedBassPattern[idx] = orig.bassPattern[s];
+                    if (orig.bassNotes) inheritedBassNotes[idx] = orig.bassNotes[s];
+                    if (orig.bassAttacks) inheritedBassAttacks[idx] = orig.bassAttacks[s];
+                    if (orig.bassDurations) inheritedBassDurations[idx] = orig.bassDurations[s];
+                    if (orig.kick) baseRhythmInfo.kickPattern[idx] = orig.kick[s];
+                    if (orig.hat) inheritedHatPattern[idx] = orig.hat[s];
+                    if (orig.snare) inheritedSnarePattern[idx] = orig.snare[s];
+                    if (orig.cymbal) inheritedCymbalPattern[idx] = orig.cymbal[s];
+                    if (orig.cymbalVelocity) inheritedCymbalVelocity[idx] = orig.cymbalVelocity[s];
+                    if (orig.k2Pattern) inheritedKeys2Pattern[idx] = orig.k2Pattern[s];
+                    if (orig.k2Notes) inheritedKeys2Notes[idx] = orig.k2Notes[s];
+                    if (orig.k2Attacks) inheritedKeys2Attacks[idx] = orig.k2Attacks[s];
+                    if (orig.k2Durations) inheritedKeys2Durations[idx] = orig.k2Durations[s];
+                    if (orig.k2SustainType) inheritedKeys2SustainType[idx] = orig.k2SustainType[s];
+                }
+                modifierPreviewDrop = null;
+                modifierPreviewOriginal = null;
+            }
+
+            // Apply new preview
+            if (hoveredMod) {
+                const d = hoveredMod;
+                const absStart = stepsPerPage + d.targetBarOnPage2 * stepsPerBar;
+                // Save originals (Keys excluded — not modified)
+                const slice = (arr) => arr ? arr.slice(absStart, absStart + stepsPerBar) : null;
+                modifierPreviewOriginal = {
+                    bassPattern: slice(inheritedBassPattern),
+                    bassNotes: slice(inheritedBassNotes),
+                    bassAttacks: slice(inheritedBassAttacks),
+                    bassDurations: slice(inheritedBassDurations),
+                    kick: slice(baseRhythmInfo.kickPattern),
+                    hat: slice(inheritedHatPattern),
+                    snare: slice(inheritedSnarePattern),
+                    cymbal: slice(inheritedCymbalPattern),
+                    cymbalVelocity: slice(inheritedCymbalVelocity),
+                    k2Pattern: slice(inheritedKeys2Pattern),
+                    k2Notes: slice(inheritedKeys2Notes),
+                    k2Attacks: slice(inheritedKeys2Attacks),
+                    k2Durations: slice(inheritedKeys2Durations),
+                    k2SustainType: slice(inheritedKeys2SustainType)
+                };
+                // Apply replacement (Keys excluded)
+                for (let s = 0; s < stepsPerBar; s++) {
+                    const idx = absStart + s;
+                    if (inheritedBassPattern && d.replacementBassPattern) inheritedBassPattern[idx] = d.replacementBassPattern[s];
+                    if (inheritedBassNotes && d.replacementBassNotes) inheritedBassNotes[idx] = d.replacementBassNotes[s];
+                    if (inheritedBassAttacks && d.replacementBassAttacks) inheritedBassAttacks[idx] = d.replacementBassAttacks[s];
+                    if (inheritedBassDurations && d.replacementBassDurations) inheritedBassDurations[idx] = d.replacementBassDurations[s];
+                    if (baseRhythmInfo.kickPattern && d.replacementKick) baseRhythmInfo.kickPattern[idx] = d.replacementKick[s];
+                    if (inheritedHatPattern && d.replacementHat) inheritedHatPattern[idx] = d.replacementHat[s];
+                    if (inheritedSnarePattern && d.replacementSnare) inheritedSnarePattern[idx] = d.replacementSnare[s];
+                    if (inheritedCymbalPattern && d.replacementCymbal) inheritedCymbalPattern[idx] = d.replacementCymbal[s];
+                    if (inheritedCymbalVelocity && d.replacementCymbalVelocity) inheritedCymbalVelocity[idx] = d.replacementCymbalVelocity[s];
+                    if (inheritedKeys2Pattern && d.replacementK2Pattern) inheritedKeys2Pattern[idx] = d.replacementK2Pattern[s];
+                    if (inheritedKeys2Notes && d.replacementK2Notes) inheritedKeys2Notes[idx] = d.replacementK2Notes[s];
+                    if (inheritedKeys2Attacks && d.replacementK2Attacks) inheritedKeys2Attacks[idx] = d.replacementK2Attacks[s];
+                    if (inheritedKeys2Durations && d.replacementK2Durations) inheritedKeys2Durations[idx] = d.replacementK2Durations[s];
+                    if (inheritedKeys2SustainType && d.replacementK2SustainType) inheritedKeys2SustainType[idx] = d.replacementK2SustainType[s];
+                }
+                modifierPreviewDrop = d;
+            }
+        }
+
+        // ======== CARRY KEYS2 LAYER (大学→アルバイト/就活) ========
+        function disposeCarryKeys2Layer() {
+            if (carryKeys2Synth) { carryKeys2Synth.dispose(); carryKeys2Synth = null; }
+            if (carryKeys2Effects) { carryKeys2Effects.forEach(e => e.dispose()); carryKeys2Effects = []; }
+        }
+
+        function initCarryKeys2Layer() {
+            disposeCarryKeys2Layer();
+            if (!inheritedKeys2Pattern || !inheritedKeys2Notes) return;
+            const styleMap = {
+                "gate": "bells", "field": "xylophone", "building": "piano-gentle",
+                "gym": "marimba", "art_hall": "glass-pad"
+            };
+            const timbreName = styleMap[inheritedKeys2SoundConfig] || "piano-gentle";
+            const cfg = UNIVERSITY_TIMBRES[timbreName] || KEYBOARD_TIMBRES[timbreName];
+            if (!cfg) return;
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: cfg.wave },
+                envelope: { attack: cfg.attack, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release }
+            });
+            synth.volume.value = -24;
+            if (cfg.filterType) {
+                const filter = new Tone.Filter({ type: cfg.filterType, frequency: cfg.filterFreq, Q: 1.5 });
+                carryKeys2Effects.push(filter);
+                synth.chain(filter, Tone.Destination);
+            } else {
+                synth.toDestination();
+            }
+            carryKeys2Synth = synth;
+        }
+
+        function drawUniversityBuildings(wallH) {
+            for (let i = 0; i < UNIVERSITY_FACILITIES.length; i++) {
+                const fac = UNIVERSITY_FACILITIES[i];
+                const cx = worldWidth * (fac.worldFraction[0] + fac.worldFraction[1]) / 2;
+                const zoneW = worldWidth * (fac.worldFraction[1] - fac.worldFraction[0]);
+                const bw = zoneW * 0.80;
+                const bx = cx - bw / 2;
+
+                if (fac.id === "gate") {
+                    drawGateBuilding(cx, bx, bw, wallH);
+                } else if (fac.id === "field") {
+                    drawFieldBuilding(cx, bx, bw, wallH);
+                } else if (fac.id === "building") {
+                    drawMainBuilding(cx, bx, bw, wallH);
+                } else if (fac.id === "gym") {
+                    drawGymBuilding(cx, bx, bw, wallH);
+                } else if (fac.id === "art_hall") {
+                    drawArtHallBuilding(cx, bx, bw, wallH);
+                }
+            }
+        }
+
+        // === 校門 (Gate) ===
+        function drawGateBuilding(cx, bx, bw, wallH) {
+            const groundY = wallH;
+            const pillarH = wallH * 0.45;
+            const pillarW = bw * 0.08;
+            const gateW = bw * 0.35;
+
+            // Brick wall extending left and right
+            ctx.fillStyle = "#b88860";
+            ctx.fillRect(bx, groundY - pillarH * 0.4, bw * 0.25, pillarH * 0.4);
+            ctx.fillRect(bx + bw * 0.75, groundY - pillarH * 0.4, bw * 0.25, pillarH * 0.4);
+            // Brick pattern
+            ctx.strokeStyle = "rgba(140,100,60,0.2)";
+            ctx.lineWidth = 1;
+            for (let r = 0; r < 6; r++) {
+                const ry = groundY - r * 8 - 4;
+                ctx.beginPath(); ctx.moveTo(bx, ry); ctx.lineTo(bx + bw * 0.25, ry); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(bx + bw * 0.75, ry); ctx.lineTo(bx + bw, ry); ctx.stroke();
+            }
+
+            // Left pillar
+            ctx.fillStyle = "#8a8078";
+            ctx.fillRect(cx - gateW / 2 - pillarW, groundY - pillarH, pillarW, pillarH);
+            // Pillar cap
+            ctx.fillStyle = "#9a9088";
+            ctx.fillRect(cx - gateW / 2 - pillarW - 3, groundY - pillarH - 6, pillarW + 6, 8);
+
+            // Right pillar
+            ctx.fillStyle = "#8a8078";
+            ctx.fillRect(cx + gateW / 2, groundY - pillarH, pillarW, pillarH);
+            ctx.fillStyle = "#9a9088";
+            ctx.fillRect(cx + gateW / 2 - 3, groundY - pillarH - 6, pillarW + 6, 8);
+
+            // Iron arch gate
+            ctx.strokeStyle = "#3a3a3a";
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(cx, groundY - pillarH * 0.55, gateW / 2, Math.PI, 0);
+            ctx.stroke();
+            // Gate bars
+            ctx.lineWidth = 2;
+            const barCount = 8;
+            for (let b = 1; b < barCount; b++) {
+                const barX = cx - gateW / 2 + (gateW / barCount) * b;
+                const arcY = groundY - pillarH * 0.55 - Math.sqrt(Math.max(0, (gateW / 2) ** 2 - (barX - cx) ** 2));
+                ctx.beginPath();
+                ctx.moveTo(barX, groundY);
+                ctx.lineTo(barX, arcY);
+                ctx.stroke();
+            }
+
+            // Name plate
+            ctx.fillStyle = "#f0e8d8";
+            ctx.beginPath();
+            ctx.roundRect(cx - gateW / 2 - pillarW - 2, groundY - pillarH * 0.7, pillarW + 4, pillarH * 0.22, 3);
+            ctx.fill();
+            ctx.strokeStyle = "#888";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.roundRect(cx - gateW / 2 - pillarW - 2, groundY - pillarH * 0.7, pillarW + 4, pillarH * 0.22, 3);
+            ctx.stroke();
+            ctx.fillStyle = "#333";
+            ctx.font = `700 ${Math.max(8, pillarW * 0.6)}px 'Zen Maru Gothic'`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            // Write vertically
+            const nameChars = "大学".split("");
+            nameChars.forEach((ch, ci) => {
+                ctx.fillText(ch, cx - gateW / 2 - pillarW / 2, groundY - pillarH * 0.7 + pillarH * 0.06 + ci * (pillarH * 0.08));
+            });
+
+            // Cherry trees on both sides of the gate
+            const treeH = pillarH * 0.7;
+            // Left cherry tree
+            drawCherryTree(cx - gateW / 2 - pillarW - bw * 0.12, groundY, treeH);
+            // Right cherry tree
+            drawCherryTree(cx + gateW / 2 + pillarW + bw * 0.12, groundY, treeH);
+
+            // Bulletin board
+            const bbX = cx + gateW / 2 + pillarW + bw * 0.06;
+            const bbW = 30;
+            const bbH = 22;
+            ctx.fillStyle = "#d0c0a0";
+            ctx.fillRect(bbX - bbW / 2, groundY - 40, bbW, bbH);
+            ctx.strokeStyle = "#8a7a60";
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(bbX - bbW / 2, groundY - 40, bbW, bbH);
+            // Post
+            ctx.fillStyle = "#8a7a60";
+            ctx.fillRect(bbX - 2, groundY - 18, 4, 18);
+            // Notes on board
+            ctx.fillStyle = "#fff";
+            ctx.fillRect(bbX - 10, groundY - 37, 8, 6);
+            ctx.fillStyle = "#fdd";
+            ctx.fillRect(bbX + 2, groundY - 36, 7, 5);
+            ctx.fillStyle = "#ddf";
+            ctx.fillRect(bbX - 8, groundY - 28, 6, 5);
+        }
+
+        function drawCherryTree(x, groundY, treeH) {
+            const trunkW = 8;
+            const trunkH = treeH * 0.4;
+            ctx.fillStyle = "hsl(15, 25%, 35%)";
+            ctx.fillRect(x - trunkW / 2, groundY - trunkH, trunkW, trunkH);
+            // Cherry blossom crown (pink)
+            const crownY = groundY - trunkH;
+            const crownR = treeH * 0.35;
+            ctx.fillStyle = "hsl(340, 60%, 78%)";
+            ctx.beginPath(); ctx.arc(x, crownY - crownR * 0.5, crownR, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "hsl(345, 55%, 82%)";
+            ctx.beginPath(); ctx.arc(x - crownR * 0.5, crownY - crownR * 0.15, crownR * 0.7, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "hsl(335, 65%, 75%)";
+            ctx.beginPath(); ctx.arc(x + crownR * 0.55, crownY - crownR * 0.3, crownR * 0.65, 0, Math.PI * 2); ctx.fill();
+        }
+
+        // === 運動場 (Field) ===
+        function drawFieldBuilding(cx, bx, bw, wallH) {
+            const groundY = wallH;
+            const fieldW = bw * 0.92;
+            const fieldX = cx - fieldW / 2;
+
+            // The field is drawn as an open ground-level area with perspective
+            // It extends from just above ground line, tapering inward at the top (depth)
+
+            // Perspective trapezoid: wider at bottom (near), narrower at top (far)
+            const nearY = groundY;                    // bottom edge (closest to viewer)
+            const farY = groundY - wallH * 0.52;      // top edge (far side of field)
+            const nearHalfW = fieldW * 0.50;           // wide at bottom
+            const farHalfW = fieldW * 0.36;            // narrower at top
+
+            // Field grass (trapezoid with depth)
+            const fieldGrass = ctx.createLinearGradient(0, farY, 0, nearY);
+            fieldGrass.addColorStop(0, "#5a9030");    // darker far
+            fieldGrass.addColorStop(0.4, "#68a838");
+            fieldGrass.addColorStop(1, "#72b848");    // brighter near
+            ctx.fillStyle = fieldGrass;
+            ctx.beginPath();
+            ctx.moveTo(cx - nearHalfW, nearY);
+            ctx.lineTo(cx - farHalfW, farY);
+            ctx.lineTo(cx + farHalfW, farY);
+            ctx.lineTo(cx + nearHalfW, nearY);
+            ctx.closePath();
+            ctx.fill();
+
+            // Mowing stripes (horizontal lines that follow perspective)
+            ctx.strokeStyle = "rgba(80,160,50,0.18)";
+            ctx.lineWidth = 1;
+            const stripes = 8;
+            for (let s = 1; s < stripes; s++) {
+                const frac = s / stripes;
+                const y = farY + (nearY - farY) * frac;
+                const hw = farHalfW + (nearHalfW - farHalfW) * frac;
+                ctx.beginPath();
+                ctx.moveTo(cx - hw, y);
+                ctx.lineTo(cx + hw, y);
+                ctx.stroke();
+            }
+
+            // Track (perspective ellipse — wider at bottom)
+            const trackCY = farY + (nearY - farY) * 0.52;
+            const trackHW = farHalfW + (nearHalfW - farHalfW) * 0.52;
+            const trackRX = trackHW * 0.82;
+            const trackRY = (nearY - farY) * 0.32;
+            ctx.strokeStyle = "hsl(15, 50%, 52%)";
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.ellipse(cx, trackCY, trackRX, trackRY, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            // Inner lane
+            ctx.strokeStyle = "rgba(255,255,255,0.3)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.ellipse(cx, trackCY, trackRX * 0.88, trackRY * 0.88, 0, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Center line and circle
+            ctx.strokeStyle = "rgba(255,255,255,0.35)";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(cx, farY + (nearY - farY) * 0.15);
+            ctx.lineTo(cx, nearY - (nearY - farY) * 0.05);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(cx, trackCY, trackRY * 0.3, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Goal posts (left and right, with perspective size)
+            const drawGoal = (gx, gy, scale) => {
+                const gw = 24 * scale;
+                const gh = 20 * scale;
+                ctx.strokeStyle = "#fff";
+                ctx.lineWidth = 2.5 * scale;
+                ctx.beginPath();
+                ctx.moveTo(gx - gw / 2, gy);
+                ctx.lineTo(gx - gw / 2, gy - gh);
+                ctx.lineTo(gx + gw / 2, gy - gh);
+                ctx.lineTo(gx + gw / 2, gy);
+                ctx.stroke();
+                // Net lines
+                ctx.strokeStyle = "rgba(255,255,255,0.2)";
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(gx, gy - gh);
+                ctx.lineTo(gx, gy);
+                ctx.stroke();
+            };
+            // Far goal (smaller)
+            drawGoal(cx, farY + (nearY - farY) * 0.12, 0.65);
+            // Near goal (larger)
+            drawGoal(cx, nearY - (nearY - farY) * 0.02, 1.0);
+
+            // Fence around perimeter (chain-link style)
+            ctx.strokeStyle = "rgba(140,140,140,0.6)";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(cx - nearHalfW, nearY);
+            ctx.lineTo(cx - farHalfW, farY);
+            ctx.lineTo(cx + farHalfW, farY);
+            ctx.lineTo(cx + nearHalfW, nearY);
+            ctx.stroke();
+            // Fence posts
+            const postCount = 8;
+            for (let p = 0; p <= postCount; p++) {
+                const frac = p / postCount;
+                // Left side posts
+                const lpx = cx - nearHalfW + (nearHalfW - farHalfW) * frac;
+                const lpy = nearY - (nearY - farY) * frac;
+                const postH = 12 + frac * 6;
+                ctx.fillStyle = "#888";
+                ctx.fillRect(lpx - 1.5, lpy - postH, 3, postH);
+                // Right side posts
+                const rpx = cx + nearHalfW - (nearHalfW - farHalfW) * frac;
+                ctx.fillRect(rpx - 1.5, lpy - postH, 3, postH);
+            }
+            // Horizontal wires
+            ctx.strokeStyle = "rgba(160,160,160,0.35)";
+            ctx.lineWidth = 1;
+            for (let w = 0; w < 3; w++) {
+                const wireYFrac = 0.3 + w * 0.25;
+                ctx.beginPath();
+                const wy = nearY - (nearY - farY) * wireYFrac;
+                const whw = farHalfW + (nearHalfW - farHalfW) * (1 - wireYFrac);
+                ctx.moveTo(cx - whw, wy);
+                ctx.lineTo(cx - farHalfW, farY);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(cx + whw, wy);
+                ctx.lineTo(cx + farHalfW, farY);
+                ctx.stroke();
+            }
+
+            // Scoreboard (small structure on the far side)
+            const sbX = cx + farHalfW * 0.6;
+            const sbY = farY - 2;
+            ctx.fillStyle = "#555";
+            ctx.fillRect(sbX - 1.5, sbY - 22, 3, 22);
+            ctx.fillStyle = "#333";
+            ctx.fillRect(sbX - 12, sbY - 28, 24, 10);
+            ctx.fillStyle = "#181818";
+            ctx.fillRect(sbX - 10, sbY - 26, 20, 6);
+            ctx.fillStyle = "#ff4444";
+            ctx.font = "700 5px monospace";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("0 - 0", sbX, sbY - 23);
+
+            // Equipment shed (small building at the side)
+            const shedX = cx - nearHalfW - 18;
+            const shedY = groundY;
+            const shedW = 28;
+            const shedH = 24;
+            ctx.fillStyle = "#8a8070";
+            ctx.fillRect(shedX, shedY - shedH, shedW, shedH);
+            ctx.fillStyle = "#6a6058";
+            ctx.beginPath();
+            ctx.moveTo(shedX - 2, shedY - shedH);
+            ctx.lineTo(shedX + shedW / 2, shedY - shedH - 8);
+            ctx.lineTo(shedX + shedW + 2, shedY - shedH);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = "#555";
+            ctx.fillRect(shedX + shedW * 0.35, shedY - 14, 8, 14);
+        }
+
+        // === 校舎 (Main Building) ===
+        function drawMainBuilding(cx, bx, bw, wallH) {
+            const groundY = wallH;
+            const floors = 4;
+            const bh = wallH * 0.72;
+            const buildX = cx - bw * 0.45;
+            const buildW = bw * 0.90;
+            const buildY = groundY - bh;
+
+            // Building body (concrete)
+            ctx.fillStyle = "#c8c4b8";
+            ctx.fillRect(buildX, buildY, buildW, bh);
+
+            // Building edge highlights
+            ctx.fillStyle = "rgba(255,255,255,0.08)";
+            ctx.fillRect(buildX, buildY, buildW * 0.05, bh);
+            ctx.fillStyle = "rgba(0,0,0,0.06)";
+            ctx.fillRect(buildX + buildW * 0.95, buildY, buildW * 0.05, bh);
+
+            // Stairwell protrusions (left and right)
+            const stairW = buildW * 0.08;
+            const stairH = bh * 0.95;
+            ctx.fillStyle = "#bab6aa";
+            ctx.fillRect(buildX - stairW, groundY - stairH, stairW, stairH);
+            ctx.fillRect(buildX + buildW, groundY - stairH, stairW, stairH);
+
+            // Floor lines
+            const floorH = bh / floors;
+            for (let f = 1; f < floors; f++) {
+                const fy = buildY + f * floorH;
+                ctx.fillStyle = "rgba(0,0,0,0.08)";
+                ctx.fillRect(buildX, fy - 1, buildW, 3);
+            }
+
+            // Windows (10 per floor)
+            const winCols = 10;
+            const winMarginX = buildW * 0.06;
+            const winAreaW = buildW - winMarginX * 2;
+            const winW = winAreaW / winCols * 0.65;
+            const winH = floorH * 0.45;
+            for (let f = 0; f < floors; f++) {
+                for (let c = 0; c < winCols; c++) {
+                    const wx = buildX + winMarginX + (c / winCols) * winAreaW + (winAreaW / winCols - winW) / 2;
+                    const wy = buildY + f * floorH + floorH * 0.2;
+                    ctx.fillStyle = `rgba(140,180,210,${0.4 + Math.random() * 0.2})`;
+                    ctx.fillRect(wx, wy, winW, winH);
+                    // Window frame
+                    ctx.strokeStyle = "rgba(100,100,100,0.3)";
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(wx, wy, winW, winH);
+                    // Window divider
+                    ctx.beginPath();
+                    ctx.moveTo(wx + winW / 2, wy);
+                    ctx.lineTo(wx + winW / 2, wy + winH);
+                    ctx.stroke();
+                }
+            }
+
+            // Main entrance (glass door + canopy)
+            const entranceW = buildW * 0.15;
+            const entranceH = floorH * 0.7;
+            ctx.fillStyle = "#666";
+            ctx.fillRect(cx - entranceW / 2, groundY - entranceH, entranceW, entranceH);
+            // Glass panels
+            ctx.fillStyle = "rgba(160,200,220,0.5)";
+            ctx.fillRect(cx - entranceW / 2 + 3, groundY - entranceH + 3, entranceW / 2 - 5, entranceH - 3);
+            ctx.fillRect(cx + 2, groundY - entranceH + 3, entranceW / 2 - 5, entranceH - 3);
+            // Canopy (awning)
+            ctx.fillStyle = "#999";
+            ctx.fillRect(cx - entranceW * 0.7, groundY - entranceH - 5, entranceW * 1.4, 6);
+
+            // Clock tower on roof
+            const towerW = buildW * 0.06;
+            const towerH = bh * 0.18;
+            ctx.fillStyle = "#aaa8a0";
+            ctx.fillRect(cx - towerW / 2, buildY - towerH, towerW, towerH);
+            // Clock face
+            ctx.fillStyle = "#f0f0e8";
+            ctx.beginPath();
+            ctx.arc(cx, buildY - towerH * 0.5, towerW * 0.35, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "#555";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(cx, buildY - towerH * 0.5, towerW * 0.35, 0, Math.PI * 2);
+            ctx.stroke();
+            // Clock hands
+            const clockCY = buildY - towerH * 0.5;
+            const handLen = towerW * 0.25;
+            ctx.strokeStyle = "#333";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(cx, clockCY); ctx.lineTo(cx, clockCY - handLen); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx, clockCY); ctx.lineTo(cx + handLen * 0.6, clockCY); ctx.stroke();
+
+            // Tower cap
+            ctx.fillStyle = "#888";
+            ctx.beginPath();
+            ctx.moveTo(cx - towerW / 2 - 2, buildY - towerH);
+            ctx.lineTo(cx, buildY - towerH - 10);
+            ctx.lineTo(cx + towerW / 2 + 2, buildY - towerH);
+            ctx.closePath();
+            ctx.fill();
+
+            // Bicycle parking (in front)
+            for (let b = 0; b < 5; b++) {
+                const bikeX = cx - buildW * 0.2 + b * 16;
+                ctx.strokeStyle = "#777";
+                ctx.lineWidth = 1.5;
+                // Simple bike rack silhouette
+                ctx.beginPath();
+                ctx.arc(bikeX, groundY - 4, 5, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(bikeX, groundY - 9);
+                ctx.lineTo(bikeX + 3, groundY - 16);
+                ctx.stroke();
+            }
+
+            // "1号館" sign
+            ctx.fillStyle = "rgba(60,60,80,0.8)";
+            ctx.beginPath();
+            ctx.roundRect(cx - 28, buildY + 8, 56, 18, 3);
+            ctx.fill();
+            ctx.fillStyle = "#fff";
+            ctx.font = "700 10px 'Zen Maru Gothic'";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("1号館", cx, buildY + 17);
+        }
+
+        // === 体育館 (Gym) ===
+        function drawGymBuilding(cx, bx, bw, wallH) {
+            const groundY = wallH;
+            const bh = wallH * 0.58;
+            const buildX = cx - bw * 0.42;
+            const buildW = bw * 0.84;
+            const buildY = groundY - bh;
+
+            // Walls (side)
+            ctx.fillStyle = "#c0b8a8";
+            ctx.fillRect(buildX, buildY + bh * 0.2, buildW, bh * 0.8);
+
+            // Arch roof (kamaboko/barrel shape)
+            ctx.fillStyle = "#8a8680";
+            ctx.beginPath();
+            ctx.moveTo(buildX, buildY + bh * 0.2);
+            ctx.quadraticCurveTo(cx, buildY - bh * 0.15, buildX + buildW, buildY + bh * 0.2);
+            ctx.lineTo(buildX + buildW, buildY + bh * 0.2);
+            ctx.lineTo(buildX, buildY + bh * 0.2);
+            ctx.closePath();
+            ctx.fill();
+            // Roof highlights
+            ctx.strokeStyle = "rgba(255,255,255,0.12)";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.quadraticCurveTo(cx, buildY - bh * 0.15, buildX + buildW, buildY + bh * 0.2);
+            ctx.stroke();
+
+            // Louver windows (side ventilation)
+            const louverCount = 8;
+            for (let l = 0; l < louverCount; l++) {
+                const lx = buildX + buildW * 0.08 + (l / louverCount) * buildW * 0.84;
+                const ly = buildY + bh * 0.3;
+                const lh = bh * 0.15;
+                ctx.fillStyle = "rgba(160,200,220,0.35)";
+                ctx.fillRect(lx, ly, buildW * 0.06, lh);
+                // Louver slats
+                ctx.strokeStyle = "rgba(100,100,100,0.3)";
+                ctx.lineWidth = 1;
+                for (let s = 0; s < 4; s++) {
+                    const sy = ly + (s / 4) * lh + lh * 0.1;
+                    ctx.beginPath();
+                    ctx.moveTo(lx, sy);
+                    ctx.lineTo(lx + buildW * 0.06, sy);
+                    ctx.stroke();
+                }
+            }
+
+            // Main entrance (large sliding doors)
+            const doorW = buildW * 0.2;
+            const doorH = bh * 0.5;
+            ctx.fillStyle = "#888";
+            ctx.fillRect(cx - doorW / 2, groundY - doorH, doorW, doorH);
+            // Door panels
+            ctx.fillStyle = "rgba(160,190,210,0.4)";
+            ctx.fillRect(cx - doorW / 2 + 3, groundY - doorH + 3, doorW / 2 - 4, doorH - 6);
+            ctx.fillRect(cx + 1, groundY - doorH + 3, doorW / 2 - 4, doorH - 6);
+            // Door handles
+            ctx.fillStyle = "#666";
+            ctx.fillRect(cx - 4, groundY - doorH * 0.5, 3, 12);
+            ctx.fillRect(cx + 1, groundY - doorH * 0.5, 3, 12);
+
+            // Basketball hoop silhouette (visible through window)
+            ctx.strokeStyle = "rgba(180,100,50,0.3)";
+            ctx.lineWidth = 2;
+            const hoopX = cx + buildW * 0.15;
+            const hoopY = buildY + bh * 0.35;
+            ctx.beginPath();
+            ctx.rect(hoopX - 8, hoopY, 16, 12);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(hoopX, hoopY + 16, 6, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // "体育館" sign
+            ctx.fillStyle = "rgba(60,60,80,0.8)";
+            ctx.beginPath();
+            ctx.roundRect(cx - 30, groundY - doorH - 16, 60, 14, 3);
+            ctx.fill();
+            ctx.fillStyle = "#fff";
+            ctx.font = "700 9px 'Zen Maru Gothic'";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("体育館", cx, groundY - doorH - 9);
+
+            // Trophy case decoration (side of entrance)
+            ctx.fillStyle = "rgba(200,180,120,0.4)";
+            ctx.fillRect(cx + doorW / 2 + 8, groundY - 28, 18, 24);
+            ctx.strokeStyle = "rgba(180,160,100,0.5)";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(cx + doorW / 2 + 8, groundY - 28, 18, 24);
+            // Trophy silhouette
+            ctx.fillStyle = "rgba(220,180,60,0.6)";
+            ctx.beginPath();
+            ctx.moveTo(cx + doorW / 2 + 14, groundY - 22);
+            ctx.lineTo(cx + doorW / 2 + 20, groundY - 22);
+            ctx.lineTo(cx + doorW / 2 + 19, groundY - 14);
+            ctx.lineTo(cx + doorW / 2 + 15, groundY - 14);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillRect(cx + doorW / 2 + 15, groundY - 14, 4, 4);
+            ctx.fillRect(cx + doorW / 2 + 13, groundY - 10, 8, 2);
+        }
+
+        // === 制作館 (Art Hall) ===
+        function drawArtHallBuilding(cx, bx, bw, wallH) {
+            const groundY = wallH;
+            const bh = wallH * 0.60;
+            const buildX = cx - bw * 0.42;
+            const buildW = bw * 0.84;
+            const buildY = groundY - bh;
+
+            // Modern concrete building body
+            ctx.fillStyle = "#bbb8b0";
+            ctx.fillRect(buildX, buildY, buildW, bh);
+
+            // Glass section (large atelier window — angled skylight look)
+            const glassW = buildW * 0.35;
+            const glassH = bh * 0.55;
+            const glassX = buildX + buildW * 0.55;
+            const glassY = buildY + bh * 0.08;
+            // Window background
+            ctx.fillStyle = "rgba(140,190,220,0.5)";
+            ctx.beginPath();
+            ctx.moveTo(glassX, glassY + glassH);
+            ctx.lineTo(glassX, glassY);
+            ctx.lineTo(glassX + glassW, glassY - glassH * 0.15);
+            ctx.lineTo(glassX + glassW, glassY + glassH);
+            ctx.closePath();
+            ctx.fill();
+            // Window frame
+            ctx.strokeStyle = "#888";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(glassX, glassY + glassH);
+            ctx.lineTo(glassX, glassY);
+            ctx.lineTo(glassX + glassW, glassY - glassH * 0.15);
+            ctx.lineTo(glassX + glassW, glassY + glassH);
+            ctx.closePath();
+            ctx.stroke();
+            // Window dividers
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(glassX + glassW * 0.33, glassY + glassH);
+            ctx.lineTo(glassX + glassW * 0.33, glassY - glassH * 0.05);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(glassX + glassW * 0.66, glassY + glassH);
+            ctx.lineTo(glassX + glassW * 0.66, glassY - glassH * 0.1);
+            ctx.stroke();
+
+            // Regular windows on left side
+            for (let r = 0; r < 2; r++) {
+                for (let c = 0; c < 3; c++) {
+                    const wx = buildX + buildW * 0.06 + c * buildW * 0.14;
+                    const wy = buildY + bh * 0.15 + r * bh * 0.35;
+                    ctx.fillStyle = "rgba(140,180,210,0.4)";
+                    ctx.fillRect(wx, wy, buildW * 0.10, bh * 0.2);
+                    ctx.strokeStyle = "rgba(100,100,100,0.3)";
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(wx, wy, buildW * 0.10, bh * 0.2);
+                }
+            }
+
+            // Colorful wall mural/mosaic (on front face)
+            const muralX = buildX + buildW * 0.08;
+            const muralY = buildY + bh * 0.7;
+            const muralW = buildW * 0.38;
+            const muralH = bh * 0.22;
+            const mosaicColors = [
+                "rgba(220,80,80,0.5)", "rgba(80,160,220,0.5)", "rgba(220,200,60,0.5)",
+                "rgba(80,200,120,0.5)", "rgba(200,100,220,0.5)", "rgba(240,140,60,0.5)"
+            ];
+            const tileSize = 8;
+            let colorIdx = 0;
+            for (let my = muralY; my < muralY + muralH; my += tileSize) {
+                for (let mx = muralX; mx < muralX + muralW; mx += tileSize) {
+                    ctx.fillStyle = mosaicColors[colorIdx % mosaicColors.length];
+                    ctx.fillRect(mx, my, tileSize - 1, tileSize - 1);
+                    colorIdx++;
+                }
+            }
+
+            // Entrance
+            const doorW = buildW * 0.14;
+            const doorH = bh * 0.4;
+            ctx.fillStyle = "#555";
+            ctx.fillRect(cx - doorW / 2, groundY - doorH, doorW, doorH);
+            ctx.fillStyle = "rgba(160,200,220,0.4)";
+            ctx.fillRect(cx - doorW / 2 + 2, groundY - doorH + 2, doorW - 4, doorH - 4);
+
+            // Sculpture in front of entrance
+            ctx.fillStyle = "#888";
+            // Base
+            ctx.fillRect(cx + buildW * 0.22, groundY - 12, 16, 12);
+            // Abstract shape
+            ctx.beginPath();
+            ctx.moveTo(cx + buildW * 0.22 + 4, groundY - 12);
+            ctx.lineTo(cx + buildW * 0.22 + 8, groundY - 36);
+            ctx.lineTo(cx + buildW * 0.22 + 12, groundY - 12);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = "#999";
+            ctx.beginPath();
+            ctx.arc(cx + buildW * 0.22 + 8, groundY - 32, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Chimney (kiln exhaust)
+            const chimneyX = buildX + buildW * 0.85;
+            ctx.fillStyle = "#8a8480";
+            ctx.fillRect(chimneyX - 5, buildY - 14, 10, 14 + bh * 0.1);
+            // Chimney cap
+            ctx.fillStyle = "#777";
+            ctx.fillRect(chimneyX - 7, buildY - 17, 14, 4);
+
+            // "制作館" sign
+            ctx.fillStyle = "rgba(60,60,80,0.8)";
+            ctx.beginPath();
+            ctx.roundRect(cx - 30, groundY - doorH - 16, 60, 14, 3);
+            ctx.fill();
+            ctx.fillStyle = "#fff";
+            ctx.font = "700 9px 'Zen Maru Gothic'";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("制作館", cx, groundY - doorH - 9);
         }
 
         function drawSchoolBackground() {
@@ -4693,6 +9589,11 @@
                     });
                 }
 
+                // Consumed modifier: dim the entire drop
+                if (drop.consumed) {
+                    ctx.globalAlpha = 0.3;
+                }
+
                 // Base style: close to initial choice buttons (solid fill + white border + modest shadow)
                 const baseR = 50;
                 ctx.shadowColor = "rgba(0,0,0,0.14)";
@@ -4733,7 +9634,32 @@
                 ctx.fillStyle = fillLevel >= 0.985 ? "rgba(255,255,255,0.98)" : "rgba(255,255,255,0.72)";
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
-                if (drop.instrument === "bass") {
+                if (drop.instrument === "modifier") {
+                    ctx.font = "700 13px 'Zen Maru Gothic', sans-serif";
+                    ctx.fillText(drop.activityName || "", 0, -12);
+                    if (drop.activityNameEn) {
+                        ctx.font = "500 10px 'Zen Maru Gothic', sans-serif";
+                        ctx.fillText(drop.activityNameEn, 0, 2);
+                    }
+                    // Show which bar it targets
+                    ctx.font = "500 9px 'Zen Maru Gothic', sans-serif";
+                    ctx.globalAlpha = drop.consumed ? 0.3 : 0.6;
+                    const barLabel = drop.targetBarOnPage2 === 2 ? "Bar 3" : "Bar 4";
+                    ctx.fillText(barLabel, 0, 16);
+                    if (drop.consumed) {
+                        // Checkmark
+                        ctx.globalAlpha = 0.8;
+                        ctx.font = "700 22px sans-serif";
+                        ctx.fillText("\u2713", 0, 32);
+                    }
+                } else if (drop.instrument === "keyboard") {
+                    ctx.font = "700 14px 'Zen Maru Gothic', sans-serif";
+                    ctx.fillText(drop.activityName || "", 0, -6);
+                    if (drop.activityNameEn) {
+                        ctx.font = "500 10px 'Zen Maru Gothic', sans-serif";
+                        ctx.fillText(drop.activityNameEn, 0, 10);
+                    }
+                } else if (drop.instrument === "bass") {
                     ctx.font = "700 14px 'Zen Maru Gothic', sans-serif";
                     ctx.fillText(drop.activityName || "", 0, -2);
                     ctx.font = "500 9px 'Zen Maru Gothic', sans-serif";
@@ -4766,14 +9692,17 @@
         let hoveredToyHudAlpha = 0;
         let lastHoveredToy = null;
         function drawToyStatsHud() {
-            if (currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2) {
+            if (currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2) {
                 hoveredToyHudAlpha = 0;
                 return;
             }
-            // Find the hovered toy
+            // Find the hovered toy (or post-adult drop with activity labels)
             let hovToy = null;
             toneDrops.forEach(drop => {
                 if (drop.isHovered && drop.toy) hovToy = drop.toy;
+                if (drop.isHovered && drop.activityLabels && (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2)) {
+                    hovToy = { name: drop.activityName, labels: drop.activityLabels };
+                }
             });
             if (hovToy) {
                 lastHoveredToy = hovToy;
@@ -4853,7 +9782,8 @@
                 ctx.fillStyle = "rgba(255,255,255,0.1)";
                 ctx.beginPath(); ctx.roundRect(px + 14, cy - 6, 140, 14, 3); ctx.fill();
                 // Bar fill
-                const barW = (e.value / 3) * 140;
+                const barMax = (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) ? 5 : 3;
+                const barW = Math.min(e.value / barMax, 1) * 140;
                 const barG = ctx.createLinearGradient(px + 14, 0, px + 14 + barW, 0);
                 barG.addColorStop(0, "rgba(229, 142, 170, 0.7)");
                 barG.addColorStop(1, "rgba(198, 128, 219, 0.7)");
@@ -4896,13 +9826,16 @@
         let cumulHudAlpha = 0;
         let lastCumulToy = null;
         function drawCumulativeStatsHud() {
-            if (currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2) {
+            if (currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2) {
                 cumulHudAlpha = 0;
                 return;
             }
             let hovToy = null;
             toneDrops.forEach(drop => {
                 if (drop.isHovered && drop.toy) hovToy = drop.toy;
+                if (drop.isHovered && drop.activityLabels && (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2)) {
+                    hovToy = { name: drop.activityName, labels: drop.activityLabels };
+                }
             });
             if (hovToy) {
                 lastCumulToy = hovToy;
@@ -5051,7 +9984,7 @@
         }
 
         function updateToneDropProximity() {
-            if ((currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.ADULT) || !toneDrops.length) {
+            if ((currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.ADULT && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2) || !toneDrops.length) {
                 return;
             }
 
@@ -5078,7 +10011,7 @@
 
             toneDrops.forEach(drop => {
                 const dist = Math.hypot(orbWorldX - drop.x, orbWorldY - drop.y);
-                const hoverR = (drop.instrument === "chord" || drop.instrument === "bass") ? 60 : 50;
+                const hoverR = (drop.instrument === "chord" || drop.instrument === "bass" || drop.instrument === "keyboard" || drop.instrument === "modifier") ? 60 : 50;
                 const wasHovered = drop.isHovered;
                 drop.isHovered = dist <= hoverR;
                 drop.proximityVol = drop.isHovered ? -12 : -100;
@@ -5207,6 +10140,8 @@
                 if (d.bassSynth) d.bassSynth.dispose();
                 if (d.guitarSynth) d.guitarSynth.dispose();
                 if (d.guitarEffects) d.guitarEffects.forEach(e => e.dispose());
+                if (d.keyboardSynth) d.keyboardSynth.dispose();
+                if (d.keyboardEffects) d.keyboardEffects.forEach(e => e.dispose());
             });
         }
 
@@ -5722,6 +10657,7 @@
             const notes = new Array(totalSteps).fill(null);
             const attacks = new Array(totalSteps).fill(false);
             const durations = new Array(totalSteps).fill(null);
+            const sustainType = new Array(totalSteps).fill(null);
 
             const stepToDur = (len) => {
                 if (len <= 1) return "16n";
@@ -5741,9 +10677,18 @@
                     pattern[s] = true;
                     if (!notes[s]) notes[s] = ev.note;
                 }
+                if (ev.len === 1) {
+                    sustainType[ev.step] = 'single';
+                } else {
+                    for (let s = ev.step; s < ev.step + ev.len && s < totalSteps; s++) {
+                        if (s === ev.step) sustainType[s] = 'start';
+                        else if (s === ev.step + ev.len - 1) sustainType[s] = 'end';
+                        else sustainType[s] = 'mid';
+                    }
+                }
             });
 
-            return { pattern, notes, attacks, durations };
+            return { pattern, notes, attacks, durations, sustainType };
         }
 
         function createGuitarSynth(style) {
@@ -5753,25 +10698,12 @@
             const effects = [];
             let synth;
 
-            if (cfg.type === "mono") {
-                // Pluck-like guitar via MonoSynth (no AudioWorklet)
-                synth = new Tone.MonoSynth({
-                    oscillator: { type: cfg.wave },
-                    envelope: { attack: cfg.attack, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release },
-                    filterEnvelope: {
-                        attack: cfg.attack, decay: cfg.decay * 0.8,
-                        sustain: 0.1, release: cfg.release,
-                        baseFrequency: cfg.filterBase, octaves: cfg.filterOct
-                    },
-                    volume: -100
-                }).toDestination();
-
-            } else if (cfg.type === "poly") {
+            if (cfg.type === "poly") {
                 synth = new Tone.PolySynth(Tone.Synth, {
                     oscillator: { type: cfg.wave },
-                    envelope: { attack: 0.005, decay: 0.25, sustain: 0.15, release: 0.4 },
-                    volume: -100
+                    envelope: { attack: cfg.attack, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release }
                 });
+                synth.volume.value = -100;
                 if (cfg.filterType) {
                     const filter = new Tone.Filter({ type: cfg.filterType, frequency: cfg.filterFreq, Q: 1.5 });
                     effects.push(filter);
@@ -5787,12 +10719,416 @@
             } else if (cfg.type === "polyDist") {
                 synth = new Tone.PolySynth(Tone.Synth, {
                     oscillator: { type: cfg.wave },
-                    envelope: { attack: 0.005, decay: 0.2, sustain: 0.3, release: 0.3 },
-                    volume: -100
+                    envelope: { attack: cfg.attack, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release }
                 });
+                synth.volume.value = -100;
                 const dist = new Tone.Distortion(cfg.distortion);
                 effects.push(dist);
                 synth.chain(dist, Tone.Destination);
+            }
+
+            return { synth, effects };
+        }
+
+        // Keyboard timbres for ADULT phase — all PolySynth (no AudioWorklet issues)
+        const KEYBOARD_TIMBRES = {
+            "piano-gentle":   { wave: "sine",     attack: 0.005, decay: 0.8,  sustain: 0.1,  release: 0.6 },
+            "organ-funky":    { wave: "square",   attack: 0.001, decay: 0.1,  sustain: 0.0,  release: 0.05, filterType: "bandpass", filterFreq: 1800 },
+            "piano-chord":    { wave: "triangle", attack: 0.01,  decay: 1.0,  sustain: 0.35, release: 1.0,  vibratoFreq: 1.5, vibratoDepth: 0.06 },
+            "piano-arpeggio": { wave: "sine",     attack: 0.003, decay: 0.5,  sustain: 0.05, release: 0.4 },
+            "organ-power":    { wave: "sawtooth", attack: 0.005, decay: 0.3,  sustain: 0.5,  release: 0.4 }
+        };
+
+        // University-specific timbres: diverse beyond keyboard (xylophone, flute, bells, etc.)
+        const UNIVERSITY_TIMBRES = {
+            "xylophone":      { wave: "sine",     attack: 0.001, decay: 0.25, sustain: 0.0,  release: 0.15, filterType: "highpass", filterFreq: 800 },
+            "flute":          { wave: "sine",     attack: 0.04,  decay: 0.3,  sustain: 0.6,  release: 0.5,  vibratoFreq: 4.5, vibratoDepth: 0.04 },
+            "bells":          { wave: "sine",     attack: 0.001, decay: 1.2,  sustain: 0.0,  release: 1.0 },
+            "marimba":        { wave: "triangle", attack: 0.001, decay: 0.4,  sustain: 0.0,  release: 0.2 },
+            "music-box":      { wave: "sine",     attack: 0.001, decay: 0.6,  sustain: 0.0,  release: 0.4, filterType: "lowpass", filterFreq: 3500 },
+            "kalimba":        { wave: "triangle", attack: 0.001, decay: 0.5,  sustain: 0.02, release: 0.3, filterType: "bandpass", filterFreq: 1200 },
+            "reed-organ":     { wave: "sawtooth", attack: 0.02,  decay: 0.2,  sustain: 0.55, release: 0.3, filterType: "lowpass", filterFreq: 1400 },
+            "glass-pad":      { wave: "sine",     attack: 0.08,  decay: 0.5,  sustain: 0.4,  release: 0.8,  vibratoFreq: 2.0, vibratoDepth: 0.08 },
+            "pluck-synth":    { wave: "triangle", attack: 0.001, decay: 0.18, sustain: 0.0,  release: 0.12, filterType: "lowpass", filterFreq: 2200 },
+            "warm-strings":   { wave: "sawtooth", attack: 0.06,  decay: 0.4,  sustain: 0.5,  release: 0.6, filterType: "lowpass", filterFreq: 1000, vibratoFreq: 3.0, vibratoDepth: 0.05 },
+            "steel-drum":     { wave: "sine",     attack: 0.001, decay: 0.35, sustain: 0.0,  release: 0.2, filterType: "bandpass", filterFreq: 2000 },
+            "celesta":        { wave: "sine",     attack: 0.001, decay: 0.8,  sustain: 0.0,  release: 0.5, filterType: "lowpass", filterFreq: 4000 },
+            "whistle":        { wave: "sine",     attack: 0.03,  decay: 0.15, sustain: 0.7,  release: 0.3,  vibratoFreq: 5.0, vibratoDepth: 0.03 },
+            "choir-pad":      { wave: "triangle", attack: 0.1,   decay: 0.3,  sustain: 0.6,  release: 0.8,  vibratoFreq: 2.5, vibratoDepth: 0.06 },
+            "harpsichord":    { wave: "sawtooth", attack: 0.001, decay: 0.15, sustain: 0.0,  release: 0.08, filterType: "lowpass", filterFreq: 2500 }
+        };
+
+        // 3 timbre sets per university facility (for variety)
+        const UNIVERSITY_FACILITY_TIMBRES = {
+            "gate":     ["bells",        "flute",       "music-box"],
+            "field":    ["xylophone",    "steel-drum",  "whistle"],
+            "building": ["piano-gentle", "reed-organ",  "harpsichord"],
+            "gym":      ["marimba",      "pluck-synth", "kalimba"],
+            "art_hall": ["glass-pad",    "celesta",     "choir-pad"]
+        };
+
+        // Pattern style mappings for university timbres
+        const UNIVERSITY_PATTERN_STYLES = {
+            "bells":        "piano-gentle",
+            "flute":        "piano-chord",
+            "music-box":    "piano-arpeggio",
+            "xylophone":    "organ-funky",
+            "steel-drum":   "organ-funky",
+            "whistle":      "piano-chord",
+            "piano-gentle": "piano-gentle",
+            "reed-organ":   "syncopated",
+            "harpsichord":  "staccato-bounce",
+            "marimba":      "organ-funky",
+            "pluck-synth":  "piano-arpeggio",
+            "kalimba":      "piano-arpeggio",
+            "glass-pad":    "melodic-run",
+            "celesta":      "staccato-bounce",
+            "choir-pad":    "syncopated"
+        };
+
+        function createUniversitySynth(timbreName) {
+            const cfg = UNIVERSITY_TIMBRES[timbreName] || KEYBOARD_TIMBRES[timbreName];
+            if (!cfg) return { synth: null, effects: [] };
+            const effects = [];
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: cfg.wave },
+                envelope: { attack: cfg.attack, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release }
+            });
+            synth.volume.value = -100;
+            if (cfg.filterType && cfg.vibratoFreq) {
+                const filter = new Tone.Filter({ type: cfg.filterType, frequency: cfg.filterFreq, Q: 1.5 });
+                const vibrato = new Tone.Vibrato({ frequency: cfg.vibratoFreq, depth: cfg.vibratoDepth });
+                effects.push(filter, vibrato);
+                synth.chain(filter, vibrato, Tone.Destination);
+            } else if (cfg.filterType) {
+                const filter = new Tone.Filter({ type: cfg.filterType, frequency: cfg.filterFreq, Q: 1.5 });
+                effects.push(filter);
+                synth.chain(filter, Tone.Destination);
+            } else if (cfg.vibratoFreq) {
+                const vibrato = new Tone.Vibrato({ frequency: cfg.vibratoFreq, depth: cfg.vibratoDepth });
+                effects.push(vibrato);
+                synth.chain(vibrato, Tone.Destination);
+            } else {
+                synth.toDestination();
+            }
+            return { synth, effects };
+        }
+
+        function buildKeyboardLine(baseInfo, style, chordProg, variant) {
+            const totalSteps = baseInfo.beatsPerBar * baseInfo.bars * STEPS_PER_BEAT;
+            const barSteps = baseInfo.beatsPerBar * STEPS_PER_BEAT;
+            const S = STEPS_PER_BEAT; // 4
+
+            const chordRoots = chordProg.notes.map(triad => triad[0].replace(/\d+$/, ''));
+            const chordThirds = chordProg.notes.map(triad => triad[1].replace(/\d+$/, ''));
+            const chordFifths = chordProg.notes.map(triad => triad[2].replace(/\d+$/, ''));
+
+            const events = [];
+            const add = (si, note, len) => {
+                if (si >= 0 && si < totalSteps && note) {
+                    events.push({ step: si, note, len: Math.min(len, totalSteps - si) });
+                }
+            };
+
+            for (let bar = 0; bar < baseInfo.bars; bar++) {
+                const b = bar * barSteps;
+                const R = chordRoots[bar % chordRoots.length];
+                const T = chordThirds[bar % chordThirds.length];
+                const F = chordFifths[bar % chordFifths.length];
+                const chord4 = [R + "4", T + "4", F + "4"];
+                const chordWide = [R + "3", T + "4", F + "4"];
+
+                if (style === "piano-gentle") {
+                    // Beat 1 full chord, beat 3 partial chord
+                    add(b, chord4, 3);
+                    if (baseInfo.beatsPerBar >= 3) add(b + 2 * S, [R + "4", F + "4"], 3);
+                    if (baseInfo.beatsPerBar >= 4 && variant === 1 && Math.random() > 0.4) {
+                        add(b + 3 * S, [T + "4", F + "4"], 2);
+                    }
+
+                } else if (style === "organ-funky") {
+                    // Offbeat staccato chord stabs
+                    const offbeats = variant === 0 ? [2, 6, 10, 14] : [2, 6, 10];
+                    for (const step of offbeats) {
+                        if (step < barSteps) add(b + step, chord4, 1);
+                    }
+                    // Accent on beat 1 every other bar
+                    if (bar % 2 === 0) add(b, chord4, 1);
+                    if (variant === 1 && baseInfo.beatsPerBar >= 3 && Math.random() > 0.3) {
+                        add(b + 2 * S + 3, [R + "4", F + "4"], 1);
+                    }
+
+                } else if (style === "piano-chord") {
+                    // Full bar sustained chord (wide voicing)
+                    if (variant === 0) {
+                        add(b, chordWide, barSteps);
+                    } else {
+                        add(b, chordWide, Math.floor(barSteps * 0.6));
+                        if (baseInfo.beatsPerBar >= 3) {
+                            add(b + 2 * S, chord4, Math.floor(barSteps * 0.4));
+                        }
+                    }
+
+                } else if (style === "piano-arpeggio") {
+                    // 8th-note broken chords cycling through voicings
+                    if (variant === 0) {
+                        add(b, chord4, 2);
+                        if (baseInfo.beatsPerBar >= 2) add(b + S, [T + "4", F + "4"], 2);
+                        if (baseInfo.beatsPerBar >= 3) add(b + 2 * S, [R + "4", F + "4", R + "5"], 2);
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S, chordWide, 2);
+                    } else {
+                        for (let beat = 0; beat < baseInfo.beatsPerBar; beat++) {
+                            const ch = beat % 2 === 0 ? chord4 : [R + "4", F + "4"];
+                            add(b + beat * S, ch, 2);
+                            if (Math.random() > 0.4) {
+                                add(b + beat * S + 2, [T + "4", F + "4"], 2);
+                            }
+                        }
+                    }
+
+                } else if (style === "organ-power") {
+                    // Strong chord on beats 1 and 3, 8th-note fills on beat 4
+                    const power = [R + "4", F + "4", R + "5"];
+                    add(b, power, 3);
+                    if (baseInfo.beatsPerBar >= 3) add(b + 2 * S, power, 3);
+                    if (baseInfo.beatsPerBar >= 4) {
+                        if (variant === 0 && Math.random() > 0.3) {
+                            add(b + 3 * S, [R + "4", F + "4"], 2);
+                            add(b + 3 * S + 2, power, 2);
+                        } else {
+                            add(b + 3 * S, power, 2);
+                            if (Math.random() > 0.25) {
+                                add(b + 3 * S + 2, [R + "4", F + "4"], 2);
+                            }
+                        }
+                    }
+
+                } else if (style === "syncopated") {
+                    // Syncopated hits — accents on offbeats with varying chord voicings
+                    if (variant === 0) {
+                        add(b, [R + "4"], 1);
+                        add(b + 3, chord4, 2);
+                        if (baseInfo.beatsPerBar >= 3) add(b + 2 * S + 1, [T + "4", F + "4"], 2);
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S + 2, chordWide, 2);
+                    } else {
+                        add(b + 1, [R + "4", F + "4"], 2);
+                        if (baseInfo.beatsPerBar >= 2) add(b + S + 3, chord4, 1);
+                        if (baseInfo.beatsPerBar >= 3) add(b + 2 * S, [T + "5"], 1);
+                        if (baseInfo.beatsPerBar >= 3) add(b + 2 * S + 2, chordWide, 3);
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S + 1, [R + "4", T + "4"], 2);
+                    }
+
+                } else if (style === "melodic-run") {
+                    // Single-note melodic runs through chord tones at different octaves
+                    const tones = [R, T, F];
+                    if (variant === 0) {
+                        // Ascending run
+                        add(b, [tones[0] + "4"], 2);
+                        add(b + 2, [tones[1] + "4"], 2);
+                        if (baseInfo.beatsPerBar >= 2) add(b + S, [tones[2] + "4"], 2);
+                        if (baseInfo.beatsPerBar >= 2) add(b + S + 2, [tones[0] + "5"], 2);
+                        if (baseInfo.beatsPerBar >= 3) add(b + 2 * S, [tones[1] + "5"], 3);
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S, [tones[2] + "5"], 2);
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S + 2, [tones[0] + "4"], 2);
+                    } else {
+                        // Descending run with leaps
+                        add(b, [tones[2] + "5"], 2);
+                        add(b + 2, [tones[0] + "5"], 1);
+                        add(b + 3, [tones[1] + "4"], 2);
+                        if (baseInfo.beatsPerBar >= 2) add(b + S + 1, [tones[2] + "4"], 2);
+                        if (baseInfo.beatsPerBar >= 3) add(b + 2 * S, [tones[0] + "4"], 4);
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S, [tones[1] + "5"], 2);
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S + 2, [tones[2] + "4"], 2);
+                    }
+
+                } else if (style === "staccato-bounce") {
+                    // Quick bouncing single notes — rhythmic and playful
+                    const bounce = [R + "5", T + "4", F + "4", R + "4"];
+                    if (variant === 0) {
+                        for (let beat = 0; beat < baseInfo.beatsPerBar; beat++) {
+                            add(b + beat * S, [bounce[beat % bounce.length]], 1);
+                            if (Math.random() > 0.3) add(b + beat * S + 2, [bounce[(beat + 1) % bounce.length]], 1);
+                        }
+                    } else {
+                        add(b, [R + "5"], 1);
+                        add(b + 1, [F + "4"], 1);
+                        add(b + 3, [T + "4"], 1);
+                        if (baseInfo.beatsPerBar >= 2) { add(b + S, [R + "4"], 1); add(b + S + 2, [F + "5"], 1); }
+                        if (baseInfo.beatsPerBar >= 3) { add(b + 2 * S + 1, [T + "5"], 1); add(b + 2 * S + 3, [R + "4"], 1); }
+                        if (baseInfo.beatsPerBar >= 4) { add(b + 3 * S, [F + "4"], 1); add(b + 3 * S + 2, [T + "4", R + "5"], 1); }
+                    }
+
+                // === Part-Time (アルバイト) pattern styles ===
+                } else if (style === "staccato-burst") {
+                    // 16th-note burst clusters (2-3 notes) → rest → burst
+                    if (variant === 0) {
+                        add(b, [R + "5"], 1);
+                        add(b + 1, [T + "5"], 1);
+                        add(b + 2, [F + "5"], 1);
+                        // Rest on beat 2
+                        if (baseInfo.beatsPerBar >= 3) {
+                            add(b + 2 * S, [R + "4"], 1);
+                            add(b + 2 * S + 1, [F + "4"], 1);
+                        }
+                        if (baseInfo.beatsPerBar >= 4) {
+                            add(b + 3 * S + 2, [T + "5"], 1);
+                            add(b + 3 * S + 3, [R + "5"], 1);
+                        }
+                    } else {
+                        add(b + 1, [F + "5"], 1);
+                        add(b + 2, [R + "5"], 1);
+                        if (baseInfo.beatsPerBar >= 2) {
+                            add(b + S + 1, [T + "4"], 1);
+                            add(b + S + 2, [F + "4"], 1);
+                            add(b + S + 3, [R + "4"], 1);
+                        }
+                        if (baseInfo.beatsPerBar >= 4) {
+                            add(b + 3 * S, [T + "5"], 1);
+                            add(b + 3 * S + 1, [F + "5"], 1);
+                        }
+                    }
+
+                } else if (style === "synco-punch") {
+                    // Off-beat accented short hits, irregular placement
+                    if (variant === 0) {
+                        add(b + 2, [R + "5", F + "5"], 1);
+                        if (baseInfo.beatsPerBar >= 2) add(b + S + 3, [T + "4"], 1);
+                        if (baseInfo.beatsPerBar >= 3) add(b + 2 * S + 1, [F + "4", R + "5"], 1);
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S + 2, [T + "5"], 1);
+                    } else {
+                        add(b + 3, [F + "5"], 1);
+                        if (baseInfo.beatsPerBar >= 2) add(b + S + 1, [R + "4", T + "4"], 1);
+                        if (baseInfo.beatsPerBar >= 3) {
+                            add(b + 2 * S + 2, [T + "5"], 1);
+                            add(b + 2 * S + 3, [F + "4"], 1);
+                        }
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S, [R + "5"], 1);
+                    }
+
+                } else if (style === "rapid-tap") {
+                    // Fast consecutive taps for 1-2 beats then rest
+                    if (variant === 0) {
+                        for (let s = 0; s < Math.min(S * 2, barSteps); s++) {
+                            add(b + s, [s % 2 === 0 ? R + "5" : T + "5"], 1);
+                        }
+                        // Rest for remaining beats
+                    } else {
+                        // Start after a rest
+                        if (baseInfo.beatsPerBar >= 2) {
+                            for (let s = 0; s < Math.min(S, barSteps - S); s++) {
+                                add(b + S + s, [s % 3 === 0 ? R + "5" : (s % 3 === 1 ? T + "4" : F + "4")], 1);
+                            }
+                        }
+                        if (baseInfo.beatsPerBar >= 4) {
+                            add(b + 3 * S, [R + "4", F + "4"], 1);
+                            add(b + 3 * S + 2, [T + "5"], 1);
+                        }
+                    }
+
+                // === Job Hunt (就活) pattern styles ===
+                } else if (style === "formal-accent") {
+                    // ファーー、、ファー、ファーーー rhythm — mid-length notes with gaps
+                    if (variant === 0) {
+                        add(b, chord4, 3);
+                        if (baseInfo.beatsPerBar >= 3) add(b + 2 * S, [R + "4"], 2);
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S, [R + "4", F + "4"], 3);
+                    } else {
+                        add(b + 1, [T + "4"], 2);
+                        if (baseInfo.beatsPerBar >= 3) add(b + S + 3, chord4, 3);
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S, [F + "4"], 2);
+                    }
+
+                } else if (style === "crisp-staccato") {
+                    // ファー、ファーー、、ファー rhythm — punchy with space
+                    const crisp = [R + "5", T + "4", F + "5"];
+                    if (variant === 0) {
+                        add(b, [crisp[0]], 2);
+                        if (baseInfo.beatsPerBar >= 2) add(b + S + 2, [crisp[1]], 3);
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S, [crisp[2]], 2);
+                    } else {
+                        add(b + 1, [crisp[2]], 3);
+                        if (baseInfo.beatsPerBar >= 3) add(b + 2 * S, [crisp[0]], 2);
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S + 1, [crisp[1]], 2);
+                    }
+
+                } else if (style === "dramatic-swell") {
+                    // ファーーー、、ファー、ファーー rhythm — passionate swells with breath
+                    if (variant === 0) {
+                        add(b, [R + "4"], 3);
+                        if (baseInfo.beatsPerBar >= 3) add(b + S + 3, [R + "5", F + "5"], 2);
+                        if (baseInfo.beatsPerBar >= 4) add(b + 2 * S + 2, chord4, 3);
+                    } else {
+                        add(b, chord4, 2);
+                        if (baseInfo.beatsPerBar >= 2) add(b + S, [T + "5", F + "5"], 3);
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S, [R + "4"], 2);
+                    }
+                }
+            }
+
+            // Convert events into arrays
+            const pattern = new Array(totalSteps).fill(false);
+            const notes = new Array(totalSteps).fill(null);
+            const attacks = new Array(totalSteps).fill(false);
+            const durations = new Array(totalSteps).fill(null);
+            const sustainType = new Array(totalSteps).fill(null);
+
+            const stepToDur = (len) => {
+                if (len <= 1) return "16n";
+                if (len <= 2) return "8n";
+                if (len <= 3) return "8n.";
+                if (len <= 4) return "4n";
+                if (len <= 6) return "4n.";
+                if (len <= 8) return "2n";
+                return "1n";
+            };
+
+            events.forEach(ev => {
+                attacks[ev.step] = true;
+                notes[ev.step] = ev.note;
+                durations[ev.step] = stepToDur(ev.len);
+                for (let s = ev.step; s < ev.step + ev.len && s < totalSteps; s++) {
+                    pattern[s] = true;
+                    if (!notes[s]) notes[s] = ev.note;
+                }
+                if (ev.len === 1) {
+                    sustainType[ev.step] = 'single';
+                } else {
+                    for (let s = ev.step; s < ev.step + ev.len && s < totalSteps; s++) {
+                        if (s === ev.step) sustainType[s] = 'start';
+                        else if (s === ev.step + ev.len - 1) sustainType[s] = 'end';
+                        else sustainType[s] = 'mid';
+                    }
+                }
+            });
+
+            return { pattern, notes, attacks, durations, sustainType };
+        }
+
+        function createKeyboardSynth(style) {
+            const cfg = KEYBOARD_TIMBRES[style];
+            if (!cfg) return { synth: null, effects: [] };
+
+            const effects = [];
+            // NOTE: Do NOT put volume in the PolySynth constructor options — Tone.js v14
+            // passes all second-arg properties as inner voice options, so volume:-100 would
+            // set each inner Synth to -100dB (making total output ~silent).
+            // Instead, set PolySynth.volume.value after creation.
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: cfg.wave },
+                envelope: { attack: cfg.attack, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release }
+            });
+            synth.volume.value = -100;
+
+            if (cfg.filterType) {
+                const filter = new Tone.Filter({ type: cfg.filterType, frequency: cfg.filterFreq, Q: 1.5 });
+                effects.push(filter);
+                synth.chain(filter, Tone.Destination);
+            } else if (cfg.vibratoFreq) {
+                const vibrato = new Tone.Vibrato({ frequency: cfg.vibratoFreq, depth: cfg.vibratoDepth });
+                effects.push(vibrato);
+                synth.chain(vibrato, Tone.Destination);
+            } else {
+                synth.toDestination();
             }
 
             return { synth, effects };
@@ -6336,7 +11672,7 @@
                         baseGroove.kickSynth.triggerAttackRelease("C1", "8n");
                     }
                     if (
-                        (currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT) &&
+                        (currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) &&
                         carryHatSynth &&
                         carryHatFilter &&
                         inheritedHatPattern &&
@@ -6346,7 +11682,7 @@
                         carryHatSynth.triggerAttackRelease("32n");
                     }
                     if (
-                        (currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT) &&
+                        (currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) &&
                         carrySnareSynth &&
                         carrySnareFilter &&
                         inheritedSnarePattern &&
@@ -6360,7 +11696,7 @@
                         }
                     }
                     if (
-                        (currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT) &&
+                        (currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) &&
                         carryCymbalSynth &&
                         inheritedCymbalPattern &&
                         inheritedCymbalPattern[step]
@@ -6368,9 +11704,9 @@
                         carryCymbalSynth.triggerAttackRelease("16n");
                     }
                     // Carry chord playback removed from ADULT (bass + guitar only)
-                    // Carry bass playback (ADULT: play inherited bass line)
+                    // Carry bass playback (ADULT+: play inherited bass line)
                     if (
-                        currentScene === SCENE.ADULT &&
+                        (currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) &&
                         carryBassSynth &&
                         inheritedBassAttacks &&
                         inheritedBassAttacks[step]
@@ -6379,6 +11715,32 @@
                         const dur = inheritedBassDurations ? inheritedBassDurations[step] : "8n";
                         if (note) {
                             try { carryBassSynth.triggerAttackRelease(note, dur); } catch (e) { /* ignore */ }
+                        }
+                    }
+                    // Carry keyboard playback (UNIVERSITY+: play inherited keyboard line)
+                    if (
+                        (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) &&
+                        carryKeyboardSynth &&
+                        inheritedKeyboardAttacks &&
+                        inheritedKeyboardAttacks[step]
+                    ) {
+                        const kNote = inheritedKeyboardNotes ? inheritedKeyboardNotes[step] : null;
+                        const kDur = inheritedKeyboardDurations ? inheritedKeyboardDurations[step] : "8n";
+                        if (kNote) {
+                            try { carryKeyboardSynth.triggerAttackRelease(kNote, kDur); } catch (e) { /* ignore */ }
+                        }
+                    }
+                    // Carry Keys2 playback (PART_TIME/JOB_HUNT/JOB_HUNT2)
+                    if (
+                        (currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) &&
+                        carryKeys2Synth &&
+                        inheritedKeys2Attacks &&
+                        inheritedKeys2Attacks[step]
+                    ) {
+                        const k2Note = inheritedKeys2Notes ? inheritedKeys2Notes[step] : null;
+                        const k2Dur = inheritedKeys2Durations ? inheritedKeys2Durations[step] : "8n";
+                        if (k2Note) {
+                            try { carryKeys2Synth.triggerAttackRelease(k2Note, k2Dur); } catch (e) { /* ignore */ }
                         }
                     }
                     updateScoreHudPlayhead(step);
@@ -6392,7 +11754,7 @@
                     }
 
                     toneDrops.forEach(drop => {
-                        if (!drop.pattern[step]) return;
+                        if (!drop.pattern || !drop.pattern[step]) return;
                         if (drop.proximityVol <= -68) return;
                         const accent = drop.velocityPattern ? (drop.velocityPattern[step] || 0.72) : 0.9;
                         const baseVol = Math.min(-12, drop.proximityVol - 18) + (accent - 0.8) * 9;
@@ -6405,6 +11767,20 @@
                             drop.chordSynth.volume.value = baseVol - 8;
                             drop.chordSynth.triggerAttackRelease(drop.chordProgression.notes[barIndex], "2n");
                             if (drop.isHovered) drop.ripples.push({ t: 0, accent });
+                            return;
+                        }
+                        if (drop.instrument === "keyboard") {
+                            if (drop.keyboardAttacks && drop.keyboardAttacks[step] && drop.keyboardSynth) {
+                                const kNote = drop.keyboardNotes[step];
+                                const kDur = drop.keyboardDurations[step];
+                                if (kNote) {
+                                    drop.keyboardSynth.volume.value = baseVol + 8;
+                                    try { drop.keyboardSynth.triggerAttackRelease(kNote, kDur); } catch(e) {}
+                                }
+                            }
+                            if (drop.isHovered && drop.keyboardAttacks && drop.keyboardAttacks[step]) {
+                                drop.ripples.push({ t: 0, accent });
+                            }
                             return;
                         }
                         if (drop.instrument === "bass") {
@@ -6495,11 +11871,97 @@
             tick();
         }
 
+        // 画面外トーン方向インジケーター（マリカ風くの字矢印）
+        function drawOffscreenToneArrows() {
+            if (!toneDrops.length) return;
+            if (currentScene < SCENE.CRAWL || currentScene === SCENE.LESSON) return;
+
+            let hasLeft = false, hasRight = false;
+            for (const drop of toneDrops) {
+                const sx = drop.x - cameraX;
+                if (sx < -20) hasLeft = true;
+                if (sx > width + 20) hasRight = true;
+                if (hasLeft && hasRight) break;
+            }
+            if (!hasLeft && !hasRight) return;
+
+            const t = Date.now() * 0.002;
+            const pulse = 0.7 + 0.3 * Math.sin(t);
+            const drift = Math.sin(t * 1.1) * 3;
+            const yCenter = height * ROOM_WALL_RATIO + TONE_FLOOR_OFFSET;
+            const btnC = palette.btnColor;
+            const toHsla = (a) => btnC.replace('hsl(', 'hsla(').replace(')', ', ' + a + ')');
+
+            ctx.save();
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            // くの字1個を描く（太いストローク、枠線なし）
+            const armLen = 28;
+            const halfAng = 58 * Math.PI / 180; // 開き約116°
+            const adx = armLen * Math.cos(halfAng);
+            const ady = armLen * Math.sin(halfAng);
+
+            const drawChevron = (tipX, tipY, dir, alpha) => {
+                const ax = tipX + dir * adx;
+                const ay1 = tipY - ady;
+                const ay2 = tipY + ady;
+                // グロー
+                ctx.shadowColor = toHsla(alpha * 0.5);
+                ctx.shadowBlur = 18;
+                ctx.strokeStyle = toHsla(alpha);
+                ctx.lineWidth = 7;
+                ctx.beginPath();
+                ctx.moveTo(ax, ay1);
+                ctx.lineTo(tipX, tipY);
+                ctx.lineTo(ax, ay2);
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+            };
+
+            // マリカ風: 2個並べる（手前が濃く、奥が薄い）
+            const gap = 22;
+            const drawSide = (baseX, dir) => {
+                drawChevron(baseX,       yCenter, dir, pulse * 0.9);
+                drawChevron(baseX + dir * -gap, yCenter, dir, pulse * 0.45);
+            };
+
+            if (hasLeft) drawSide(38 - drift, 1);
+            if (hasRight) drawSide(width - 38 + drift, -1);
+
+            ctx.restore();
+        }
+
         // Render Loop
         function animate() {
             ctx.clearRect(0, 0, width, height);
             // Keep pointer-linked world coordinates in sync even while camera scrolls.
-            if (currentScene >= SCENE.CRAWL) {
+            const isJobHuntSideScroll = (currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) && jobHuntViewMode === "sidescroll";
+            if (isTopDownScene && isJobHuntSideScroll) {
+                // Side-scroll mode uses cameraX like normal side-scroll scenes
+                orbWorldX = mouseX + cameraX;
+                orbWorldY = mouseY;
+            } else if (isTopDownScene) {
+                if (currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) {
+                    updateTopDownCamera();
+                    topDownOffsetX = worldWidth <= width ? (width - worldWidth) / 2 : -topDownCameraX;
+                    topDownOffsetY = worldHeight <= height ? (height - worldHeight) / 2 : -topDownCameraY;
+                } else {
+                    topDownOffsetX = (width - worldWidth) / 2;
+                    topDownOffsetY = (height - worldHeight) / 2;
+                }
+                // Account for camera zoom when converting mouse to world coords
+                if ((currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) && jobHuntCameraZoom !== 1.0 && baby) {
+                    const z = jobHuntCameraZoom;
+                    const bsx = baby.x + topDownOffsetX;
+                    const bsy = baby.y + topDownOffsetY;
+                    orbWorldX = (mouseX - bsx) / z + bsx - topDownOffsetX;
+                    orbWorldY = (mouseY - bsy) / z + bsy - topDownOffsetY;
+                } else {
+                    orbWorldX = mouseX - topDownOffsetX;
+                    orbWorldY = mouseY - topDownOffsetY;
+                }
+            } else if (currentScene >= SCENE.CRAWL) {
                 orbWorldX = mouseX + cameraX;
                 orbWorldY = mouseY;
             } else {
@@ -6512,7 +11974,145 @@
             if (currentScene === SCENE.LESSON) {
                 // 授業フェーズ: toneなし、選択肢なし、HUDなし
                 drawLessonScene();
-            } else if (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT) {
+            } else if (isTopDownScene) {
+                // 見下ろし型2D scenes (PART_TIME, JOB_HUNT, JOB_HUNT2)
+                updateToneDropProximity();
+                updateModifierTonePreview();
+                updateScoreHudPreviewRow();
+
+                if (baby && !isMinigameActive) {
+                    if (isJobHuntSideScroll) {
+                        baby.update(orbWorldX);
+                        // Check exit trigger: walk to left door to leave
+                        if (!jobHuntTransitioning && baby.x < 30) {
+                            triggerJobHuntExitInterview();
+                        }
+                    } else {
+                        baby.updateTopDown(orbWorldX, orbWorldY);
+                    }
+                }
+
+                if (isJobHuntSideScroll) {
+                    // === SIDE-SCROLL RENDERING ===
+                    updateJobHuntSideScrollCamera();
+                    ctx.save();
+                    ctx.translate(-cameraX, 0);
+                    drawJobHuntSideScrollBg();
+                    drawToneDrops();
+                    if (baby) baby.draw(ctx);
+                    ctx.restore();
+                } else {
+                    // === EXISTING TOP-DOWN RENDERING ===
+                    // Dark grey margins
+                    ctx.fillStyle = "#2a2a2a";
+                    ctx.fillRect(0, 0, width, height);
+
+                    ctx.save();
+                    // Apply job hunt camera zoom (scale around baby's screen position)
+                    if ((currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) && jobHuntCameraZoom !== 1.0) {
+                        const z = jobHuntCameraZoom;
+                        const babyScreenX = baby ? baby.x + topDownOffsetX : width / 2;
+                        const babyScreenY = baby ? baby.y + topDownOffsetY : height / 2;
+                        ctx.translate(babyScreenX, babyScreenY);
+                        ctx.scale(z, z);
+                        ctx.translate(-babyScreenX, -babyScreenY);
+                    }
+                    ctx.translate(topDownOffsetX, topDownOffsetY);
+                    // Clip to world bounds
+                    ctx.beginPath();
+                    ctx.rect(0, 0, worldWidth, worldHeight);
+                    ctx.clip();
+
+                    if (currentScene === SCENE.PART_TIME) {
+                        drawPartTimeBackground();
+                    } else if (currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) {
+                        drawJobHuntBackground();
+                    }
+                    drawToneDrops();
+                    if (baby) baby.drawTopDown(ctx, baby.walkCycle);
+                    ctx.restore();
+                }
+
+                // Second interview pass text overlay
+                if (secondInterviewText && secondInterviewText.alpha > 0) {
+                    ctx.save();
+                    const stAlpha = secondInterviewText.alpha;
+                    const stScale = secondInterviewText.scale;
+                    const shimmer = secondInterviewText.shimmer || 0;
+                    const cx = width / 2, cy = height / 2;
+
+                    // Background dim overlay
+                    ctx.globalAlpha = stAlpha * 0.35;
+                    ctx.fillStyle = "#000";
+                    ctx.fillRect(0, 0, width, height);
+
+                    // Sparkle particles
+                    if (secondInterviewText.sparkles) {
+                        secondInterviewText.sparkles.forEach(s => {
+                            if (s.life <= 0) return;
+                            ctx.globalAlpha = s.life * stAlpha;
+                            ctx.fillStyle = `hsl(${s.hue}, 85%, 70%)`;
+                            ctx.beginPath();
+                            ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+                            ctx.fill();
+                            // Star sparkle cross
+                            ctx.strokeStyle = `hsla(${s.hue}, 90%, 80%, ${s.life * 0.6})`;
+                            ctx.lineWidth = 1;
+                            const len = s.size * 1.5;
+                            ctx.beginPath();
+                            ctx.moveTo(s.x - len, s.y); ctx.lineTo(s.x + len, s.y);
+                            ctx.moveTo(s.x, s.y - len); ctx.lineTo(s.x, s.y + len);
+                            ctx.stroke();
+                        });
+                    }
+
+                    // Gold glow behind text
+                    ctx.globalAlpha = stAlpha * 0.5;
+                    const glowR = 140 * stScale;
+                    const glow = ctx.createRadialGradient(cx, cy - 10, 0, cx, cy - 10, glowR);
+                    glow.addColorStop(0, "rgba(255,210,80,0.6)");
+                    glow.addColorStop(0.5, "rgba(255,180,50,0.2)");
+                    glow.addColorStop(1, "rgba(255,180,50,0)");
+                    ctx.fillStyle = glow;
+                    ctx.fillRect(cx - glowR, cy - 10 - glowR, glowR * 2, glowR * 2);
+
+                    // Main Japanese text
+                    ctx.globalAlpha = stAlpha;
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    const fontSize = Math.round(42 * stScale);
+                    ctx.font = `900 ${fontSize}px 'Zen Maru Gothic', sans-serif`;
+                    // Gold gradient text
+                    const shimOff = Math.sin(shimmer * 0.05) * 20;
+                    const textGrad = ctx.createLinearGradient(cx - 150 + shimOff, cy - 20, cx + 150 + shimOff, cy + 20);
+                    textGrad.addColorStop(0, "#ffe082");
+                    textGrad.addColorStop(0.3, "#fff8e1");
+                    textGrad.addColorStop(0.5, "#ffd54f");
+                    textGrad.addColorStop(0.7, "#fff8e1");
+                    textGrad.addColorStop(1, "#ffca28");
+                    ctx.fillStyle = textGrad;
+                    ctx.shadowColor = "rgba(255,180,50,0.9)";
+                    ctx.shadowBlur = 30;
+                    ctx.fillText(secondInterviewText.textJa || "", cx, cy - 14);
+                    // Stroke outline for readability
+                    ctx.shadowBlur = 0;
+                    ctx.strokeStyle = "rgba(180,120,20,0.35)";
+                    ctx.lineWidth = 1.5;
+                    ctx.strokeText(secondInterviewText.textJa || "", cx, cy - 14);
+
+                    // English subtitle
+                    ctx.shadowColor = "rgba(255,200,100,0.6)";
+                    ctx.shadowBlur = 12;
+                    const enSize = Math.round(18 * stScale);
+                    ctx.font = `600 ${enSize}px 'Zen Maru Gothic', sans-serif`;
+                    ctx.fillStyle = "rgba(255,245,220,0.9)";
+                    ctx.fillText(secondInterviewText.textEn || "", cx, cy + 24);
+                    ctx.restore();
+                }
+
+                drawToyStatsHud();
+                drawCumulativeStatsHud();
+            } else if (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY) {
                 updateToneDropProximity();
                 updateScoreHudPreviewRow();
 
@@ -6525,7 +12125,9 @@
 
                 ctx.save();
                 ctx.translate(-cameraX, 0);
-                if (currentScene === SCENE.ADULT) {
+                if (currentScene === SCENE.UNIVERSITY) {
+                    drawUniversityBackground();
+                } else if (currentScene === SCENE.ADULT) {
                     drawAdultBackground();
                 } else if (currentScene === SCENE.CHILD2) {
                     drawSchoolBackground();
@@ -6540,6 +12142,7 @@
 
                 drawToyStatsHud();
                 drawCumulativeStatsHud();
+                drawOffscreenToneArrows();
             } else {
                 // Title/Choice Background
                 ctx.fillStyle = palette.bg;
@@ -6567,10 +12170,30 @@
                 const scaleY = minigameCanvas.height / rect.height;
                 const minigameMouseX = (mouseX - rect.left) * scaleX;
                 const minigameMouseY = (mouseY - rect.top) * scaleY;
-                
+
                 activeMinigame.update(minigameMouseX, minigameMouseY);
                 if (activeMinigame) {
                     activeMinigame.draw();
+                    // When finished/failed: remove quit button, enable click-to-close after brief delay
+                    if ((activeMinigame.state === 'finished' || activeMinigame.state === 'failed') && !activeMinigame._resultSetup) {
+                        activeMinigame._resultSetup = true;
+                        activeMinigame._resultClickReady = false;
+                        const btn = document.getElementById('minigame-quit-btn');
+                        if (btn) btn.remove();
+                        // Brief delay so result screen is visible before accepting clicks
+                        setTimeout(() => { if (activeMinigame) activeMinigame._resultClickReady = true; }, 1500);
+                    }
+                    // Draw "click to continue" hint on result screen
+                    if (activeMinigame._resultClickReady && minigameCtx) {
+                        const mc = minigameCtx;
+                        const cw = minigameCanvas.width, ch = minigameCanvas.height;
+                        mc.save();
+                        mc.fillStyle = `rgba(255,255,255,${0.5 + 0.3 * Math.sin(Date.now() * 0.004)})`;
+                        mc.font = "600 16px 'Zen Maru Gothic', sans-serif";
+                        mc.textAlign = "center"; mc.textBaseline = "bottom";
+                        mc.fillText("クリックして教室に戻る", cw / 2, ch - 30);
+                        mc.restore();
+                    }
                 }
             }
             requestAnimationFrame(animate);
@@ -6592,13 +12215,160 @@
         const scoreTracks = document.getElementById('score-tracks');
         const scoreMeta = document.getElementById('score-meta');
         const scoreToggleBtn = document.getElementById('score-toggle-btn');
+        const settingsBtn = document.getElementById('settings-btn');
+        const settingsPanel = document.getElementById('settings-panel');
+        const settingsTracksEl = document.getElementById('settings-tracks');
+        const settingsCloseBtn = document.getElementById('settings-close-btn');
         const minigameWrapper = document.getElementById('minigame-wrapper');
         const minigameCanvas = document.getElementById('minigame-canvas');
         const minigameCtx = minigameCanvas ? minigameCanvas.getContext('2d') : null;
 
+        // ======== VOLUME MANAGEMENT SYSTEM ========
+        function addVolumeTrack(trackId) {
+            if (volumeState[trackId]) return; // already added
+            const info = VOLUME_TRACKS.find(t => t.id === trackId);
+            if (!info) return;
+            const row = document.createElement('div');
+            row.className = 'vol-row';
+            row.dataset.track = trackId;
+            row.innerHTML =
+                '<button class="vol-mute-btn" title="Mute">\u266A</button>' +
+                '<span class="vol-label">' + info.label + '</span>' +
+                '<button class="vol-dec-btn">\u25C1</button>' +
+                '<div class="vol-bar-wrap"><div class="vol-bar-fill"></div><div class="vol-bar-thumb"></div></div>' +
+                '<button class="vol-inc-btn">\u25B7</button>' +
+                '<span class="vol-pct">80%</span>';
+            settingsTracksEl.appendChild(row);
+            const st = { volume: 80, muted: false, el: row };
+            volumeState[trackId] = st;
+
+            const fill = row.querySelector('.vol-bar-fill');
+            const thumb = row.querySelector('.vol-bar-thumb');
+            const pct = row.querySelector('.vol-pct');
+            fill.style.background = info.color;
+            fill.style.width = '80%';
+            thumb.style.left = '80%';
+
+            function updateBarUI() {
+                fill.style.width = st.volume + '%';
+                thumb.style.left = st.volume + '%';
+                pct.textContent = st.volume + '%';
+            }
+            function setVol(v) {
+                st.volume = Math.max(0, Math.min(100, Math.round(v)));
+                updateBarUI();
+                applyTrackVolume(trackId);
+            }
+            // Mute button
+            row.querySelector('.vol-mute-btn').addEventListener('click', function(e) {
+                e.stopPropagation();
+                st.muted = !st.muted;
+                row.classList.toggle('muted', st.muted);
+                applyTrackVolume(trackId);
+            });
+            // Dec / Inc
+            row.querySelector('.vol-dec-btn').addEventListener('click', function(e) { e.stopPropagation(); setVol(st.volume - 5); });
+            row.querySelector('.vol-inc-btn').addEventListener('click', function(e) { e.stopPropagation(); setVol(st.volume + 5); });
+            // Bar drag
+            const barWrap = row.querySelector('.vol-bar-wrap');
+            let dragging = false;
+            function barPos(e) {
+                const rect = barWrap.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                return Math.max(0, Math.min(100, (clientX - rect.left) / rect.width * 100));
+            }
+            function onDown(e) {
+                e.preventDefault(); e.stopPropagation();
+                dragging = true;
+                setVol(barPos(e));
+            }
+            function onMove(e) {
+                if (!dragging) return;
+                e.preventDefault();
+                setVol(barPos(e));
+            }
+            function onUp() { dragging = false; }
+            barWrap.addEventListener('mousedown', onDown);
+            barWrap.addEventListener('touchstart', onDown, { passive: false });
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('touchmove', onMove, { passive: false });
+            window.addEventListener('mouseup', onUp);
+            window.addEventListener('touchend', onUp);
+
+            // Apply initial volume
+            applyTrackVolume(trackId);
+        }
+
+        function applyTrackVolume(trackId) {
+            const st = volumeState[trackId];
+            if (!st) return;
+            const vol = st.muted ? 0 : st.volume;
+            const apply = function(synth, defaultDb) {
+                if (!synth) return;
+                const db = vol === 0 ? -100 : defaultDb + (vol - 100) * 0.5;
+                synth.volume.value = db;
+            };
+            switch (trackId) {
+                case 'kick':
+                    if (baseGroove && baseGroove.kickSynth) apply(baseGroove.kickSynth, -8);
+                    break;
+                case 'hat':
+                    if (carryHatSynth) apply(carryHatSynth, inheritedHatVolumeDb);
+                    break;
+                case 'snare':
+                    if (carrySnareSynth) apply(carrySnareSynth, inheritedSnareVolumeDb);
+                    if (carrySnareBody) apply(carrySnareBody, inheritedSnareBodyVolumeDb);
+                    break;
+                case 'cymbal':
+                    if (carryCymbalSynth) apply(carryCymbalSynth, inheritedCymbalVolumeDb);
+                    break;
+                case 'bass':
+                    if (carryBassSynth) apply(carryBassSynth, -16);
+                    toneDrops.forEach(function(d) { if (d.bassSynth) apply(d.bassSynth, -16); });
+                    break;
+                case 'keyboard':
+                    if (carryKeyboardSynth) apply(carryKeyboardSynth, -22);
+                    break;
+                case 'keys2':
+                    if (carryKeys2Synth) apply(carryKeys2Synth, -22);
+                    break;
+            }
+        }
+
+        // Settings button events
+        settingsBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            settingsPanelOpen = !settingsPanelOpen;
+            settingsPanel.classList.toggle('hidden', !settingsPanelOpen);
+        });
+        settingsCloseBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            settingsPanelOpen = false;
+            settingsPanel.classList.add('hidden');
+        });
+        // Prevent clicks inside panel from closing it / propagating
+        settingsPanel.addEventListener('click', function(e) { e.stopPropagation(); });
+        settingsPanel.addEventListener('mousedown', function(e) { e.stopPropagation(); });
+        settingsPanel.addEventListener('touchstart', function(e) { e.stopPropagation(); });
+        // Close settings panel when clicking outside
+        document.addEventListener('click', function() {
+            if (settingsPanelOpen) {
+                settingsPanelOpen = false;
+                settingsPanel.classList.add('hidden');
+            }
+        });
+
         function fadeScreenTo(opacity, durationMs) {
             sceneFade.style.transition = `opacity ${durationMs}ms ease`;
             sceneFade.style.opacity = String(opacity);
+            // Hide settings during white-screen fade
+            if (opacity >= 1) {
+                settingsBtn.style.display = 'none';
+                if (settingsPanelOpen) {
+                    settingsPanelOpen = false;
+                    settingsPanel.classList.add('hidden');
+                }
+            }
         }
 
         async function ensureAudioReady() {
@@ -6618,9 +12388,15 @@
         }
 
         function updateScoreToggleUi() {
-            const available = (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT) && !!baseRhythmInfo;
+            const available = (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) && !!baseRhythmInfo;
             scoreToggleBtn.classList.remove('visible');
             setScoreHudVisible(available);
+            // Settings button: visible only during gameplay scenes
+            settingsBtn.style.display = available ? '' : 'none';
+            if (!available && settingsPanelOpen) {
+                settingsPanelOpen = false;
+                settingsPanel.classList.add('hidden');
+            }
         }
 
         function withAlpha(hslColor, alpha) {
@@ -6647,8 +12423,23 @@
             const isChild = currentScene === SCENE.CHILD1;
             const isChild2 = currentScene === SCENE.CHILD2;
             const isAdult = currentScene === SCENE.ADULT;
+            const isUniversity = currentScene === SCENE.UNIVERSITY;
+            const isPartTime = currentScene === SCENE.PART_TIME;
+            const isJobHunt = currentScene === SCENE.JOB_HUNT;
+            const isJobHunt2 = currentScene === SCENE.JOB_HUNT2;
+            const isPostAdult = isUniversity || isPartTime || isJobHunt || isJobHunt2;
             const rows = [];
             let chordRow = null;
+
+            // Pagination support for JOB_HUNT2
+            const usePagination = isJobHunt2 && scoreHudState.pageCount > 1;
+            const displayPage = scoreHudState.currentPage;
+            const pageOffset = usePagination ? displayPage * scoreHudState.stepsPerPage : 0;
+            const displaySteps = usePagination ? scoreHudState.stepsPerPage : null; // null = show all
+            const slicePage = (arr) => {
+                if (!arr || !usePagination) return arr;
+                return arr.slice(pageOffset, pageOffset + scoreHudState.stepsPerPage);
+            };
 
             // Chord row for CHILD1 (when hovering a chord drop) or CHILD2 (always visible)
             if (isChild && previewDropIndex !== null && toneDrops[previewDropIndex] && toneDrops[previewDropIndex].instrument === "chord") {
@@ -6658,16 +12449,16 @@
                     side: preview.chordSide
                 };
             }
-            // CHILD2: chord names shown as bar labels, not as a scored row
 
-            // Bass preview row (CHILD2/ADULT hover)
-            if ((isChild2 || isAdult) && previewDropIndex !== null && toneDrops[previewDropIndex] && toneDrops[previewDropIndex].instrument === "bass") {
+            // Bass/Keyboard preview row (CHILD2/ADULT/UNIVERSITY/PART_TIME/JOB_HUNT hover)
+            if ((isChild2 || isAdult || isPostAdult) && previewDropIndex !== null && toneDrops[previewDropIndex] && (toneDrops[previewDropIndex].instrument === "bass" || toneDrops[previewDropIndex].instrument === "keyboard")) {
                 const preview = toneDrops[previewDropIndex];
+                const isKeyboard = preview.instrument === "keyboard";
                 rows.push({
-                    label: 'Bass',
-                    pattern: preview.pattern,
-                    styleClass: 'bass',
-                    sustainType: preview.bassSustainType || null
+                    label: isKeyboard ? 'Keys' : 'Bass',
+                    pattern: slicePage(preview.pattern),
+                    styleClass: isKeyboard ? 'bass' : 'bass',
+                    sustainType: slicePage(isKeyboard ? (preview.keyboardSustainType || null) : (preview.bassSustainType || null))
                 });
             }
 
@@ -6677,46 +12468,66 @@
                 const isSnare = preview.instrument === "snare";
                 const isChord = preview.instrument === "chord";
                 const isBass = preview.instrument === "bass";
-                if (!isChord && !isBass) {
+                const isKeyboard = preview.instrument === "keyboard";
+                const isModifier = preview.instrument === "modifier";
+                if (!isChord && !isBass && !isKeyboard && !isModifier) {
                     const instrLabel = isCymbal ? 'Cymbal' : (isSnare ? 'Snare' : 'Hat');
                     const instrStyle = isCymbal ? (preview.hudStyleClass || 'cymbal') :
                         (isSnare ? (preview.hudStyleClass || 'snare') : (previewDropIndex >= 2 ? 'hat-dense' : 'hat'));
                     rows.push({
                         label: `${instrLabel} ${previewDropIndex + 1}`,
-                        pattern: preview.pattern,
+                        pattern: slicePage(preview.pattern),
                         styleClass: instrStyle
                     });
                 }
             }
-            // ADULT: always show inherited bass row
-            if (isAdult && inheritedBassPattern) {
+            // Keys2 row (PART_TIME/JOB_HUNT/JOB_HUNT2)
+            if ((isPartTime || isJobHunt || isJobHunt2) && inheritedKeys2Pattern) {
                 rows.push({
-                    label: 'Bass',
-                    pattern: inheritedBassPattern,
-                    styleClass: inheritedBassStyleClass || 'bass',
-                    sustainType: inheritedBassSustainType || null
+                    label: 'Keys2',
+                    pattern: slicePage(inheritedKeys2Pattern),
+                    styleClass: 'bass',
+                    sustainType: slicePage(inheritedKeys2SustainType || null)
                 });
             }
-            if ((isChild || isChild2 || isAdult) && inheritedCymbalPattern) {
+            // Always show inherited keyboard row for post-adult scenes
+            if ((isUniversity || isPartTime || isJobHunt || isJobHunt2) && inheritedKeyboardPattern) {
+                rows.push({
+                    label: 'Keys',
+                    pattern: slicePage(inheritedKeyboardPattern),
+                    styleClass: 'bass',
+                    sustainType: slicePage(inheritedKeyboardSustainType || null)
+                });
+            }
+            // Always show inherited bass row
+            if ((isAdult || isPostAdult) && inheritedBassPattern) {
+                rows.push({
+                    label: 'Bass',
+                    pattern: slicePage(inheritedBassPattern),
+                    styleClass: inheritedBassStyleClass || 'bass',
+                    sustainType: slicePage(inheritedBassSustainType || null)
+                });
+            }
+            if ((isChild || isChild2 || isAdult || isPostAdult) && inheritedCymbalPattern) {
                 rows.push({
                     label: 'Cymbal',
-                    pattern: inheritedCymbalPattern,
+                    pattern: slicePage(inheritedCymbalPattern),
                     styleClass: inheritedCymbalStyleClass || 'cymbal'
                 });
             }
-            if ((currentScene === SCENE.TODDLE1 || isChild || isChild2 || isAdult) && inheritedSnarePattern) {
+            if ((currentScene === SCENE.TODDLE1 || isChild || isChild2 || isAdult || isPostAdult) && inheritedSnarePattern) {
                 rows.push({
                     label: 'Snare',
-                    pattern: inheritedSnarePattern,
+                    pattern: slicePage(inheritedSnarePattern),
                     styleClass: inheritedSnareStyleClass || 'snare'
                 });
             }
-            if (currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || isChild || isChild2 || isAdult) {
+            if (currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || isChild || isChild2 || isAdult || isPostAdult) {
                 const carryPattern = inheritedHatPattern || baseRhythmInfo.baseHatPattern;
                 if (carryPattern) {
                     rows.push({
                         label: 'Hat',
-                        pattern: carryPattern,
+                        pattern: slicePage(carryPattern),
                         styleClass: inheritedHatStyleClass || 'hat'
                     });
                 }
@@ -6724,7 +12535,7 @@
             // Keep kick as the bottom-most permanent row.
             rows.push({
                 label: 'Kick',
-                pattern: baseRhythmInfo.kickPattern,
+                pattern: slicePage(baseRhythmInfo.kickPattern),
                 styleClass: 'kick'
             });
 
@@ -6732,11 +12543,16 @@
             scoreHudState.rows = [];
             scoreHudState.chordCells = null;
             scoreHudState.barLabelCells = null;
+            scoreHudState.paginationEl = null;
+            const effectiveSteps = displaySteps || baseRhythmInfo.kickPattern.length;
+            // For pagination, totalSteps reflects the full loop length for audio,
+            // but display uses stepsPerPage
             scoreHudState.totalSteps = baseRhythmInfo.kickPattern.length;
             scoreHudState.currentStep = -1;
-            const beatSpan = (100 * STEPS_PER_BEAT) / scoreHudState.totalSteps;
-            const barSpan = (100 * STEPS_PER_BEAT * baseRhythmInfo.beatsPerBar) / scoreHudState.totalSteps;
-            scoreTracks.style.setProperty('--steps', String(scoreHudState.totalSteps));
+            const displayTotal = usePagination ? scoreHudState.stepsPerPage : scoreHudState.totalSteps;
+            const beatSpan = (100 * STEPS_PER_BEAT) / displayTotal;
+            const barSpan = (100 * STEPS_PER_BEAT * baseRhythmInfo.beatsPerBar) / displayTotal;
+            scoreTracks.style.setProperty('--steps', String(displayTotal));
             scoreTracks.style.setProperty('--beat-span', `${beatSpan}%`);
             scoreTracks.style.setProperty('--bar-span', `${barSpan}%`);
 
@@ -6766,8 +12582,8 @@
                 scoreHudState.chordCells = chordCells;
             }
 
-            // Chord name bar labels (CHILD2+/ADULT: show chord names above each bar)
-            if ((isChild2 || isAdult) && inheritedChordProgression) {
+            // Chord name bar labels (CHILD2+/ADULT/post-adult: show chord names above each bar)
+            if ((isChild2 || isAdult || isPostAdult) && inheritedChordProgression) {
                 const barLabelRow = document.createElement('div');
                 barLabelRow.className = 'score-bar-labels';
                 const barLabelLeft = document.createElement('div');
@@ -6791,14 +12607,14 @@
                 scoreHudState.barLabelCells = barLabelCells;
             }
 
-            // Drum rows (wrapped in drum-block for CHILD1/CHILD2/ADULT)
-            const drumBlock = (isChild || isChild2 || isAdult) ? document.createElement('div') : null;
+            // Drum rows (wrapped in drum-block for structured scenes)
+            const drumBlock = (isChild || isChild2 || isAdult || isPostAdult) ? document.createElement('div') : null;
             if (drumBlock) drumBlock.className = 'drum-block';
 
             rows.forEach(row => {
                 const rowEl = document.createElement('div');
                 rowEl.className = 'score-row';
-                if (row.label.startsWith('Hat') || row.label.startsWith('Snare') || row.label.startsWith('Cymbal') || row.label.startsWith('Bass')) rowEl.classList.add('preview');
+                if (row.label.startsWith('Hat') || row.label.startsWith('Snare') || row.label.startsWith('Cymbal') || row.label.startsWith('Bass') || row.label.startsWith('Keys')) rowEl.classList.add('preview');
 
                 const labelEl = document.createElement('div');
                 labelEl.className = 'score-label';
@@ -6806,13 +12622,14 @@
 
                 const gridEl = document.createElement('div');
                 gridEl.className = 'score-grid';
-                gridEl.style.setProperty('--steps', String(scoreHudState.totalSteps));
+                gridEl.style.setProperty('--steps', String(displayTotal));
 
                 const stepEls = [];
-                for (let i = 0; i < scoreHudState.totalSteps; i++) {
+                const patLen = row.pattern ? row.pattern.length : displayTotal;
+                for (let i = 0; i < displayTotal; i++) {
                     const stepEl = document.createElement('div');
                     stepEl.className = 'score-step';
-                    if (row.pattern[i]) {
+                    if (row.pattern && row.pattern[i]) {
                         stepEl.classList.add('on');
                         stepEl.classList.add(row.styleClass);
                     }
@@ -6835,6 +12652,56 @@
             });
 
             if (drumBlock) scoreTracks.appendChild(drumBlock);
+
+            // Apply bar highlights spanning all rows (JOB_HUNT2 modifier tones)
+            if (isJobHunt2 && scoreHudState.rows.length > 0) {
+                const barSteps = STEPS_PER_BEAT * baseRhythmInfo.beatsPerBar;
+                const totalRows = scoreHudState.rows.length;
+                const applyColumnBorder = (barIdx, color, style) => {
+                    const barStart = barIdx * barSteps;
+                    for (let r = 0; r < totalRows; r++) {
+                        const rowSteps = scoreHudState.rows[r];
+                        const barEnd = Math.min(barStart + barSteps - 1, rowSteps.length - 1);
+                        for (let s = barStart; s <= barEnd && s < rowSteps.length; s++) {
+                            // Top border only on first row, bottom only on last row
+                            if (r === 0) rowSteps[s].style.borderTop = `2px ${style} ${color}`;
+                            if (r === totalRows - 1) rowSteps[s].style.borderBottom = `2px ${style} ${color}`;
+                            // Left/right on all rows at bar edges
+                            if (s === barStart) rowSteps[s].style.borderLeft = `2px ${style} ${color}`;
+                            if (s === barEnd) rowSteps[s].style.borderRight = `2px ${style} ${color}`;
+                        }
+                    }
+                };
+                // Permanent highlights from consumed modifiers
+                if (scoreHudState.barHighlights) {
+                    scoreHudState.barHighlights.forEach(hl => {
+                        if (hl.page !== displayPage) return;
+                        applyColumnBorder(hl.barIndex, hl.color, 'solid');
+                    });
+                }
+                // Hover preview: show solid border for hovered modifier's target bar
+                if (previewDropIndex !== null && toneDrops[previewDropIndex] &&
+                    toneDrops[previewDropIndex].instrument === "modifier" &&
+                    !toneDrops[previewDropIndex].consumed &&
+                    displayPage === 1) {
+                    const hvDrop = toneDrops[previewDropIndex];
+                    applyColumnBorder(hvDrop.targetBarOnPage2, hvDrop.dropColor, 'solid');
+                }
+            }
+
+            // Pagination dots for JOB_HUNT2
+            if (usePagination) {
+                const pagDiv = document.createElement('div');
+                pagDiv.className = 'score-pagination';
+                for (let p = 0; p < scoreHudState.pageCount; p++) {
+                    const dot = document.createElement('div');
+                    dot.className = 'score-dot';
+                    if (p === scoreHudState.currentPage) dot.classList.add('active');
+                    pagDiv.appendChild(dot);
+                }
+                scoreTracks.appendChild(pagDiv);
+                scoreHudState.paginationEl = pagDiv;
+            }
 
             if (baseGroove) {
                 updateScoreHudPlayhead(baseGroove.step % scoreHudState.totalSteps);
@@ -6861,24 +12728,46 @@
             if (!baseRhythmInfo) return;
             scoreMeta.textContent = `${baseRhythmInfo.beatsPerBar}/4 x ${baseRhythmInfo.bars}  |  ${Math.round(baseRhythmInfo.bpm)} BPM`;
             scoreHudState.previewDropIndex = null;
+            // Reset pagination for non-JOB_HUNT2 scenes
+            if (currentScene !== SCENE.JOB_HUNT2) {
+                scoreHudState.pageCount = 1;
+                scoreHudState.currentPage = 0;
+                scoreHudState.stepsPerPage = 0;
+                scoreHudState.barHighlights = [];
+            }
             applyScoreHudTheme();
             renderScoreRows(null);
         }
 
         function updateScoreHudPlayhead(step) {
-            if (!scoreHudState.totalSteps || scoreHudState.currentStep === step) return;
+            if (!scoreHudState.totalSteps) return;
+
+            // Pagination: detect page switch for JOB_HUNT2
+            const usePagination = scoreHudState.pageCount > 1 && scoreHudState.stepsPerPage > 0;
+            let displayStep = step;
+            if (usePagination) {
+                const page = Math.floor(step / scoreHudState.stepsPerPage) % scoreHudState.pageCount;
+                if (page !== scoreHudState.currentPage) {
+                    scoreHudState.currentPage = page;
+                    renderScoreRows(scoreHudState.previewDropIndex); // re-render with new page slice
+                }
+                displayStep = step % scoreHudState.stepsPerPage;
+            }
+
+            if (scoreHudState.currentStep === displayStep) return;
             if (scoreHudState.currentStep >= 0) {
                 scoreHudState.rows.forEach(row => {
                     row[scoreHudState.currentStep]?.classList.remove('playhead');
                 });
             }
             scoreHudState.rows.forEach(row => {
-                row[step]?.classList.add('playhead');
+                row[displayStep]?.classList.add('playhead');
             });
             // Update chord cell highlighting
             if (baseRhythmInfo) {
                 const barSteps = STEPS_PER_BEAT * baseRhythmInfo.beatsPerBar;
-                const currentBar = Math.floor(step / barSteps) % baseRhythmInfo.bars;
+                const effectiveStep = usePagination ? displayStep : step;
+                const currentBar = Math.floor(effectiveStep / barSteps) % baseRhythmInfo.bars;
                 if (scoreHudState.chordCells) {
                     scoreHudState.chordCells.forEach((cell, i) => {
                         cell.classList.toggle('active', i === currentBar);
@@ -6890,7 +12779,7 @@
                     });
                 }
             }
-            scoreHudState.currentStep = step;
+            scoreHudState.currentStep = displayStep;
         }
 
         const blobs = [];
@@ -6899,17 +12788,49 @@
         animate();
         initOrbPosition();
 
+        // Sound consent modal
+        const soundModal = document.getElementById('sound-modal-overlay');
+        const soundModalBtn = document.getElementById('sound-modal-btn');
+        soundModalBtn.addEventListener('click', async () => {
+            soundModal.classList.add('hidden');
+            await ensureAudioReady();
+            // Start title BGM (use Audio element to avoid CORS with file://)
+            titleBgmPlayer = new Audio('sounds/Atokata-1(Fast).mp3');
+            titleBgmPlayer.loop = true;
+            titleBgmPlayer.volume = 0.4;
+            titleBgmPlayer.play().catch(() => {});
+            setTimeout(() => { soundModal.style.display = 'none'; }, 600);
+        });
+
         // Start Button (Title -> Choice)
         startBtn.addEventListener('click', async () => {
             await ensureAudioReady();
-            
+
             // Animation
             document.getElementById('ripple-effect').classList.add('ripple-anim');
             startBtn.style.transform = "scale(0.9)";
-            
-            // Audio: Title Chime
-            const synth = new Tone.PolySynth(Tone.Synth, { volume: -5 }).toDestination();
-            synth.triggerAttackRelease(["C4", "E4", "G4", "B4"], "2n");
+
+            playTitleToneConfirmSound();
+
+            // Fade out title BGM over 1 second
+            if (titleBgmPlayer && !titleBgmPlayer.paused) {
+                const bgm = titleBgmPlayer;
+                const startVol = bgm.volume;
+                const fadeStart = Date.now();
+                const fadeDur = 1000;
+                const fadeStep = () => {
+                    const elapsed = Date.now() - fadeStart;
+                    if (elapsed >= fadeDur) {
+                        bgm.pause();
+                        bgm.src = '';
+                        titleBgmPlayer = null;
+                        return;
+                    }
+                    bgm.volume = startVol * (1 - elapsed / fadeDur);
+                    requestAnimationFrame(fadeStep);
+                };
+                fadeStep();
+            }
 
             // UI Switch
             uiTitle.style.opacity = 0;
@@ -6919,7 +12840,7 @@
                 // Trigger reflow
                 void uiChoice.offsetWidth;
                 uiChoice.style.opacity = 1;
-                
+
                 currentScene = SCENE.CHOICE;
                 initProximityAudio();
                 // Reposition orb above middle choice button
@@ -7245,11 +13166,36 @@
             fastTrack = null;
         }
 
+        function playTitleToneConfirmSound() {
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                volume: -12,
+                oscillator: { type: 'sine' },
+                envelope: { attack: 0.005, decay: 0.6, sustain: 0.01, release: 1.2 }
+            }).toDestination();
+            synth.triggerAttackRelease(["C5", "E5", "G5", "B5"], "4n");
+            setTimeout(() => synth.dispose(), 1400);
+        }
+
+        function playKickChoiceConfirmSound() {
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                volume: -14,
+                oscillator: { type: 'sine' },
+                envelope: { attack: 0.003, decay: 0.5, sustain: 0.01, release: 1.0 }
+            }).toDestination();
+            synth.triggerAttackRelease(["D5", "F#5", "A5"], "8n");
+            setTimeout(() => {
+                synth.triggerAttackRelease(["D6"], "8n");
+                setTimeout(() => synth.dispose(), 600);
+            }, 120);
+        }
+
         // getToneDropAtScreenPoint removed — selection now via tune bubble
 
         function transitionToLevel2(clickedDrop) {
             if (level2TransitionLock || currentScene !== SCENE.CRAWL) return;
             level2TransitionLock = true;
+            playTitleToneConfirmSound();
+            addVolumeTrack('hat');
             if (clickedDrop.toy) selectedToys.push(clickedDrop.toy);
             inheritedHatPattern = clickedDrop.pattern ? clickedDrop.pattern.slice() : null;
             inheritedHatStyleClass = clickedDrop.hudStyleClass || 'hat';
@@ -7279,6 +13225,7 @@
             
             chosenColor = color;
             currentScene = SCENE.TRANSITION;
+            addVolumeTrack('kick');
             const chosenSide = side;
             const sideState = choiceRhythm[chosenSide];
             baseRhythmBpm = sideState ? sideState.bpm : 72;
@@ -7332,11 +13279,7 @@
                 }, 1400);
             }, 1000);
 
-            // Decision Sound
-            const synth = new Tone.PolySynth(Tone.Synth, {
-                volume: -5, envelope: { attack: 0.05, decay: 1, sustain: 0.1, release: 2 }
-            }).toDestination();
-            synth.triggerAttackRelease(["D4", "F#4", "A4", "D5"], "1n");
+            playKickChoiceConfirmSound();
         }
 
         function finishTransition() {
@@ -7378,6 +13321,8 @@
         function transitionToToddler1(clickedDrop) {
             if (toddlerTransitionLock || currentScene !== SCENE.CRAWL2) return;
             toddlerTransitionLock = true;
+            playTitleToneConfirmSound();
+            addVolumeTrack('snare');
             if (clickedDrop.toy) selectedToys.push(clickedDrop.toy);
             inheritedSnarePattern = clickedDrop.pattern ? clickedDrop.pattern.slice() : null;
             inheritedSnareVelocity = clickedDrop.velocityPattern ? clickedDrop.velocityPattern.slice() : null;
@@ -7420,6 +13365,8 @@
         function transitionToChild1(clickedDrop) {
             if (childTransitionLock || currentScene !== SCENE.TODDLE1) return;
             childTransitionLock = true;
+            playTitleToneConfirmSound();
+            addVolumeTrack('cymbal');
             // Save cymbal pattern from clicked drop
             inheritedCymbalPattern = clickedDrop.pattern ? clickedDrop.pattern.slice() : null;
             inheritedCymbalVelocity = clickedDrop.velocityPattern ? clickedDrop.velocityPattern.slice() : null;
@@ -7466,6 +13413,7 @@
             if (!clickedDrop.chordProgression) return;
             if (child2TransitionLock) return;
             child2TransitionLock = true;
+            playTitleToneConfirmSound();
             childLifeChoice = clickedDrop.chordSide;
             inheritedChordProgression = clickedDrop.chordProgression;
             // Ripple effect
@@ -7508,6 +13456,8 @@
 
         function handleChild2Choice(clickedDrop) {
             if (!clickedDrop.bassNotes) return;
+            playTitleToneConfirmSound();
+            addVolumeTrack('bass');
             child2ActivityChoice = clickedDrop.activityId;
             inheritedBassPattern = clickedDrop.pattern ? clickedDrop.pattern.slice() : null;
             inheritedBassNotes = clickedDrop.bassNotes ? clickedDrop.bassNotes.slice() : null;
@@ -7756,8 +13706,8 @@ class LibraryMinigame {
         }
 
         if (this.state === 'finished') {
-            this.timer++;
-            if (this.timer > 180) { this.alpha -= 0.05; if (this.alpha <= 0) this.closeMinigame(this.score >= this.targetScore ? "勝利" : "引き分け"); }
+            if (!this._resultLabel) this._resultLabel = this.score >= this.targetScore ? "勝利" : "引き分け";
+            this._handleResultClick = () => this.closeMinigame(this._resultLabel);
             return;
         }
 
@@ -8137,16 +14087,12 @@ class SoccerMinigame {
         }
 
         if (this.state === 'finished') {
-            this.timer++;
-            if (this.timer > 300) {
-                this.alpha -= 0.05;
-                if (this.alpha <= 0.01) {
-                    let label = "引き分け";
-                    if (this.player.score > this.enemy.score) label = "勝利";
-                    else if (this.player.score < this.enemy.score) label = "敗北";
-                    this.closeMinigame(label);
-                }
+            if (!this._resultLabel) {
+                this._resultLabel = "引き分け";
+                if (this.player.score > this.enemy.score) this._resultLabel = "勝利";
+                else if (this.player.score < this.enemy.score) this._resultLabel = "敗北";
             }
+            this._handleResultClick = () => this.closeMinigame(this._resultLabel);
             return;
         }
         
@@ -8508,8 +14454,8 @@ class ScienceMinigame {
             return;
         }
         if (this.state === 'finished') {
-            this.timer++;
-            if (this.timer > 180) { this.alpha -= 0.05; if (this.alpha <= 0) this.closeMinigame(this.score >= this.player.successThreshold ? "勝利" : "引き分け"); }
+            if (!this._resultLabel) this._resultLabel = this.score >= this.player.successThreshold ? "勝利" : "引き分け";
+            this._handleResultClick = () => this.closeMinigame(this._resultLabel);
             return;
         }
         if (this.state === 'playing') {
@@ -8754,11 +14700,8 @@ class ReadingMinigame {
                 }
             }
         } else if (this.state === 'finished' || this.state === 'failed') {
-            this.timer++;
-            if (this.timer > 180) {
-                this.alpha -= 0.05;
-                if (this.alpha <= 0) this.closeMinigame(this.state === 'finished' ? "勝利" : "敗北");
-            }
+            if (!this._resultLabel) this._resultLabel = this.state === 'finished' ? "勝利" : "敗北";
+            this._handleResultClick = () => this.closeMinigame(this._resultLabel);
         }
 
         let dx = mouseX - this.player.x;
@@ -8983,7 +14926,8 @@ class ChattingMinigame {
             return;
         }
         if (this.state === 'finished' || this.state === 'failed') {
-            this.timer++; if (this.timer > 180) { this.alpha -= 0.05; if (this.alpha <= 0) this.closeMinigame(this.state === 'finished' ? "勝利" : "敗北"); }
+            if (!this._resultLabel) this._resultLabel = this.state === 'finished' ? "勝利" : "敗北";
+            this._handleResultClick = () => this.closeMinigame(this._resultLabel);
             return;
         }
         if (this.state === 'playing') {
@@ -9167,7 +15111,8 @@ class DoodleMinigame {
             return;
         }
         if (this.state === 'finished' || this.state === 'failed') {
-            this.timer++; if (this.timer > 180) { this.alpha -= 0.05; if (this.alpha <= 0) this.closeMinigame(this.state === 'finished' ? "勝利" : "不合格"); }
+            if (!this._resultLabel) this._resultLabel = this.state === 'finished' ? "勝利" : "不合格";
+            this._handleResultClick = () => this.closeMinigame(this._resultLabel);
             return;
         }
         if (this.state === 'playing') {
@@ -9477,7 +15422,8 @@ class OrganMinigame {
             return;
         }
         if (this.state === 'finished' || this.state === 'failed') {
-            this.timer++; if (this.timer > 180) { this.alpha -= 0.05; if (this.alpha <= 0) this.closeMinigame(this.state === 'finished' ? "勝利" : "敗北"); }
+            if (!this._resultLabel) this._resultLabel = this.state === 'finished' ? "勝利" : "敗北";
+            this._handleResultClick = () => this.closeMinigame(this._resultLabel);
             return;
         }
 

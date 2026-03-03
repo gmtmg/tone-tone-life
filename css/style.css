@@ -617,5 +617,308 @@
         #modal-no { background: #f0f0f0; color: #333; }
         #modal-yes:hover { transform: scale(1.05); background: #f06060; }
         #modal-no:hover { transform: scale(1.05); background: #e0e0e0; }
-        
-        
+
+        /* --- Score Pagination Dots (二次面接) --- */
+        .score-pagination {
+            display: flex;
+            justify-content: center;
+            gap: 6px;
+            padding: 3px 0;
+        }
+        .score-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.25);
+            transition: background 0.3s;
+        }
+        .score-dot.active {
+            background: rgba(255,255,255,0.85);
+        }
+
+        /* --- Sound consent modal --- */
+        #sound-modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 9999;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(20, 18, 15, 0.7);
+            backdrop-filter: blur(6px);
+            transition: opacity 0.6s;
+            cursor: default;
+        }
+        #sound-modal-overlay.hidden {
+            opacity: 0; pointer-events: none;
+        }
+        #sound-modal {
+            background:
+                radial-gradient(circle at 20% 20%, rgba(255,236,210,0.9), rgba(255,236,210,0)),
+                radial-gradient(circle at 80% 80%, rgba(255,244,220,0.7), rgba(255,244,220,0)),
+                linear-gradient(145deg, rgba(255,255,255,0.92), rgba(255,255,255,0.6));
+            border-radius: 20px;
+            padding: 36px 48px 32px;
+            text-align: center;
+            box-shadow: 0 16px 48px rgba(80,60,40,0.25);
+            max-width: min(420px, 85vw);
+            animation: modalIn 0.5s ease-out;
+        }
+        @keyframes modalIn {
+            from { opacity: 0; transform: scale(0.92) translateY(16px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .sound-modal-icon {
+            font-size: 2.4rem;
+            margin-bottom: 8px;
+            opacity: 0.6;
+        }
+        .sound-modal-title {
+            font-size: 1.3rem; font-weight: 700;
+            color: #4a3c30;
+            margin: 0 0 12px;
+            letter-spacing: 0.06em;
+        }
+        .sound-modal-body {
+            font-size: 0.92rem; line-height: 1.7;
+            color: #5a4a3a;
+            margin: 0 0 8px;
+        }
+        .sound-modal-hint {
+            font-size: 0.78rem;
+            color: #8a7a6a;
+            margin: 0 0 20px;
+        }
+        #sound-modal-btn {
+            font-family: 'Zen Maru Gothic', sans-serif;
+            font-size: 1rem; font-weight: 700;
+            color: #fff;
+            background: linear-gradient(135deg, #c89060, #a06830);
+            border: none; border-radius: 28px;
+            padding: 10px 36px;
+            cursor: pointer;
+            box-shadow: 0 4px 14px rgba(160,100,40,0.3);
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        #sound-modal-btn:hover {
+            transform: scale(1.04);
+            box-shadow: 0 6px 20px rgba(160,100,40,0.4);
+        }
+        #sound-modal-btn:active {
+            transform: scale(0.97);
+        }
+
+        /* --- OtoLogic Credit --- */
+        #logo-credit {
+            margin: 10px 0 0;
+            font-size: 0.72rem;
+            color: #5a4a3a;
+            letter-spacing: 0.06em;
+        }
+        #logo-credit a {
+            color: #5a4a3a;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+        #logo-credit a:hover {
+            color: #7a6a5a;
+        }
+
+        /* --- Settings Button --- */
+        #settings-btn {
+            position: fixed;
+            top: 14px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 40;
+            font-family: 'Zen Maru Gothic', sans-serif;
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: #5a4a3e;
+            background:
+                radial-gradient(circle at 20% 20%, rgba(255,236,210,0.9), rgba(255,236,210,0)),
+                linear-gradient(145deg, rgba(255,255,255,0.92), rgba(255,255,255,0.6));
+            border: 1px solid rgba(180,160,130,0.3);
+            border-radius: 16px;
+            padding: 7px 16px;
+            cursor: pointer !important;
+            box-shadow: 0 4px 14px rgba(80,60,40,0.15);
+            backdrop-filter: blur(3px);
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        #settings-btn:hover {
+            transform: translateX(-50%) scale(1.04);
+            box-shadow: 0 6px 18px rgba(80,60,40,0.22);
+        }
+
+        /* --- Settings Panel --- */
+        #settings-panel {
+            position: fixed;
+            top: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 45;
+            width: 280px;
+            border-radius: 20px;
+            background:
+                radial-gradient(circle at 20% 20%, rgba(255,236,210,0.92), rgba(255,236,210,0)),
+                radial-gradient(circle at 80% 80%, rgba(255,244,220,0.7), rgba(255,244,220,0)),
+                linear-gradient(145deg, rgba(255,255,255,0.92), rgba(255,255,255,0.6));
+            backdrop-filter: blur(6px);
+            box-shadow: 0 10px 32px rgba(80,60,40,0.22);
+            padding: 10px 10px 12px;
+            cursor: default !important;
+        }
+        #settings-panel.hidden {
+            display: none;
+        }
+        #settings-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 2px 6px 6px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: #5a4a3e;
+            letter-spacing: 0.08em;
+        }
+        #settings-close-btn {
+            background: none;
+            border: none;
+            font-size: 1.2rem;
+            color: #8a7a6a;
+            cursor: pointer !important;
+            padding: 0 4px;
+            line-height: 1;
+        }
+        #settings-close-btn:hover {
+            color: #5a4a3a;
+        }
+        #settings-tracks {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        /* --- Volume Row --- */
+        .vol-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border-radius: 8px;
+            transition: opacity 0.2s;
+        }
+        .vol-row:hover {
+            background: rgba(255,255,255,0.25);
+        }
+        .vol-mute-btn {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border: 1px solid rgba(120,100,80,0.25);
+            background: rgba(255,255,255,0.5);
+            font-size: 0.72rem;
+            line-height: 22px;
+            text-align: center;
+            cursor: pointer !important;
+            padding: 0;
+            color: #5a4a3e;
+            flex-shrink: 0;
+            transition: background 0.15s, color 0.15s;
+        }
+        .vol-row.muted .vol-mute-btn {
+            background: rgba(160,140,120,0.3);
+            color: #aaa;
+            text-decoration: line-through;
+        }
+        .vol-label {
+            width: 40px;
+            font-size: 0.68rem;
+            font-weight: 700;
+            color: #5a4a3e;
+            text-align: right;
+            flex-shrink: 0;
+            letter-spacing: 0.02em;
+        }
+        .vol-dec-btn,
+        .vol-inc-btn {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 1px solid rgba(120,100,80,0.2);
+            background: rgba(255,255,255,0.4);
+            font-size: 0.6rem;
+            line-height: 18px;
+            text-align: center;
+            cursor: pointer !important;
+            padding: 0;
+            color: #7a6a5a;
+            flex-shrink: 0;
+            transition: background 0.1s;
+        }
+        .vol-dec-btn:hover,
+        .vol-inc-btn:hover {
+            background: rgba(255,255,255,0.7);
+        }
+        .vol-bar-wrap {
+            flex: 1;
+            height: 8px;
+            border-radius: 4px;
+            background: rgba(0,0,0,0.12);
+            position: relative;
+            cursor: pointer !important;
+            min-width: 40px;
+        }
+        .vol-bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            transition: width 0.05s;
+        }
+        .vol-bar-thumb {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #fff;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        .vol-pct {
+            width: 34px;
+            font-size: 0.64rem;
+            font-weight: 700;
+            color: #7a6a5a;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        /* Muted state */
+        .vol-row.muted .vol-bar-wrap {
+            pointer-events: none;
+            opacity: 0.35;
+        }
+        .vol-row.muted .vol-dec-btn,
+        .vol-row.muted .vol-inc-btn {
+            pointer-events: none;
+            opacity: 0.35;
+        }
+        .vol-row.muted .vol-label,
+        .vol-row.muted .vol-pct {
+            opacity: 0.5;
+        }
+
+        /* Cursor overrides for Settings area */
+        #settings-panel *,
+        #settings-btn {
+            cursor: default !important;
+        }
+        #settings-panel button,
+        #settings-panel .vol-bar-wrap,
+        #settings-btn {
+            cursor: pointer !important;
+        }
+
