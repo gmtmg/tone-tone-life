@@ -5581,9 +5581,9 @@
             { id: "travel", name: "旅", nameEn: "Travel", keyboardStyle: "piano-chord",
               color: "hsl(170, 50%, 55%)", worldFraction: [0.60, 0.74],
               labels: { adventurous: 3, curious: 2, optimistic: 1 } },
-            { id: "startup", name: "起業", nameEn: "Startup", keyboardStyle: "organ-power",
-              color: "hsl(45, 70%, 55%)", worldFraction: [0.80, 0.94],
-              labels: { creative: 3, adventurous: 2, expressive: 1 } }
+            { id: "entertainment", name: "娯楽", nameEn: "Entertainment", keyboardStyle: "pachinko-bells",
+              color: "hsl(350, 75%, 55%)", worldFraction: [0.80, 0.94],
+              labels: { social: 3, expressive: 2, optimistic: 1 } }
         ];
 
         let adultBuildingSeeds = [];
@@ -5675,6 +5675,7 @@
                     keyboardSustainType: kbBundle.sustainType,
                     activityId: act.id,
                     activityName: act.name,
+                    activityNameEn: act.nameEn,
                     dropColor: act.color,
                     activityLabels: act.labels,
                     ripples: []
@@ -6164,66 +6165,122 @@
                     ctx.lineWidth = 1;
                     ctx.beginPath(); ctx.arc(cx, by + bh * 0.5, 8, 0, Math.PI * 2); ctx.stroke();
 
-                } else if (act.id === "startup") {
-                    // Modern co-working space: contemporary design, large windows, rooftop garden
-                    const bh = wallH * 0.50;
+                } else if (act.id === "entertainment") {
+                    // Pachinko parlor: flashy, colorful, neon lights, slot machine motifs
+                    const bh = wallH * 0.55;
                     const by = wallH - bh;
-                    // Main body (exposed brick look)
-                    ctx.fillStyle = "#b85a3a";
+                    const t = Date.now();
+                    // Main body — dark with metallic sheen
+                    const bodyG = ctx.createLinearGradient(bx, by, bx + bw, by);
+                    bodyG.addColorStop(0, '#1a0a2e');
+                    bodyG.addColorStop(0.5, '#2a1248');
+                    bodyG.addColorStop(1, '#1a0a2e');
+                    ctx.fillStyle = bodyG;
                     ctx.fillRect(bx, by, bw, bh);
-                    // Brick pattern
-                    ctx.strokeStyle = "rgba(80,30,15,0.25)";
-                    ctx.lineWidth = 0.5;
-                    for (let r = 0; r < Math.floor(bh / 6); r++) {
-                        const ry = by + r * 6;
-                        ctx.beginPath(); ctx.moveTo(bx, ry); ctx.lineTo(bx + bw, ry); ctx.stroke();
-                        const off = (r % 2) * 8;
-                        for (let c = off; c < bw; c += 16) {
-                            ctx.beginPath(); ctx.moveTo(bx + c, ry); ctx.lineTo(bx + c, ry + 6); ctx.stroke();
+                    // Neon border trim (animated color cycling)
+                    const hueShift = (t * 0.05) % 360;
+                    ctx.strokeStyle = `hsl(${hueShift}, 90%, 60%)`;
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(bx + 1, by + 1, bw - 2, bh - 2);
+                    // Inner neon trim
+                    ctx.strokeStyle = `hsl(${(hueShift + 180) % 360}, 85%, 55%)`;
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(bx + 4, by + 4, bw - 8, bh - 8);
+                    // Top marquee — flashing lights strip
+                    ctx.fillStyle = '#0a0a1a';
+                    ctx.fillRect(bx, by - 8, bw, 10);
+                    for (let l = 0; l < Math.floor(bw / 5); l++) {
+                        const lx = bx + 2.5 + l * 5;
+                        const flash = Math.sin(t * 0.008 + l * 0.7) > 0 ? 1 : 0.2;
+                        const lhue = (l * 30 + hueShift) % 360;
+                        ctx.fillStyle = `hsla(${lhue}, 95%, 60%, ${flash})`;
+                        ctx.beginPath(); ctx.arc(lx, by - 3, 2, 0, Math.PI * 2); ctx.fill();
+                    }
+                    // Side light strips (vertical)
+                    for (let s = 0; s < 2; s++) {
+                        const sx = s === 0 ? bx + 2 : bx + bw - 4;
+                        for (let ly = 0; ly < Math.floor(bh / 6); ly++) {
+                            const flash = Math.sin(t * 0.006 + ly * 1.2 + s * 3) > 0 ? 0.9 : 0.15;
+                            ctx.fillStyle = `rgba(255,220,50,${flash})`;
+                            ctx.fillRect(sx, by + 10 + ly * 6, 2, 3);
                         }
                     }
-                    // Large modern windows
-                    for (let r = 0; r < 3; r++) {
-                        for (let c = 0; c < 4; c++) {
-                            const wx = bx + bw * 0.06 + c * (bw * 0.88 / 4);
-                            const wy = by + bh * 0.12 + r * bh * 0.28;
-                            const ww2 = bw * 0.18;
-                            const wh2 = bh * 0.2;
-                            ctx.fillStyle = "rgba(160,210,230,0.55)";
-                            ctx.fillRect(wx, wy, ww2, wh2);
-                            ctx.strokeStyle = "#333";
-                            ctx.lineWidth = 1;
-                            ctx.strokeRect(wx, wy, ww2, wh2);
-                        }
-                    }
-                    // Rooftop garden
-                    ctx.fillStyle = "#5a9a5a";
-                    ctx.fillRect(bx + 4, by - 4, bw - 8, 6);
-                    for (let p = 0; p < 6; p++) {
-                        const px = bx + 10 + p * (bw - 20) / 5;
-                        ctx.fillStyle = "#4a8a3a";
-                        ctx.beginPath(); ctx.arc(px, by - 6, 5 + Math.random() * 3, 0, Math.PI * 2); ctx.fill();
-                    }
-                    // Neon 「STARTUP」 sign
-                    ctx.fillStyle = "rgba(0,0,0,0.5)";
-                    ctx.beginPath(); ctx.roundRect(cx - 36, by + bh * 0.04, 72, 16, 3); ctx.fill();
-                    ctx.fillStyle = "#ff6af0";
-                    ctx.font = "bold 10px sans-serif";
-                    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-                    ctx.fillText("STARTUP", cx, by + bh * 0.04 + 8);
-                    // Glow effect on sign
+                    // Main sign — 「パチンコ」 neon with glow
+                    ctx.fillStyle = "rgba(0,0,0,0.6)";
+                    ctx.beginPath(); ctx.roundRect(cx - 38, by + bh * 0.06, 76, 18, 3); ctx.fill();
                     ctx.save();
-                    ctx.shadowColor = "#ff6af0";
-                    ctx.shadowBlur = 8;
-                    ctx.fillStyle = "#ff6af0";
-                    ctx.fillText("STARTUP", cx, by + bh * 0.04 + 8);
+                    ctx.shadowColor = "#ff2255";
+                    ctx.shadowBlur = 10;
+                    ctx.fillStyle = "#ff3366";
+                    ctx.font = "bold 12px sans-serif";
+                    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                    ctx.fillText("PACHINKO", cx, by + bh * 0.06 + 9);
                     ctx.restore();
-                    // Entrance
-                    ctx.fillStyle = "#444";
-                    ctx.fillRect(cx - 14, wallH - 18, 28, 18);
-                    ctx.fillStyle = "rgba(170,200,220,0.6)";
-                    ctx.fillRect(cx - 12, wallH - 16, 11, 16);
-                    ctx.fillRect(cx + 1, wallH - 16, 11, 16);
+                    // Sub sign
+                    ctx.fillStyle = "rgba(0,0,0,0.5)";
+                    ctx.beginPath(); ctx.roundRect(cx - 28, by + bh * 0.06 + 20, 56, 12, 2); ctx.fill();
+                    ctx.save();
+                    ctx.shadowColor = "#44ff88";
+                    ctx.shadowBlur = 6;
+                    ctx.fillStyle = "#44ff88";
+                    ctx.font = "bold 8px sans-serif";
+                    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                    ctx.fillText("& SLOTS", cx, by + bh * 0.06 + 26);
+                    ctx.restore();
+                    // Slot machine display panels (3 reels)
+                    for (let r = 0; r < 3; r++) {
+                        const rx = bx + bw * 0.15 + r * (bw * 0.7 / 3);
+                        const ry = by + bh * 0.42;
+                        const rw = bw * 0.18;
+                        const rh = bh * 0.25;
+                        // Reel frame
+                        ctx.fillStyle = '#0a0520';
+                        ctx.fillRect(rx, ry, rw, rh);
+                        ctx.strokeStyle = '#FFD700';
+                        ctx.lineWidth = 1.5;
+                        ctx.strokeRect(rx, ry, rw, rh);
+                        // Reel symbol (7 / cherry / bar) — animated glow
+                        const symbols = ['7', '\u2605', '\u2666'];
+                        const symIdx = Math.floor(((t * 0.001 + r * 1.3) % 3));
+                        const symGlow = 0.6 + Math.sin(t * 0.005 + r * 2) * 0.4;
+                        ctx.save();
+                        ctx.shadowColor = r === 0 ? '#ff4444' : r === 1 ? '#44ff44' : '#ffaa00';
+                        ctx.shadowBlur = 6 * symGlow;
+                        ctx.fillStyle = r === 0 ? `rgba(255,68,68,${symGlow})` : r === 1 ? `rgba(68,255,68,${symGlow})` : `rgba(255,170,0,${symGlow})`;
+                        ctx.font = `bold ${rh * 0.5}px sans-serif`;
+                        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                        ctx.fillText(symbols[symIdx], rx + rw / 2, ry + rh / 2);
+                        ctx.restore();
+                    }
+                    // Pachinko ball chute decoration
+                    ctx.fillStyle = '#FFD700';
+                    ctx.fillRect(bx + bw * 0.08, by + bh * 0.75, bw * 0.84, 2);
+                    // Scattered "balls" (small golden dots)
+                    for (let b2 = 0; b2 < 8; b2++) {
+                        const bx2 = bx + bw * 0.12 + (b2 / 7) * bw * 0.76;
+                        const by2 = by + bh * 0.80 + Math.sin(b2 * 2.3) * 4;
+                        ctx.fillStyle = `rgba(255,215,0,${0.5 + Math.sin(t * 0.004 + b2) * 0.3})`;
+                        ctx.beginPath(); ctx.arc(bx2, by2, 2.5, 0, Math.PI * 2); ctx.fill();
+                    }
+                    // Entrance — automatic glass doors with neon frame
+                    ctx.fillStyle = '#1a0a2e';
+                    ctx.fillRect(cx - 16, wallH - 20, 32, 20);
+                    ctx.fillStyle = "rgba(100,80,140,0.5)";
+                    ctx.fillRect(cx - 14, wallH - 18, 13, 18);
+                    ctx.fillRect(cx + 1, wallH - 18, 13, 18);
+                    // Door neon frame
+                    ctx.strokeStyle = `hsl(${(hueShift + 90) % 360}, 90%, 55%)`;
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(cx - 16, wallH - 20, 32, 20);
+                    // Bottom neon strip
+                    ctx.fillStyle = '#0a0a1a';
+                    ctx.fillRect(bx, wallH - 3, bw, 3);
+                    for (let l = 0; l < Math.floor(bw / 4); l++) {
+                        const lx = bx + 2 + l * 4;
+                        const flash = Math.sin(t * 0.01 + l * 0.5) > 0 ? 0.8 : 0.15;
+                        ctx.fillStyle = `rgba(255,50,100,${flash})`;
+                        ctx.fillRect(lx, wallH - 2, 2, 1.5);
+                    }
                 }
             }
         }
@@ -6434,12 +6491,17 @@
                 ctx.lineWidth = 1.5;
                 ctx.beginPath(); ctx.roundRect(signX - signW / 2, signY - signH / 2, signW, signH, 4); ctx.stroke();
 
-                // Sign text
+                // Sign text — Japanese name + English subtitle
                 ctx.fillStyle = "#fff";
                 ctx.font = "700 11px 'Zen Maru Gothic'";
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
-                ctx.fillText(act.name, signX, signY);
+                ctx.fillText(act.name, signX, signY - 5);
+                if (act.nameEn) {
+                    ctx.fillStyle = "rgba(255,255,255,0.65)";
+                    ctx.font = "500 8px 'Zen Maru Gothic'";
+                    ctx.fillText(act.nameEn, signX, signY + 6);
+                }
 
                 // Sign pole
                 ctx.fillStyle = "#666";
@@ -8735,7 +8797,7 @@
                 parttime: "organ-funky",
                 jobhunt: "piano-sparse",
                 travel: "piano-chord",
-                startup: "organ-power"
+                entertainment: "pachinko-bells"
             };
             const style = styleMap[inheritedKeyboardSoundConfig] || "piano-gentle";
             const kb = createKeyboardSynth(style);
@@ -15025,6 +15087,7 @@
             "piano-chord":    { wave: "triangle", attack: 0.01,  decay: 1.0,  sustain: 0.35, release: 1.0,  vibratoFreq: 1.5, vibratoDepth: 0.06 },
             "piano-arpeggio": { wave: "sine",     attack: 0.003, decay: 0.25, sustain: 0.0,  release: 0.2 },
             "organ-power":    { wave: "sawtooth", attack: 0.005, decay: 0.3,  sustain: 0.5,  release: 0.4 },
+            "pachinko-bells": { wave: "square",   attack: 0.001, decay: 0.12, sustain: 0.0,  release: 0.08, filterType: "bandpass", filterFreq: 2400 },
             "piano-sparse":   { wave: "triangle", attack: 0.02,  decay: 1.2,  sustain: 0.08, release: 0.8 },
             "syncopated":     { wave: "sine",     attack: 0.008, decay: 0.35, sustain: 0.15, release: 0.3 },
             "staccato-bounce":{ wave: "triangle", attack: 0.003, decay: 0.2,  sustain: 0.0,  release: 0.15 }
@@ -15231,6 +15294,24 @@
                                 add(b + 3 * S + 2, [R + "4", F + "4"], 2);
                             }
                         }
+                    }
+
+                } else if (style === "pachinko-bells") {
+                    // Rapid, flashy arpeggiated bells — pachinko parlor feel
+                    // Busy 16th-note cascades with high octave sparkle
+                    const hi = [R + "5", F + "5"];
+                    const mid = [R + "4", T + "4", F + "4"];
+                    const spark = [R + "6"];
+                    if (variant === 0) {
+                        add(b, mid, 1); add(b + 1, hi, 1); add(b + 2, spark, 1); add(b + 3, hi, 1);
+                        if (baseInfo.beatsPerBar >= 2) { add(b + S, mid, 1); add(b + S + 1, spark, 1); add(b + S + 2, hi, 1); add(b + S + 3, mid, 1); }
+                        if (baseInfo.beatsPerBar >= 3) { add(b + 2*S, spark, 1); add(b + 2*S + 1, mid, 1); add(b + 2*S + 2, hi, 1); add(b + 2*S + 3, spark, 1); }
+                        if (baseInfo.beatsPerBar >= 4) { add(b + 3*S, hi, 1); add(b + 3*S + 1, spark, 1); add(b + 3*S + 2, mid, 1); add(b + 3*S + 3, hi, 1); }
+                    } else {
+                        add(b, spark, 1); add(b + 2, mid, 1);
+                        if (baseInfo.beatsPerBar >= 2) { add(b + S, hi, 1); add(b + S + 1, spark, 1); add(b + S + 3, mid, 1); }
+                        if (baseInfo.beatsPerBar >= 3) { add(b + 2*S, mid, 1); add(b + 2*S + 2, spark, 1); add(b + 2*S + 3, hi, 1); }
+                        if (baseInfo.beatsPerBar >= 4) { add(b + 3*S, spark, 1); add(b + 3*S + 1, hi, 1); add(b + 3*S + 2, spark, 1); add(b + 3*S + 3, mid, 1); }
                     }
 
                 } else if (style === "syncopated") {
