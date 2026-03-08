@@ -90,6 +90,16 @@
         let universityNpcs = null;
         let universityBuildingSeeds = [];
         let adultTransitionLock = false;
+        let travelChoiceTransitioning = false;
+        let travelStill = {
+            active: false,
+            type: null,       // "sea" or "mountain"
+            progress: 0,      // 0→1 over ~7 seconds
+            startTime: 0,
+            duration: 7000,   // 7秒
+            endScheduled: false
+        };
+        let travelStillAudio = null;
 
         // PART_TIME & JOB_HUNT (見下ろし型2D) variables
         let worldHeight = 0;
@@ -114,6 +124,70 @@
         let carryKeys2Effects = [];
         let secondInterviewText = null; // {text, alpha, scale, timer}
 
+        // ==========================================
+        // Visuals: Environment Effects & Particles
+        // ==========================================
+        class EnvironmentEffects {
+            constructor() {
+                this.particles = [];
+                this.timer = 0;
+            }
+            reset() { this.particles = []; }
+            update(bpm) { /* Particles removed */ }
+            draw(ctx, camX) { /* Particles removed */ }
+            drawFarMountains(ctx, camX) {
+                const groundY = height * ROOM_WALL_RATIO;
+                ctx.save();
+                ctx.fillStyle = "rgba(180, 200, 220, 0.25)";
+                ctx.beginPath(); ctx.moveTo(0, groundY);
+                for (let i = 0; i <= 20; i++) {
+                    const x = (i / 20) * width;
+                    const wx = x + camX * 0.05; // Very slow parallax (0.05)
+                    const h = 40 + Math.sin(wx * 0.005) * 40 + Math.cos(wx * 0.002) * 20;
+                    ctx.lineTo(x, groundY - h);
+                }
+                ctx.lineTo(width, groundY); ctx.closePath(); ctx.fill();
+                ctx.restore();
+            }
+
+            drawMiddleHouses(ctx, camX) {
+                const groundY = height * ROOM_WALL_RATIO;
+                ctx.save();
+                ctx.fillStyle = "rgba(160, 180, 160, 0.2)";
+                const pSpeed = 0.15; // Slow parallax (0.15)
+                const spacing = 220;
+                for (let x = -200; x < worldWidth + 200; x += spacing) {
+                    const wx = x - camX * pSpeed;
+                    if (wx < -200 || wx > width + 200) continue;
+                    
+                    const h = 30 + (Math.sin(x * 0.01) * 20);
+                    const w = 40 + (Math.cos(x * 0.02) * 20);
+                    if (x % 440 === 0) { // House
+                        ctx.beginPath();
+                        ctx.moveTo(wx, groundY); ctx.lineTo(wx, groundY - h);
+                        ctx.lineTo(wx + w/2, groundY - h - 15); ctx.lineTo(wx + w, groundY - h);
+                        ctx.lineTo(wx + w, groundY); ctx.closePath(); ctx.fill();
+                    } else { // Trees
+                        ctx.beginPath(); ctx.arc(wx, groundY - h, w * 0.5, 0, Math.PI * 2); ctx.fill();
+                        ctx.fillRect(wx - 4, groundY - h, 8, h);
+                    }
+                }
+                ctx.restore();
+            }
+            drawGodRays(ctx, x, y, w, h) {
+                ctx.save();
+                const grad = ctx.createLinearGradient(x, y, x + 50, y + h);
+                grad.addColorStop(0, "rgba(255, 253, 240, 0.15)");
+                grad.addColorStop(1, "rgba(255, 253, 240, 0)");
+                ctx.fillStyle = grad;
+                ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + w, y);
+                ctx.lineTo(x + w + 40, y + h); ctx.lineTo(x + 40, y + h);
+                ctx.closePath(); ctx.fill();
+                ctx.restore();
+            }
+        }
+        const envEffects = new EnvironmentEffects();
+
         // Side-scroll interview room state
         let jobHuntViewMode = "topdown";          // "topdown" | "sidescroll"
         let jobHuntTransitioning = false;         // lock during fade animation
@@ -127,6 +201,15 @@
         // Modifier tone preview state (JOB_HUNT2)
         let modifierPreviewDrop = null;         // currently previewing modifier drop
         let modifierPreviewOriginal = null;     // saved original bar data before preview
+
+        // Adult selection confirmation state
+        let adultConfirmation = {
+            active: false,
+            drop: null,
+            yesRect: null,
+            noRect: null,
+            fade: 0 // animation [0-1]
+        };
 
         let titleBgmPlayer = null;
 
@@ -269,7 +352,7 @@
         const toySystem = window.TTLToyData || { LIFE_LABELS: [], TOY_LIBRARY: [], drawToy: () => {} };
 
         // シーン管理
-        const SCENE = { TITLE: 0, CHOICE: 1, TRANSITION: 2, CRAWL: 3, CRAWL2: 4, TODDLE1: 5, CHILD1: 6, CHILD2: 7, LESSON: 8, ADULT: 9, UNIVERSITY: 10, PART_TIME: 11, JOB_HUNT: 12, JOB_HUNT2: 13 };
+        const SCENE = { TITLE: 0, CHOICE: 1, TRANSITION: 2, CRAWL: 3, CRAWL2: 4, TODDLE1: 5, CHILD1: 6, CHILD2: 7, LESSON: 8, ADULT: 9, UNIVERSITY: 10, PART_TIME: 11, JOB_HUNT: 12, JOB_HUNT2: 13, TRAVEL: 14 };
         let currentScene = SCENE.TITLE;
         const RHYTHM_BARS = 4;
         const STEPS_PER_BEAT = 4;
@@ -545,9 +628,32 @@
 
         async function pickToneDropAt(screenX, screenY) {
             if (currentScene < SCENE.CRAWL || !toneDrops.length) return;
+            if (travelStill.active) return;
             await ensureAudioReady();
+
+            // If confirmation is already open, check button clicks
+            if (adultConfirmation.active) {
+                const rx = screenX, ry = screenY;
+                if (adultConfirmation.yesRect && rx >= adultConfirmation.yesRect.x && rx <= adultConfirmation.yesRect.x + adultConfirmation.yesRect.w && ry >= adultConfirmation.yesRect.y && ry <= adultConfirmation.yesRect.y + adultConfirmation.yesRect.h) {
+                    const chosen = adultConfirmation.drop;
+                    adultConfirmation.active = false; adultConfirmation.drop = null;
+                    if (currentScene === SCENE.ADULT) handleAdultChoice(chosen);
+                    else if (currentScene === SCENE.UNIVERSITY) handleUniversityChoice(chosen);
+                    else if (currentScene === SCENE.PART_TIME) handlePartTimeChoice(chosen);
+                    else if (currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) handleJobHuntChoice(chosen);
+                    else if (currentScene === SCENE.TRAVEL) handleTravelChoice(chosen);
+                    return;
+                }
+                if (adultConfirmation.noRect && rx >= adultConfirmation.noRect.x && rx <= adultConfirmation.noRect.x + adultConfirmation.noRect.w && ry >= adultConfirmation.noRect.y && ry <= adultConfirmation.noRect.y + adultConfirmation.noRect.h) {
+                    adultConfirmation.active = false; adultConfirmation.drop = null;
+                    return;
+                }
+                return; // Ignore other clicks while confirmation is open
+            }
+
             const picked = getToneDropAtScreenPoint(screenX, screenY);
             if (!picked) return;
+
             if (currentScene === SCENE.CRAWL) {
                 transitionToLevel2(picked);
             } else if (currentScene === SCENE.CRAWL2) {
@@ -558,14 +664,11 @@
                 handleChildChoice(picked);
             } else if (currentScene === SCENE.CHILD2) {
                 handleChild2Choice(picked);
-            } else if (currentScene === SCENE.ADULT) {
-                handleAdultChoice(picked);
-            } else if (currentScene === SCENE.UNIVERSITY) {
-                handleUniversityChoice(picked);
-            } else if (currentScene === SCENE.PART_TIME) {
-                handlePartTimeChoice(picked);
-            } else if (currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) {
-                handleJobHuntChoice(picked);
+            } else if (currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL) {
+                // Enter confirmation mode for later stages
+                adultConfirmation.active = true;
+                adultConfirmation.drop = picked;
+                adultConfirmation.fade = 0;
             }
         }
 
@@ -2072,17 +2175,1767 @@
             }
         }
 
+        // ======== TRAVEL SYSTEM ========
+        function seededRandom(s) {
+            const x = Math.sin(s) * 10000;
+            return x - Math.floor(x);
+        }
+
+        function getParallaxX(worldX, speed) {
+            const camCenter = cameraX + width / 2;
+            const distFromCenter = worldX - camCenter;
+            return (width / 2) + distFromCenter * speed;
+        }
+
         function updateCamera() {
-            if (!baby) return;
-            const leftTrigger = width * 0.3;
-            const rightTrigger = width * 0.7;
-            const babyScreenX = baby.x - cameraX;
+            const target = baby.x - width / 2;
+            cameraX += (target - cameraX) * 0.1;
+            cameraX = Math.max(0, Math.min(cameraX, Math.max(0, worldWidth - width)));
+        }
 
-            if (babyScreenX > rightTrigger) cameraX = baby.x - rightTrigger;
-            if (babyScreenX < leftTrigger) cameraX = baby.x - leftTrigger;
+        // ======== TRAIN CLASS ========
+        class Train {
+            constructor() {
+                this.x = 7000;
+                this.velocity = 0;
+                this.timer = 0;
+                this.carW = 190;
+                this.carH = 78;
+                this.gap = 6;
+            }
+            update(tx) {
+                this.timer += 0.08;
+                const dx = tx - this.x;
+                this.velocity += dx * 0.002;
+                this.velocity *= 0.93;
+                this.x += this.velocity;
+                this.x = Math.max(800, Math.min(worldWidth - 800, this.x));
+            }
+            draw(ctx, groundY) {
+                const drawCar = (cx, cy, type) => {
+                    ctx.save();
+                    ctx.translate(cx, cy);
+                    const bob = Math.sin(this.timer * 3 + cx * 0.05) * 1.2;
+                    ctx.translate(0, bob);
+                    const w = this.carW, h = this.carH;
+                    const bx = -w / 2, by = -h - 28;
 
-            const maxCamera = Math.max(0, worldWidth - width);
-            cameraX = Math.max(0, Math.min(cameraX, maxCamera));
+                    // Bogie frames
+                    const drawBogie = (bogieX) => {
+                        ctx.fillStyle = "#2a2a2a";
+                        ctx.beginPath(); ctx.roundRect(bogieX - 32, by + h + 2, 64, 10, 2); ctx.fill();
+                        // Wheels (4 per bogie)
+                        ctx.fillStyle = "#1a1a1a";
+                        [-20, -8, 8, 20].forEach(off => {
+                            ctx.beginPath(); ctx.arc(bogieX + off, by + h + 14, 7, 0, Math.PI * 2); ctx.fill();
+                            // Wheel shine
+                            ctx.fillStyle = "rgba(255,255,255,0.15)";
+                            ctx.beginPath(); ctx.arc(bogieX + off - 1, by + h + 12, 3, 0, Math.PI * 2); ctx.fill();
+                            ctx.fillStyle = "#1a1a1a";
+                        });
+                        // Axle
+                        ctx.fillStyle = "#333";
+                        ctx.fillRect(bogieX - 22, by + h + 12, 44, 3);
+                    };
+                    drawBogie(bx + 38);
+                    drawBogie(bx + w - 38);
+
+                    // Body base shadow
+                    ctx.fillStyle = "rgba(0,0,0,0.08)";
+                    ctx.beginPath(); ctx.ellipse(0, by + h + 20, w * 0.45, 6, 0, 0, Math.PI * 2); ctx.fill();
+
+                    // Body
+                    const bodyG = ctx.createLinearGradient(0, by, 0, by + h);
+                    bodyG.addColorStop(0, "#fdfcf0");
+                    bodyG.addColorStop(0.42, "#faf8ec");
+                    bodyG.addColorStop(0.44, "#3d7a68");
+                    bodyG.addColorStop(0.56, "#2d5a4c");
+                    bodyG.addColorStop(1, "#1e3d32");
+                    ctx.fillStyle = bodyG;
+                    const rad = type === 'front' ? [20, 4, 4, 4] : (type === 'back' ? [4, 20, 4, 4] : 4);
+                    ctx.beginPath(); ctx.roundRect(bx, by, w, h, rad); ctx.fill();
+
+                    // Thin accent line at color boundary
+                    ctx.fillStyle = "rgba(255,255,255,0.25)";
+                    ctx.fillRect(bx + 4, by + h * 0.43, w - 8, 1);
+
+                    // Door (center of each car) — drawn on top of body
+                    const doorW = 22, doorH = h * 0.72;
+                    const doorX = -doorW / 2, doorY = by + 6;
+                    // Door recess shadow
+                    ctx.fillStyle = "rgba(0,0,0,0.18)";
+                    ctx.beginPath(); ctx.roundRect(doorX - 2, doorY - 1, doorW + 4, doorH + 3, 2); ctx.fill();
+                    // Door panel (solid, opaque)
+                    const doorG = ctx.createLinearGradient(doorX, doorY, doorX, doorY + doorH);
+                    doorG.addColorStop(0, "#d8d4c8");
+                    doorG.addColorStop(0.5, "#c8c4b8");
+                    doorG.addColorStop(1, "#b0aca0");
+                    ctx.fillStyle = doorG;
+                    ctx.beginPath(); ctx.roundRect(doorX, doorY, doorW, doorH, 2); ctx.fill();
+                    // Door frame border
+                    ctx.strokeStyle = "rgba(0,0,0,0.2)";
+                    ctx.lineWidth = 1;
+                    ctx.beginPath(); ctx.roundRect(doorX, doorY, doorW, doorH, 2); ctx.stroke();
+                    // Door center line
+                    ctx.strokeStyle = "rgba(0,0,0,0.25)";
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath(); ctx.moveTo(0, doorY + 2); ctx.lineTo(0, doorY + doorH - 2); ctx.stroke();
+                    // Door window
+                    ctx.fillStyle = "#7ab0d0";
+                    ctx.beginPath(); ctx.roundRect(doorX + 3, doorY + 4, doorW - 6, doorH * 0.35, 1); ctx.fill();
+                    // Door window reflection
+                    ctx.fillStyle = "rgba(255,255,255,0.15)";
+                    ctx.fillRect(doorX + 4, doorY + 5, (doorW - 6) * 0.3, doorH * 0.35 - 2);
+
+                    // Windows (3 on each side of door)
+                    const winSets = [
+                        { startX: bx + 16, count: 3 },
+                        { startX: doorW / 2 + 8, count: 3 }
+                    ];
+                    winSets.forEach(ws => {
+                        for (let i = 0; i < ws.count; i++) {
+                            const wx = ws.startX + i * 26, wy = by + 8, ww = 22, wh = h * 0.32;
+                            // Frame
+                            ctx.fillStyle = "#b0b0a8";
+                            ctx.beginPath(); ctx.roundRect(wx - 1, wy - 1, ww + 2, wh + 2, 2); ctx.fill();
+                            // Glass gradient
+                            const glassG = ctx.createLinearGradient(wx, wy, wx + ww, wy + wh);
+                            glassG.addColorStop(0, "#b8dff0");
+                            glassG.addColorStop(0.4, "#8cc8e8");
+                            glassG.addColorStop(1, "#5a9ab8");
+                            ctx.fillStyle = glassG;
+                            ctx.beginPath(); ctx.roundRect(wx, wy, ww, wh, 1); ctx.fill();
+                            // Reflection
+                            ctx.fillStyle = "rgba(255,255,255,0.18)";
+                            ctx.fillRect(wx + 2, wy + 1, ww * 0.3, wh - 2);
+                        }
+                    });
+
+                    // Destination display (front/back only)
+                    if (type === 'front' || type === 'back') {
+                        const dispX = type === 'front' ? bx + 14 : bx + w - 62;
+                        ctx.fillStyle = "#111";
+                        ctx.beginPath(); ctx.roundRect(dispX, by + 5, 48, 14, 2); ctx.fill();
+                        ctx.fillStyle = "#ff9933";
+                        ctx.font = "bold 8px 'Zen Maru Gothic', sans-serif";
+                        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                        const dir = this.velocity > 0.3 ? "山の駅→" : (this.velocity < -0.3 ? "←海の駅" : "はじまり");
+                        ctx.fillText(dir, dispX + 24, by + 12);
+                    }
+
+                    // Headlights
+                    if (type === 'front' || type === 'back') {
+                        const hlX = type === 'front' ? bx + 8 : bx + w - 8;
+                        const hlDir = type === 'front' ? -1 : 1;
+                        // Light housing
+                        ctx.fillStyle = "#ddd";
+                        ctx.beginPath(); ctx.arc(hlX, by + h - 16, 7, 0, Math.PI * 2); ctx.fill();
+                        ctx.fillStyle = "#fff8c0";
+                        ctx.beginPath(); ctx.arc(hlX, by + h - 16, 5, 0, Math.PI * 2); ctx.fill();
+                        // Light beam
+                        const isMoving = (hlDir > 0 && this.velocity > 0.1) || (hlDir < 0 && this.velocity < -0.1);
+                        if (isMoving) {
+                            const grad = ctx.createLinearGradient(hlX, by + h - 16, hlX + hlDir * 300, by + h - 16);
+                            grad.addColorStop(0, "rgba(255, 253, 200, 0.35)");
+                            grad.addColorStop(1, "rgba(255, 253, 200, 0)");
+                            ctx.fillStyle = grad;
+                            ctx.beginPath();
+                            ctx.moveTo(hlX, by + h - 22);
+                            ctx.lineTo(hlX + hlDir * 300, by + h - 70);
+                            ctx.lineTo(hlX + hlDir * 300, by + h + 30);
+                            ctx.lineTo(hlX, by + h - 10);
+                            ctx.closePath(); ctx.fill();
+                        }
+                        // Tail light (opposite end)
+                        const tlX = type === 'front' ? bx + w - 8 : bx + 8;
+                        ctx.fillStyle = "#cc3333";
+                        ctx.beginPath(); ctx.arc(tlX, by + h - 14, 4, 0, Math.PI * 2); ctx.fill();
+                    }
+
+                    // Roof detail
+                    ctx.fillStyle = "rgba(200,195,185,0.5)";
+                    ctx.fillRect(bx + 10, by - 3, w - 20, 4);
+
+                    ctx.restore();
+                };
+
+                const screenTrainX = this.x - cameraX;
+                const totalW = this.carW * 3 + this.gap * 2;
+                const startX = screenTrainX - totalW / 2 + this.carW / 2;
+
+                // Pantograph (diamond shape)
+                const panX1 = startX + this.carW * 0.5;
+                const panX2 = startX + this.carW + this.gap + this.carW * 0.5;
+                [panX1, panX2].forEach(px => {
+                    const panBaseY = groundY - this.carH - 28 - 3;
+                    ctx.strokeStyle = "#444";
+                    ctx.lineWidth = 2.5;
+                    // Lower arms
+                    ctx.beginPath();
+                    ctx.moveTo(px - 12, panBaseY);
+                    ctx.lineTo(px - 4, panBaseY - 40);
+                    ctx.moveTo(px + 12, panBaseY);
+                    ctx.lineTo(px + 4, panBaseY - 40);
+                    ctx.stroke();
+                    // Upper arms
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(px - 4, panBaseY - 40);
+                    ctx.lineTo(px - 2, panBaseY - 58);
+                    ctx.moveTo(px + 4, panBaseY - 40);
+                    ctx.lineTo(px + 2, panBaseY - 58);
+                    ctx.stroke();
+                    // Contact strip
+                    ctx.fillStyle = "#666";
+                    ctx.fillRect(px - 18, panBaseY - 60, 36, 3);
+                    // Base insulator
+                    ctx.fillStyle = "#aaa";
+                    ctx.fillRect(px - 6, panBaseY, 12, 4);
+                });
+
+                // Draw cars
+                drawCar(startX, groundY, 'front');
+                drawCar(startX + this.carW + this.gap, groundY, 'middle');
+                drawCar(startX + (this.carW + this.gap) * 2, groundY, 'back');
+            }
+        }
+
+        // ======== TRAVEL SKY ========
+        function drawTravelSky(ctx, groundY) {
+            const relX = cameraX - (7000 - width / 2);
+            const progress = clamp01((relX + 3500) / 7000); // 0=far left, 1=far right
+
+            // Sky gradient: blue (left) → warm sunset (right)
+            const skyG = ctx.createLinearGradient(0, 0, 0, groundY);
+            if (progress < 0.4) {
+                // Blue summer sky
+                skyG.addColorStop(0, "#5BA8D9");
+                skyG.addColorStop(1, "#87CEEB");
+            } else {
+                const p = clamp01((progress - 0.4) / 0.6);
+                const topR = 91 + p * 164, topG2 = 168 - p * 68, topB = 217 - p * 167;
+                const botR = 135 + p * 120, botG2 = 206 - p * 80, botB = 235 - p * 175;
+                skyG.addColorStop(0, `rgb(${topR},${topG2},${topB})`);
+                skyG.addColorStop(0.7, `rgb(${botR},${botG2},${botB})`);
+                skyG.addColorStop(1, `rgb(${Math.min(255, botR + 20)},${Math.max(60, botG2 - 40)},${Math.max(30, botB - 30)})`);
+            }
+            ctx.fillStyle = skyG;
+            ctx.fillRect(0, 0, width, groundY);
+
+            // Towering cumulus clouds (LEFT side only, parallax 0.06-0.10)
+            const drawCumulonimbus = (worldBaseX, baseSize, yOff) => {
+                const sx = getParallaxX(worldBaseX, 0.08);
+                if (sx < -baseSize * 2 || sx > width + baseSize * 2) return;
+                if (worldBaseX > 6500) return; // left side only
+                ctx.save();
+                const grad = ctx.createLinearGradient(sx, groundY - baseSize * 2.2 + yOff, sx, groundY - baseSize * 0.3 + yOff);
+                grad.addColorStop(0, "#ffffff");
+                grad.addColorStop(0.5, "#f4f4f0");
+                grad.addColorStop(0.85, "#e0ddd5");
+                grad.addColorStop(1, "#c8c4ba");
+                ctx.fillStyle = grad;
+                // Build cloud from overlapping circles (towering shape)
+                const layers = [
+                    { y: 0, r: baseSize * 0.6, count: 3 },    // top (smallest)
+                    { y: baseSize * 0.35, r: baseSize * 0.75, count: 4 },
+                    { y: baseSize * 0.7, r: baseSize * 0.9, count: 5 },
+                    { y: baseSize * 1.0, r: baseSize * 1.0, count: 6 },   // base (widest)
+                    { y: baseSize * 1.25, r: baseSize * 0.85, count: 5 },
+                ];
+                layers.forEach(layer => {
+                    for (let i = 0; i < layer.count; i++) {
+                        const spread = layer.r * 1.2;
+                        const lx = sx + (i - (layer.count - 1) / 2) * (spread * 2 / layer.count);
+                        const ly = groundY - baseSize * 2.0 + layer.y + yOff;
+                        const r = layer.r * (0.7 + seededRandom(worldBaseX + i + layer.y) * 0.4);
+                        ctx.beginPath();
+                        ctx.arc(lx, ly, r, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                });
+                ctx.restore();
+            };
+            drawCumulonimbus(1200, 110, 0);
+            drawCumulonimbus(3200, 90, 20);
+            drawCumulonimbus(-500, 80, 10);
+
+            // Thin sunset clouds (RIGHT side only)
+            if (progress > 0.3) {
+                ctx.save();
+                ctx.globalAlpha = clamp01((progress - 0.3) * 1.4) * 0.5;
+                const cloudData = [
+                    { wx: 9000, y: groundY * 0.18, w: 280, h: 12 },
+                    { wx: 10500, y: groundY * 0.25, w: 200, h: 8 },
+                    { wx: 11800, y: groundY * 0.15, w: 320, h: 14 },
+                    { wx: 8500, y: groundY * 0.32, w: 180, h: 10 },
+                    { wx: 12500, y: groundY * 0.22, w: 240, h: 11 },
+                ];
+                cloudData.forEach(c => {
+                    const sx = getParallaxX(c.wx, 0.06);
+                    if (sx < -400 || sx > width + 400) return;
+                    const cg = ctx.createLinearGradient(sx, c.y, sx + c.w, c.y);
+                    cg.addColorStop(0, "rgba(255,200,120,0)");
+                    cg.addColorStop(0.3, "rgba(255,180,100,0.6)");
+                    cg.addColorStop(0.7, "rgba(255,160,80,0.5)");
+                    cg.addColorStop(1, "rgba(255,140,60,0)");
+                    ctx.fillStyle = cg;
+                    ctx.beginPath();
+                    ctx.ellipse(sx + c.w / 2, c.y, c.w / 2, c.h, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+                ctx.restore();
+            }
+        }
+
+        // ======== TRAVEL SUN ========
+        function drawTravelSun(ctx, groundY) {
+            if (cameraX + width < 7000) return;
+            const sx = getParallaxX(12000, 0.03);
+            const sy = groundY * 0.38;
+            if (sx < -800 || sx > width + 800) return;
+            ctx.save();
+            // Atmospheric glow
+            const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, 800);
+            glow.addColorStop(0, "rgba(255, 180, 60, 0.35)");
+            glow.addColorStop(0.3, "rgba(255, 140, 40, 0.15)");
+            glow.addColorStop(1, "rgba(255, 100, 20, 0)");
+            ctx.fillStyle = glow;
+            ctx.beginPath(); ctx.arc(sx, sy, 800, 0, Math.PI * 2); ctx.fill();
+            // Single sun disk with soft edge
+            const disk = ctx.createRadialGradient(sx, sy, 0, sx, sy, 60);
+            disk.addColorStop(0, "#FFF8DD");
+            disk.addColorStop(0.5, "#FFDD55");
+            disk.addColorStop(0.85, "#FFCC33");
+            disk.addColorStop(1, "rgba(255,180,40,0)");
+            ctx.fillStyle = disk;
+            ctx.beginPath(); ctx.arc(sx, sy, 60, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+        }
+
+        // ======== TRAVEL BACK MOUNTAINS ========
+        function drawTravelBackMountains(ctx, groundY) {
+            // side: 'left' tapers both edges, 'right' tapers left edge only (right goes off-screen)
+            const renderLayer = (startW, endW, speed, color, hBase, hVar, steps, side) => {
+                ctx.save(); ctx.fillStyle = color; ctx.beginPath();
+                const pts = [];
+                for (let i = 0; i <= steps; i++) {
+                    const t = i / steps;
+                    const worldX = startW + t * (endW - startW);
+                    const x = getParallaxX(worldX, speed);
+                    // Left side: taper in from left edge only; right: maintain height off-screen
+                    let taper;
+                    if (side === 'right') {
+                        taper = Math.min(1, Math.sin(t * Math.PI * 0.5) * 1.2); // rise from left, stay high
+                    } else {
+                        taper = Math.sin(t * Math.PI);
+                    }
+                    const h = (hBase + Math.sin(i * 0.1 + worldX * 0.00003) * hVar
+                               + Math.sin(i * 0.05) * hVar * 0.3) * taper;
+                    pts.push({ x, y: groundY - Math.max(0, h) });
+                }
+                ctx.moveTo(pts[0].x, groundY);
+                ctx.lineTo(pts[0].x, pts[0].y);
+                for (let i = 1; i < pts.length; i++) {
+                    const prev = pts[i - 1], cur = pts[i];
+                    const cpx = (prev.x + cur.x) / 2;
+                    ctx.bezierCurveTo(cpx, prev.y, cpx, cur.y, cur.x, cur.y);
+                }
+                // Right-side mountains: extend off screen at full height
+                if (side === 'right') {
+                    ctx.lineTo(pts[pts.length - 1].x + 2000, pts[pts.length - 1].y);
+                    ctx.lineTo(pts[pts.length - 1].x + 2000, groundY);
+                } else {
+                    ctx.lineTo(pts[pts.length - 1].x, groundY);
+                }
+                ctx.closePath(); ctx.fill();
+                ctx.restore();
+            };
+            // Left mountains (distant blue-grey, opaque)
+            if (cameraX < 7500) {
+                renderLayer(-1000, 7000, 0.04, "#B4C3D2", 110, 12, 24, 'left');
+                renderLayer(-500, 6500, 0.08, "#96AABE", 80, 8, 22, 'left');
+            }
+            // Right mountains — never cut off, extend off-screen at full height
+            if (cameraX + width > 6500) {
+                renderLayer(7500, 18000, 0.04, "#9E7E5E", 145, 10, 30, 'right');
+                renderLayer(8000, 18000, 0.09, "#876B4A", 105, 8, 26, 'right');
+                renderLayer(10500, 18000, 0.14, "#7A5F3E", 155, 12, 24, 'right');
+            }
+        }
+
+        // ======== TRAVEL SEA AREA (LEFT ONLY) ========
+        function drawTravelSeaArea(ctx, groundY) {
+            if (cameraX > 3500) return;
+            const t = Date.now() * 0.001;
+
+            // Ocean water — full coverage from far left to shoreline
+            ctx.save();
+            const waterStart = -2000;
+            const waterEnd = 1600;
+            // Fill large ocean background first
+            const oceanLeft = getParallaxX(waterStart, 0.4);
+            const oceanRight = getParallaxX(waterEnd, 0.4);
+            const oceanG = ctx.createLinearGradient(oceanLeft, 0, oceanRight, 0);
+            oceanG.addColorStop(0, "#1B5E90");
+            oceanG.addColorStop(0.3, "#2A78B0");
+            oceanG.addColorStop(0.7, "#3A8FD6");
+            oceanG.addColorStop(1, "#6BB5E8");
+            ctx.fillStyle = oceanG;
+            ctx.fillRect(Math.min(0, oceanLeft), groundY - 30, Math.max(width, oceanRight) - Math.min(0, oceanLeft) + 50, groundY * 0.5 + 40);
+            // Depth variation strips
+            for (let wx = waterStart; wx < waterEnd; wx += 50) {
+                const sx = getParallaxX(wx, 0.4);
+                if (sx > width + 100 || sx < -100) continue;
+                const depth = clamp01(1 - (wx - waterStart) / (waterEnd - waterStart));
+                ctx.fillStyle = `rgba(${15 + depth * 15}, ${80 + depth * 40}, ${140 + depth * 50}, 0.3)`;
+                ctx.fillRect(sx, groundY - 10 - depth * 20, 60, groundY * 0.5 + depth * 20);
+            }
+            // Waves
+            for (let wx = waterStart; wx < 1800; wx += 90) {
+                const sx = getParallaxX(wx, 1.0) + Math.sin(t * 1.5 + wx * 0.008) * 12;
+                if (sx < -80 || sx > width + 80) continue;
+                ctx.fillStyle = `rgba(255,255,255,${0.2 + seededRandom(wx * 0.3) * 0.2})`;
+                ctx.beginPath();
+                ctx.ellipse(sx, groundY + 5 + Math.sin(t + wx * 0.01) * 3, 40 + seededRandom(wx) * 20, 8, 0, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            // Horizon shimmer line
+            const hLeft = getParallaxX(waterStart, 0.4);
+            const hRight = getParallaxX(waterEnd - 200, 0.4);
+            ctx.strokeStyle = "rgba(255,255,255,0.18)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(Math.max(0, hLeft), groundY - 25);
+            ctx.lineTo(Math.min(width, hRight), groundY - 20);
+            ctx.stroke();
+            ctx.restore();
+
+            // Sandy beach (transition from ocean to road)
+            for (let wx = 600; wx < 2200; wx += 80) {
+                const sx = getParallaxX(wx, 0.7);
+                if (sx < -100 || sx > width + 100) continue;
+                const sandProgress = clamp01((wx - 600) / 1200);
+                ctx.fillStyle = `rgb(${230 + sandProgress * 15},${215 + sandProgress * 10},${180 - sandProgress * 20})`;
+                ctx.fillRect(sx, groundY - 8 + sandProgress * 4, 90, 40 - sandProgress * 20);
+            }
+
+            // Beach houses (海の家)
+            const beachHouses = [
+                { wx: 700, w: 100, h: 70, roofH: 30, color: "#b8734a", roofColor: "#8B5E3C" },
+                { wx: 1100, w: 80, h: 55, roofH: 25, color: "#a0856c", roofColor: "#6B5B4A" },
+                { wx: 1500, w: 90, h: 60, roofH: 28, color: "#c4956a", roofColor: "#7A5A40" },
+            ];
+            beachHouses.forEach(bh => {
+                const sx = getParallaxX(bh.wx, 0.85);
+                if (sx < -200 || sx > width + 200) return;
+                const by = groundY - bh.h;
+                // Pillars (raised on stilts)
+                ctx.fillStyle = "#8B7355";
+                ctx.fillRect(sx - bh.w / 2 + 5, by + bh.h - 15, 6, 18);
+                ctx.fillRect(sx + bh.w / 2 - 11, by + bh.h - 15, 6, 18);
+                // Body
+                ctx.fillStyle = bh.color;
+                ctx.beginPath(); ctx.roundRect(sx - bh.w / 2, by, bh.w, bh.h - 12, 2); ctx.fill();
+                // Roof
+                ctx.fillStyle = bh.roofColor;
+                ctx.beginPath();
+                ctx.moveTo(sx - bh.w / 2 - 12, by + 4);
+                ctx.lineTo(sx, by - bh.roofH);
+                ctx.lineTo(sx + bh.w / 2 + 12, by + 4);
+                ctx.closePath(); ctx.fill();
+                // Noren (curtain)
+                ctx.fillStyle = "rgba(180,60,50,0.7)";
+                ctx.fillRect(sx - 15, by + 10, 30, 18);
+                ctx.fillStyle = "rgba(255,255,255,0.8)";
+                ctx.font = "bold 7px 'Zen Maru Gothic', sans-serif";
+                ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                ctx.fillText("海の家", sx, by + 19);
+                // Window
+                ctx.fillStyle = "rgba(160,210,240,0.7)";
+                ctx.fillRect(sx + bh.w / 2 - 28, by + 14, 16, 14);
+            });
+
+            // Lighthouse tower (灯台) at ~worldX 1900
+            const lhX = getParallaxX(1900, 0.7);
+            if (lhX > -150 && lhX < width + 150) {
+                ctx.save(); ctx.translate(lhX, groundY);
+                // Base
+                ctx.fillStyle = "#e0dcd5";
+                ctx.fillRect(-22, -30, 44, 32);
+                // Tower (tapered)
+                ctx.fillStyle = "#fafaf5";
+                ctx.beginPath();
+                ctx.moveTo(-14, -30); ctx.lineTo(-9, -140);
+                ctx.lineTo(9, -140); ctx.lineTo(14, -30);
+                ctx.closePath(); ctx.fill();
+                // Red stripes
+                ctx.fillStyle = "#cc4444";
+                ctx.fillRect(-12, -60, 24, 12);
+                ctx.fillRect(-10, -110, 20, 10);
+                // Lantern room
+                ctx.fillStyle = "#555";
+                ctx.beginPath(); ctx.roundRect(-12, -150, 24, 14, 2); ctx.fill();
+                // Glass
+                ctx.fillStyle = "#fff8c0";
+                ctx.beginPath(); ctx.roundRect(-8, -148, 16, 10, 1); ctx.fill();
+                // Light glow
+                ctx.fillStyle = "rgba(255,248,200,0.3)";
+                ctx.beginPath(); ctx.arc(0, -143, 25, 0, Math.PI * 2); ctx.fill();
+                // Cap
+                ctx.fillStyle = "#666";
+                ctx.beginPath();
+                ctx.moveTo(-14, -150); ctx.lineTo(0, -165); ctx.lineTo(14, -150);
+                ctx.closePath(); ctx.fill();
+                ctx.restore();
+            }
+
+            // White guardrails (worldX 1200-3200)
+            if (cameraX < 3500) {
+                ctx.save();
+                ctx.strokeStyle = "#f0efe8";
+                ctx.lineWidth = 3;
+                for (let wx = 1200; wx < 3200; wx += 60) {
+                    const sx = getParallaxX(wx, 1.0);
+                    if (sx < -10 || sx > width + 10) continue;
+                    // Post
+                    ctx.fillStyle = "#eeeee8";
+                    ctx.fillRect(sx - 2, groundY - 30, 4, 32);
+                }
+                // Top rail
+                ctx.beginPath();
+                const rStart = getParallaxX(1200, 1.0);
+                const rEnd = getParallaxX(3200, 1.0);
+                if (rEnd > 0 && rStart < width) {
+                    ctx.moveTo(Math.max(0, rStart), groundY - 28);
+                    ctx.lineTo(Math.min(width, rEnd), groundY - 28);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(Math.max(0, rStart), groundY - 18);
+                    ctx.lineTo(Math.min(width, rEnd), groundY - 18);
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+
+            // Sea station sign (at worldX=400)
+            const ssx = getParallaxX(400, 1.0);
+            if (ssx > -200 && ssx < width + 200) {
+                ctx.save(); ctx.translate(ssx, groundY);
+                // Wooden posts
+                ctx.fillStyle = "#8B7355";
+                ctx.fillRect(-45, -110, 8, 112);
+                ctx.fillRect(37, -110, 8, 112);
+                // Sign board (wooden)
+                ctx.fillStyle = "#F5EDE0";
+                ctx.beginPath(); ctx.roundRect(-55, -140, 110, 50, 6); ctx.fill();
+                ctx.strokeStyle = "#8B7355";
+                ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.roundRect(-55, -140, 110, 50, 6); ctx.stroke();
+                // Text
+                ctx.fillStyle = "#4A3728";
+                ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                ctx.font = "bold 22px 'Zen Maru Gothic', sans-serif";
+                ctx.fillText("海の駅", 0, -120);
+                ctx.font = "500 9px 'Zen Maru Gothic', sans-serif";
+                ctx.fillStyle = "#7A6B5A";
+                ctx.fillText("Umi no Eki", 0, -100);
+                // Blue accent bar
+                ctx.fillStyle = "#5B9BD5";
+                ctx.beginPath(); ctx.roundRect(-50, -92, 100, 4, 2); ctx.fill();
+                ctx.restore();
+            }
+
+            // Sea station platform (worldX 250-550)
+            const seaPlatL = getParallaxX(250, 1.0);
+            const seaPlatR = getParallaxX(550, 1.0);
+            if (seaPlatR > 0 && seaPlatL < width) {
+                ctx.save();
+                const pw = seaPlatR - seaPlatL;
+                const ph = 18;
+                const py = groundY - ph;
+                // Platform base
+                ctx.fillStyle = "#A09080";
+                ctx.fillRect(seaPlatL, py, pw, ph);
+                // Platform top surface
+                ctx.fillStyle = "#C0B5A5";
+                ctx.fillRect(seaPlatL, py, pw, 4);
+                // Yellow safety line
+                ctx.fillStyle = "#E8C840";
+                ctx.fillRect(seaPlatL, py + 4, pw, 3);
+                // Platform edge shadow
+                ctx.fillStyle = "rgba(0,0,0,0.12)";
+                ctx.fillRect(seaPlatL, py + ph - 2, pw, 2);
+                // Small bench
+                const benchX = getParallaxX(340, 1.0);
+                ctx.fillStyle = "#8B7355";
+                ctx.fillRect(benchX - 12, py - 10, 24, 3);
+                ctx.fillRect(benchX - 10, py - 7, 3, 7);
+                ctx.fillRect(benchX + 7, py - 7, 3, 7);
+                ctx.restore();
+            }
+        }
+
+        // ======== TRAVEL LEFT LANDSCAPE (LEFT ONLY: 2200-7000) ========
+        function drawTravelLeftLandscape(ctx, groundY) {
+            if (cameraX > 7500) return;
+
+            // Residential area (2200-3800) - parallax 0.5
+            for (let wx = 2200; wx < 3800; wx += 200 + seededRandom(wx) * 100) {
+                const sx = getParallaxX(wx, 0.5);
+                if (sx < -200 || sx > width + 200 || wx >= 7000) continue;
+                const seed = wx * 0.77;
+                const bw = 60 + seededRandom(seed) * 50;
+                const bh = 35 + seededRandom(seed + 1) * 30;
+                const by = groundY - bh;
+                // Wall
+                const wallHue = 25 + seededRandom(seed + 2) * 20;
+                ctx.fillStyle = `hsl(${wallHue}, 22%, ${84 + seededRandom(seed + 3) * 6}%)`;
+                ctx.fillRect(sx, by, bw, bh);
+                // Roof
+                const roofColors = ["#8B5E4B", "#6B7B8B", "#B86040", "#7A6B5A"];
+                ctx.fillStyle = roofColors[Math.floor(seededRandom(seed + 4) * roofColors.length)];
+                ctx.beginPath();
+                ctx.moveTo(sx - 6, by + 2);
+                ctx.lineTo(sx + bw / 2, by - 22 - seededRandom(seed + 5) * 12);
+                ctx.lineTo(sx + bw + 6, by + 2);
+                ctx.closePath(); ctx.fill();
+                // Window
+                ctx.fillStyle = "rgba(160,210,240,0.5)";
+                ctx.fillRect(sx + 8, by + 10, 14, 12);
+                // Door
+                ctx.fillStyle = "rgba(100,70,50,0.6)";
+                ctx.fillRect(sx + bw - 22, by + bh - 22, 14, 22);
+                // Garden tree
+                if (seededRandom(seed + 6) > 0.5) {
+                    const tx = sx + bw + 12;
+                    ctx.fillStyle = "#6B8E5A";
+                    ctx.beginPath(); ctx.arc(tx, by - 5, 14, 0, Math.PI * 2); ctx.fill();
+                    ctx.fillStyle = "#7A6B5A";
+                    ctx.fillRect(tx - 2, by + 5, 4, 18);
+                }
+            }
+
+            // Ferris wheel at ~worldX 3900 - parallax 0.55
+            const fwX = getParallaxX(3900, 0.55);
+            if (fwX > -200 && fwX < width + 200) {
+                const r = 130;
+                const fy = groundY - r - 20;
+                const t = Date.now() * 0.0003;
+                ctx.save(); ctx.translate(fwX, fy);
+                // Support structure
+                ctx.strokeStyle = "rgba(180,180,175,0.8)";
+                ctx.lineWidth = 5;
+                ctx.beginPath();
+                ctx.moveTo(0, 0); ctx.lineTo(-70, r + 20);
+                ctx.moveTo(0, 0); ctx.lineTo(70, r + 20);
+                ctx.stroke();
+                // Cross brace
+                ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(-35, r * 0.5 + 10); ctx.lineTo(35, r * 0.5 + 10); ctx.stroke();
+                // Wheel rim
+                ctx.strokeStyle = "rgba(200,200,195,0.9)";
+                ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+                // Inner rim
+                ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.arc(0, 0, r * 0.7, 0, Math.PI * 2); ctx.stroke();
+                // Hub
+                ctx.fillStyle = "#ccc";
+                ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.fill();
+                // Spokes and gondolas
+                for (let i = 0; i < 16; i++) {
+                    const ang = t + (i / 16) * Math.PI * 2;
+                    const gx = Math.cos(ang) * r, gy = Math.sin(ang) * r;
+                    // Spoke
+                    ctx.strokeStyle = "rgba(190,190,185,0.5)";
+                    ctx.lineWidth = 1;
+                    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(gx, gy); ctx.stroke();
+                    // Gondola
+                    const hue = (i * 22.5) % 360;
+                    ctx.fillStyle = `hsla(${hue}, 55%, 68%, 0.9)`;
+                    ctx.beginPath(); ctx.roundRect(gx - 8, gy - 4, 16, 13, 3); ctx.fill();
+                    ctx.strokeStyle = "rgba(255,255,255,0.5)";
+                    ctx.lineWidth = 1;
+                    ctx.beginPath(); ctx.roundRect(gx - 8, gy - 4, 16, 13, 3); ctx.stroke();
+                }
+                ctx.restore();
+            }
+
+            // Town area (4500-5500) - parallax 0.45
+            for (let wx = 4500; wx < 5500; wx += 140 + seededRandom(wx * 1.1) * 80) {
+                const sx = getParallaxX(wx, 0.45);
+                if (sx < -200 || sx > width + 200 || wx >= 7000) continue;
+                const seed = wx * 0.91;
+                const bw = 70 + seededRandom(seed) * 50;
+                const bh = 55 + seededRandom(seed + 1) * 50;
+                const by = groundY - bh;
+                // Building
+                ctx.fillStyle = `hsl(${30 + seededRandom(seed + 2) * 15}, 18%, ${80 + seededRandom(seed + 3) * 8}%)`;
+                ctx.fillRect(sx, by, bw, bh);
+                // Dark edge
+                ctx.fillStyle = "rgba(0,0,0,0.08)";
+                ctx.fillRect(sx + bw - 5, by, 5, bh);
+                // Flat or slight roof
+                ctx.fillStyle = `hsl(${20 + seededRandom(seed + 4) * 10}, 12%, 55%)`;
+                ctx.fillRect(sx - 3, by - 4, bw + 6, 6);
+                // Shop sign
+                if (seededRandom(seed + 5) > 0.4) {
+                    const signColors = ["#cc6644", "#448866", "#6666aa", "#aa7744"];
+                    ctx.fillStyle = signColors[Math.floor(seededRandom(seed + 6) * signColors.length)];
+                    ctx.fillRect(sx + 5, by + 8, bw - 10, 10);
+                }
+                // Windows
+                const wRows = Math.floor(bh / 25);
+                for (let r = 0; r < wRows; r++) {
+                    for (let c = 0; c < 2; c++) {
+                        if (seededRandom(seed + r + c + 7) > 0.35) {
+                            ctx.fillStyle = "rgba(180,210,230,0.4)";
+                            ctx.fillRect(sx + 8 + c * (bw / 2), by + 22 + r * 22, bw / 2 - 12, 10);
+                        }
+                    }
+                }
+            }
+
+            // Office buildings (5500-6800) - multiple parallax layers
+            const drawBuildings = (startW, endW, speed, hMax, spacing, colorL) => {
+                for (let wx = startW; wx < endW; wx += spacing) {
+                    if (wx >= 7000) continue;
+                    const sx = getParallaxX(wx, speed);
+                    if (sx < -200 || sx > width + 200) continue;
+                    const seed = wx * 0.88;
+                    const bh = 70 + seededRandom(seed) * hMax;
+                    const bw = 45 + seededRandom(seed + 1) * 55;
+                    const by = groundY - bh;
+                    // Building
+                    ctx.fillStyle = `hsl(215, 8%, ${colorL + seededRandom(seed + 2) * 10}%)`;
+                    ctx.beginPath(); ctx.roundRect(sx, by, bw, bh, [2, 2, 0, 0]); ctx.fill();
+                    // Dark right edge
+                    ctx.fillStyle = `hsl(215, 8%, ${colorL - 10}%)`;
+                    ctx.fillRect(sx + bw - 5, by, 5, bh);
+                    // Top detail
+                    ctx.fillStyle = `hsl(215, 6%, ${colorL - 5}%)`;
+                    ctx.fillRect(sx, by, bw, 4);
+                    // Windows
+                    const cols = Math.max(2, Math.floor(bw / 18));
+                    const rows = Math.max(2, Math.floor(bh / 22));
+                    for (let r = 0; r < rows; r++) {
+                        for (let c = 0; c < cols; c++) {
+                            if (seededRandom(seed + r * 10 + c) > 0.3) {
+                                ctx.fillStyle = "rgba(180,210,235,0.3)";
+                                ctx.fillRect(sx + 6 + c * (bw - 10) / cols, by + 10 + r * (bh - 14) / rows, (bw - 14) / cols - 3, (bh - 18) / rows - 5);
+                            }
+                        }
+                    }
+                }
+            };
+            drawBuildings(5500, 6800, 0.25, 80, 350, 82);
+            drawBuildings(5800, 6800, 0.4, 140, 220, 72);
+            drawBuildings(6000, 7000, 0.55, 180, 180, 65);
+        }
+
+        // ======== TRAVEL RIGHT LANDSCAPE (RIGHT ONLY: 7000-14000) ========
+        function drawTravelRightLandscape(ctx, groundY) {
+            if (cameraX + width < 6500) return;
+            const sunProgress = clamp01((cameraX - 5500) / 5000);
+
+            // --- Distant rice paddies and fields (background, parallax 0.15-0.25) ---
+            // Expansive farmland visible behind buildings and architecture
+            if (cameraX + width > 8000) {
+                ctx.save();
+                // Far distant paddy fields (parallax 0.15)
+                for (let wx = 8800; wx < 13000; wx += 300 + seededRandom(wx * 0.31) * 200) {
+                    const sx = getParallaxX(wx, 0.15);
+                    if (sx < -300 || sx > width + 300) continue;
+                    const seed = wx * 0.67;
+                    const pw = 180 + seededRandom(seed) * 120;
+                    const ph = 14 + seededRandom(seed + 1) * 10;
+                    const py = groundY - 40 - seededRandom(seed + 2) * 30;
+                    // Field fill (golden rice / green crops)
+                    const isRice = seededRandom(seed + 3) > 0.35;
+                    if (isRice) {
+                        ctx.fillStyle = `hsla(45, ${35 + sunProgress * 15}%, ${55 + sunProgress * 10}%, 0.6)`;
+                    } else {
+                        ctx.fillStyle = `hsla(95, ${25 + sunProgress * 5}%, ${45 + sunProgress * 8}%, 0.5)`;
+                    }
+                    ctx.fillRect(sx, py, pw, ph);
+                    // Subtle ridge lines
+                    ctx.strokeStyle = `rgba(80,60,30,0.15)`;
+                    ctx.lineWidth = 0.5;
+                    for (let r = 0; r < pw; r += 12) {
+                        ctx.beginPath();
+                        ctx.moveTo(sx + r, py + ph);
+                        ctx.lineTo(sx + r + seededRandom(seed + r) * 3, py + 2);
+                        ctx.stroke();
+                    }
+                }
+                // Mid-distance fields (parallax 0.25)
+                for (let wx = 9000; wx < 12500; wx += 250 + seededRandom(wx * 0.41) * 150) {
+                    const sx = getParallaxX(wx, 0.25);
+                    if (sx < -200 || sx > width + 200) continue;
+                    const seed = wx * 0.79;
+                    const pw = 140 + seededRandom(seed) * 100;
+                    const ph = 10 + seededRandom(seed + 1) * 8;
+                    const py = groundY - 22 - seededRandom(seed + 2) * 15;
+                    ctx.fillStyle = `hsla(48, ${40 + sunProgress * 12}%, ${50 + sunProgress * 12}%, 0.7)`;
+                    ctx.fillRect(sx, py, pw, ph);
+                    // Rice stalks
+                    ctx.strokeStyle = `hsla(50, 40%, ${44 + sunProgress * 10}%, 0.5)`;
+                    ctx.lineWidth = 0.8;
+                    for (let r = 0; r < pw; r += 6) {
+                        const rh = 12 + seededRandom(seed + r) * 8;
+                        ctx.beginPath();
+                        ctx.moveTo(sx + r, py + ph - 2);
+                        ctx.lineTo(sx + r + seededRandom(seed + r + 1) * 3 - 1, py + ph - 2 - rh);
+                        ctx.stroke();
+                    }
+                    ctx.strokeStyle = "rgba(80,60,30,0.2)";
+                    ctx.lineWidth = 0.5;
+                    ctx.strokeRect(sx, py, pw, ph);
+                }
+                ctx.restore();
+            }
+
+            // Office buildings (7200-8500) - parallax layers
+            const drawRightBuildings = (startW, endW, speed, hMax, spacing, lightness) => {
+                for (let wx = startW; wx < endW; wx += spacing) {
+                    if (wx < 7000) continue;
+                    const sx = getParallaxX(wx, speed);
+                    if (sx < -200 || sx > width + 200) continue;
+                    const seed = wx * 0.93;
+                    const bh = 60 + seededRandom(seed) * hMax;
+                    const bw = 45 + seededRandom(seed + 1) * 50;
+                    const by = groundY - bh;
+                    // Warm-tinted building (sunset wash)
+                    const warmShift = sunProgress * 15;
+                    ctx.fillStyle = `hsl(${20 + warmShift}, ${8 + sunProgress * 6}%, ${lightness + seededRandom(seed + 2) * 8}%)`;
+                    ctx.beginPath(); ctx.roundRect(sx, by, bw, bh, [2, 2, 0, 0]); ctx.fill();
+                    ctx.fillStyle = `rgba(0,0,0,0.08)`;
+                    ctx.fillRect(sx + bw - 5, by, 5, bh);
+                    // Windows
+                    const cols = Math.max(2, Math.floor(bw / 18));
+                    const rows = Math.max(2, Math.floor(bh / 22));
+                    for (let r = 0; r < rows; r++) {
+                        for (let c = 0; c < cols; c++) {
+                            if (seededRandom(seed + r * 10 + c) > 0.3) {
+                                const winAlpha = 0.3 + sunProgress * 0.3;
+                                ctx.fillStyle = `rgba(255,200,140,${winAlpha})`;
+                                ctx.fillRect(sx + 6 + c * (bw - 10) / cols, by + 10 + r * (bh - 14) / rows, (bw - 14) / cols - 3, (bh - 18) / rows - 5);
+                            }
+                        }
+                    }
+                    // Sunset shadow (elongated right)
+                    if (sunProgress > 0.2) {
+                        ctx.fillStyle = `rgba(40,20,10,${0.06 + sunProgress * 0.08})`;
+                        ctx.beginPath();
+                        ctx.moveTo(sx + bw, groundY);
+                        ctx.lineTo(sx + bw, by + bh * 0.3);
+                        ctx.lineTo(sx + bw + bh * 0.6, groundY);
+                        ctx.closePath(); ctx.fill();
+                    }
+                }
+            };
+            drawRightBuildings(7200, 8500, 0.25, 70, 320, 78);
+            drawRightBuildings(7400, 8500, 0.4, 130, 200, 70);
+            drawRightBuildings(7600, 8800, 0.55, 160, 170, 64);
+
+            // Japanese-style area (8500-12500) - denser, richer content
+            // Layer 1: Background traditional houses (parallax 0.35)
+            for (let wx = 8800; wx < 12000; wx += 350 + seededRandom(wx * 0.62) * 200) {
+                const sx = getParallaxX(wx, 0.35);
+                if (sx < -200 || sx > width + 200) continue;
+                const seed = wx * 0.87;
+                const bw = 70 + seededRandom(seed + 1) * 35;
+                const bh = 32 + seededRandom(seed + 2) * 15;
+                const by = groundY - bh - 8;
+                // Distant house wall
+                ctx.fillStyle = `hsl(35, 12%, ${82 + seededRandom(seed + 3) * 6}%)`;
+                ctx.fillRect(sx, by, bw, bh);
+                // Roof
+                ctx.fillStyle = "#555";
+                ctx.beginPath();
+                ctx.moveTo(sx - 6, by + 2);
+                ctx.lineTo(sx + bw / 2, by - 14);
+                ctx.lineTo(sx + bw + 6, by + 2);
+                ctx.closePath(); ctx.fill();
+            }
+
+            // Layer 2: Main foreground Japanese architecture (parallax 0.5)
+            const japaneseDefs = [];
+            for (let wx = 8500; wx < 12500; wx += 180 + seededRandom(wx * 0.71) * 120) {
+                japaneseDefs.push(wx);
+            }
+            japaneseDefs.forEach(wx => {
+                const sx = getParallaxX(wx, 0.5);
+                if (sx < -250 || sx > width + 250) return;
+                const seed = wx * 0.83;
+                const type = Math.floor(seededRandom(seed) * 8);
+
+                if (type <= 2) {
+                    // Traditional house (低い家屋) — multiple variants
+                    const bw = 75 + seededRandom(seed + 1) * 45;
+                    const bh = 38 + seededRandom(seed + 2) * 22;
+                    const by = groundY - bh;
+                    // White plaster wall (漆喰)
+                    ctx.fillStyle = `hsl(35, ${12 + seededRandom(seed + 7) * 8}%, ${84 + seededRandom(seed + 3) * 6}%)`;
+                    ctx.fillRect(sx, by, bw, bh);
+                    // Tiled roof (瓦) — curved
+                    ctx.fillStyle = "#4A4A4A";
+                    ctx.beginPath();
+                    ctx.moveTo(sx - 10, by + 3);
+                    ctx.quadraticCurveTo(sx + bw / 2, by - 24 - seededRandom(seed + 8) * 8, sx + bw + 10, by + 3);
+                    ctx.closePath(); ctx.fill();
+                    // Roof tile lines
+                    ctx.strokeStyle = "rgba(60,60,60,0.3)";
+                    ctx.lineWidth = 0.5;
+                    for (let ri = 0; ri < 3; ri++) {
+                        const ry = by - 4 - ri * 5;
+                        ctx.beginPath();
+                        ctx.moveTo(sx - 6 + ri * 3, by + 2);
+                        ctx.quadraticCurveTo(sx + bw / 2, ry, sx + bw + 6 - ri * 3, by + 2);
+                        ctx.stroke();
+                    }
+                    // Engawa (veranda) with wood grain
+                    ctx.fillStyle = "#C4A87A";
+                    ctx.fillRect(sx, by + bh - 6, bw, 8);
+                    ctx.strokeStyle = "rgba(120,90,50,0.2)";
+                    ctx.lineWidth = 0.5;
+                    ctx.beginPath(); ctx.moveTo(sx, by + bh - 3); ctx.lineTo(sx + bw, by + bh - 3); ctx.stroke();
+                    // Shoji screen
+                    ctx.fillStyle = "rgba(245,240,228,0.8)";
+                    ctx.fillRect(sx + 8, by + 8, bw - 16, bh - 16);
+                    ctx.strokeStyle = "rgba(100,80,60,0.25)";
+                    ctx.lineWidth = 0.5;
+                    const panels = 3 + Math.floor(seededRandom(seed + 9) * 3);
+                    for (let g = 0; g <= panels; g++) {
+                        const gx = sx + 8 + g * (bw - 16) / panels;
+                        ctx.beginPath(); ctx.moveTo(gx, by + 8); ctx.lineTo(gx, by + bh - 8); ctx.stroke();
+                    }
+                    // Horizontal kumiko line
+                    ctx.beginPath(); ctx.moveTo(sx + 8, by + bh * 0.5); ctx.lineTo(sx + bw - 8, by + bh * 0.5); ctx.stroke();
+                    // Garden stone/lantern
+                    if (seededRandom(seed + 10) > 0.5) {
+                        const lx = sx + bw + 15;
+                        ctx.fillStyle = "#888";
+                        ctx.fillRect(lx - 4, groundY - 18, 8, 18);
+                        ctx.fillRect(lx - 8, groundY - 22, 16, 5);
+                        ctx.beginPath();
+                        ctx.moveTo(lx - 10, groundY - 22);
+                        ctx.lineTo(lx, groundY - 30);
+                        ctx.lineTo(lx + 10, groundY - 22);
+                        ctx.closePath(); ctx.fill();
+                    }
+                    // Shadow
+                    if (sunProgress > 0.2) {
+                        ctx.fillStyle = `rgba(40,20,10,${0.06 + sunProgress * 0.06})`;
+                        ctx.beginPath();
+                        ctx.moveTo(sx + bw, groundY); ctx.lineTo(sx + bw, by);
+                        ctx.lineTo(sx + bw + bh * 0.5, groundY); ctx.closePath(); ctx.fill();
+                    }
+                } else if (type === 3) {
+                    // Rice paddy (田んぼ) — wider, more detailed
+                    const pw = 160 + seededRandom(seed + 1) * 80;
+                    const py = groundY - 10;
+                    // Water reflection in paddy
+                    ctx.fillStyle = `hsla(200, 20%, ${60 + sunProgress * 15}%, 0.2)`;
+                    ctx.fillRect(sx, py - 2, pw, 16);
+                    // Earth
+                    ctx.fillStyle = `hsl(48, ${40 + sunProgress * 15}%, ${50 + sunProgress * 10}%)`;
+                    ctx.fillRect(sx, py, pw, 12);
+                    // Rice stalks (denser)
+                    ctx.strokeStyle = `hsl(50, 45%, ${46 + sunProgress * 10}%)`;
+                    ctx.lineWidth = 1;
+                    for (let r = 0; r < pw; r += 5) {
+                        const rh = 20 + seededRandom(seed + r) * 14;
+                        const sway = Math.sin(Date.now() * 0.001 + r * 0.1) * 2;
+                        ctx.beginPath();
+                        ctx.moveTo(sx + r, py);
+                        ctx.quadraticCurveTo(sx + r + sway, py - rh * 0.6, sx + r + sway * 1.5, py - rh);
+                        ctx.stroke();
+                        // Rice grain at tip
+                        if (seededRandom(seed + r + 5) > 0.5) {
+                            ctx.fillStyle = `hsl(42, 50%, ${55 + sunProgress * 10}%)`;
+                            ctx.beginPath(); ctx.arc(sx + r + sway * 1.5, py - rh, 1.5, 0, Math.PI * 2); ctx.fill();
+                        }
+                    }
+                    // Paddy border (畦道)
+                    ctx.fillStyle = `hsl(30, 25%, ${50 + sunProgress * 8}%)`;
+                    ctx.fillRect(sx - 2, py + 10, pw + 4, 4);
+                } else if (type === 4) {
+                    // Tall Japanese architecture (五重塔風)
+                    const towerX = sx, towerW = 50;
+                    const floors = 4 + Math.floor(seededRandom(seed + 1) * 2);
+                    const floorH = 25;
+                    let curY = groundY;
+                    for (let f = 0; f < floors; f++) {
+                        const fw = towerW - f * 6;
+                        const fy = curY - floorH;
+                        // Floor body
+                        ctx.fillStyle = `hsl(35, 12%, ${88 - f * 2}%)`;
+                        ctx.fillRect(towerX - fw / 2, fy, fw, floorH - 3);
+                        // Window
+                        ctx.fillStyle = "rgba(60,50,40,0.3)";
+                        ctx.fillRect(towerX - fw / 4, fy + 6, fw / 2, floorH - 14);
+                        // Roof eave (curved, more elegant)
+                        ctx.fillStyle = "#3A3A3A";
+                        ctx.beginPath();
+                        ctx.moveTo(towerX - fw / 2 - 12, fy + 2);
+                        ctx.quadraticCurveTo(towerX, fy - 10, towerX + fw / 2 + 12, fy + 2);
+                        ctx.lineTo(towerX + fw / 2 + 10, fy + 5);
+                        ctx.lineTo(towerX - fw / 2 - 10, fy + 5);
+                        ctx.closePath(); ctx.fill();
+                        curY = fy;
+                    }
+                    // Spire (sorin)
+                    ctx.fillStyle = "#666";
+                    ctx.fillRect(towerX - 2, curY - 35, 4, 35);
+                    // Decorative rings
+                    for (let ri = 0; ri < 4; ri++) {
+                        ctx.fillStyle = "#777";
+                        ctx.fillRect(towerX - 4 - ri * 0.5, curY - 30 + ri * 5, 8 + ri, 2);
+                    }
+                    ctx.fillStyle = "#888";
+                    ctx.beginPath(); ctx.arc(towerX, curY - 35, 4, 0, Math.PI * 2); ctx.fill();
+                    // Shadow
+                    if (sunProgress > 0.2) {
+                        const totalH = groundY - curY + 35;
+                        ctx.fillStyle = `rgba(40,20,10,${0.06 + sunProgress * 0.06})`;
+                        ctx.beginPath();
+                        ctx.moveTo(towerX + towerW / 2, groundY);
+                        ctx.lineTo(towerX, curY - 35);
+                        ctx.lineTo(towerX + towerW / 2 + totalH * 0.4, groundY);
+                        ctx.closePath(); ctx.fill();
+                    }
+                } else if (type === 5) {
+                    // Torii gate (鳥居) — more detailed
+                    ctx.fillStyle = "#CC4444";
+                    // Main pillars (slightly tapered)
+                    ctx.beginPath();
+                    ctx.moveTo(sx - 32, groundY + 2);
+                    ctx.lineTo(sx - 28, groundY - 82);
+                    ctx.lineTo(sx - 22, groundY - 82);
+                    ctx.lineTo(sx - 24, groundY + 2);
+                    ctx.closePath(); ctx.fill();
+                    ctx.beginPath();
+                    ctx.moveTo(sx + 22, groundY + 2);
+                    ctx.lineTo(sx + 20, groundY - 82);
+                    ctx.lineTo(sx + 28, groundY - 82);
+                    ctx.lineTo(sx + 32, groundY + 2);
+                    ctx.closePath(); ctx.fill();
+                    // Kasagi (top beam, curved)
+                    ctx.beginPath();
+                    ctx.moveTo(sx - 40, groundY - 82);
+                    ctx.quadraticCurveTo(sx, groundY - 94, sx + 40, groundY - 82);
+                    ctx.lineTo(sx + 38, groundY - 78);
+                    ctx.quadraticCurveTo(sx, groundY - 88, sx - 38, groundY - 78);
+                    ctx.closePath(); ctx.fill();
+                    // Nuki (horizontal beam)
+                    ctx.fillRect(sx - 34, groundY - 66, 68, 5);
+                    // Gakuzuka (center tablet)
+                    ctx.fillStyle = "#333";
+                    ctx.fillRect(sx - 10, groundY - 76, 20, 12);
+                    ctx.fillStyle = "#FFD700";
+                    ctx.font = "bold 6px 'Zen Maru Gothic', sans-serif";
+                    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                    ctx.fillText("神社", sx, groundY - 70);
+                } else if (type === 6) {
+                    // Farmhouse with vegetable field (農家と畑)
+                    const bw = 90 + seededRandom(seed + 1) * 30;
+                    const bh = 42 + seededRandom(seed + 2) * 15;
+                    const by = groundY - bh;
+                    // Farmhouse
+                    ctx.fillStyle = `hsl(28, 18%, ${78 + seededRandom(seed + 3) * 8}%)`;
+                    ctx.fillRect(sx, by, bw, bh);
+                    // Thatched-style roof
+                    ctx.fillStyle = "#6B5D4A";
+                    ctx.beginPath();
+                    ctx.moveTo(sx - 12, by + 4);
+                    ctx.lineTo(sx + bw / 2, by - 28);
+                    ctx.lineTo(sx + bw + 12, by + 4);
+                    ctx.closePath(); ctx.fill();
+                    // Chimney smoke hint
+                    ctx.fillStyle = "rgba(200,195,190,0.2)";
+                    ctx.beginPath(); ctx.arc(sx + bw * 0.7, by - 35 + Math.sin(Date.now() * 0.001) * 3, 8, 0, Math.PI * 2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(sx + bw * 0.7 - 4, by - 45 + Math.sin(Date.now() * 0.0012) * 3, 6, 0, Math.PI * 2); ctx.fill();
+                    // Vegetable field next to house
+                    const fieldX = sx + bw + 10;
+                    const fieldW = 80 + seededRandom(seed + 4) * 40;
+                    ctx.fillStyle = `hsl(90, 25%, ${40 + sunProgress * 8}%)`;
+                    ctx.fillRect(fieldX, groundY - 6, fieldW, 10);
+                    // Crop rows
+                    ctx.fillStyle = `hsl(110, 35%, ${35 + sunProgress * 10}%)`;
+                    for (let cr = 0; cr < fieldW; cr += 10) {
+                        ctx.beginPath();
+                        ctx.arc(fieldX + cr + 5, groundY - 8, 4 + seededRandom(seed + cr) * 3, 0, Math.PI, true);
+                        ctx.fill();
+                    }
+                } else {
+                    // Shrine/temple gate with stone path (参道)
+                    // Stone steps
+                    ctx.fillStyle = "#999";
+                    for (let si = 0; si < 3; si++) {
+                        ctx.fillRect(sx - 20 + si * 2, groundY - 4 - si * 5, 40 - si * 4, 6);
+                    }
+                    // Stone lanterns (pair)
+                    [-22, 22].forEach(offset => {
+                        const lx = sx + offset;
+                        ctx.fillStyle = "#8A8A8A";
+                        ctx.fillRect(lx - 5, groundY - 28, 10, 28);
+                        ctx.fillRect(lx - 8, groundY - 32, 16, 5);
+                        ctx.beginPath();
+                        ctx.moveTo(lx - 10, groundY - 32);
+                        ctx.lineTo(lx, groundY - 42);
+                        ctx.lineTo(lx + 10, groundY - 32);
+                        ctx.closePath(); ctx.fill();
+                        // Lantern glow
+                        ctx.fillStyle = "rgba(255,200,100,0.15)";
+                        ctx.beginPath(); ctx.arc(lx, groundY - 36, 8, 0, Math.PI * 2); ctx.fill();
+                    });
+                }
+            });
+        }
+
+        // ======== TRAVEL AUTUMN TREES (RIGHT ONLY, background) ========
+        function drawTravelAutumnTrees(ctx, groundY, isForeground) {
+            if (cameraX + width < 9500) return;
+            const t = Date.now() * 0.0005;
+
+            const drawAutumnTree = (wx, parallax, trunkH, canopyR, hueBase) => {
+                const sx = getParallaxX(wx, parallax);
+                if (sx < -canopyR * 2 || sx > width + canopyR * 2) return;
+                const by = groundY;
+
+                // Trunk — natural curve, extends fully to ground
+                const trunkW = 5 + canopyR * 0.1;
+                const trunkG = ctx.createLinearGradient(sx, by, sx, by - trunkH);
+                trunkG.addColorStop(0, "#4A3020");
+                trunkG.addColorStop(0.5, "#5A3E2E");
+                trunkG.addColorStop(1, "#6B4E3D");
+                ctx.fillStyle = trunkG;
+                ctx.beginPath();
+                ctx.moveTo(sx - trunkW, by + 4);
+                ctx.lineTo(sx - trunkW * 1.3, by);
+                ctx.quadraticCurveTo(sx - trunkW * 0.7, by - trunkH * 0.4, sx - trunkW * 0.3, by - trunkH);
+                ctx.lineTo(sx + trunkW * 0.3, by - trunkH);
+                ctx.quadraticCurveTo(sx + trunkW * 0.7, by - trunkH * 0.4, sx + trunkW * 1.3, by);
+                ctx.lineTo(sx + trunkW, by + 4);
+                ctx.closePath(); ctx.fill();
+
+                // Roots
+                ctx.strokeStyle = "#4A3020";
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(sx - trunkW * 1.2, by);
+                ctx.quadraticCurveTo(sx - trunkW * 2, by + 2, sx - trunkW * 2.5, by + 1);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(sx + trunkW * 1.2, by);
+                ctx.quadraticCurveTo(sx + trunkW * 1.8, by + 3, sx + trunkW * 2.2, by + 1);
+                ctx.stroke();
+
+                // Branches
+                if (canopyR > 18) {
+                    ctx.strokeStyle = "#5A3E2E";
+                    ctx.lineWidth = 2.5;
+                    ctx.beginPath();
+                    ctx.moveTo(sx - 2, by - trunkH * 0.7);
+                    ctx.quadraticCurveTo(sx - canopyR * 0.3, by - trunkH * 0.85, sx - canopyR * 0.55, by - trunkH - canopyR * 0.15);
+                    ctx.stroke();
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(sx + 2, by - trunkH * 0.65);
+                    ctx.quadraticCurveTo(sx + canopyR * 0.25, by - trunkH * 0.8, sx + canopyR * 0.5, by - trunkH - canopyR * 0.05);
+                    ctx.stroke();
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.moveTo(sx, by - trunkH * 0.9);
+                    ctx.lineTo(sx + canopyR * 0.15, by - trunkH - canopyR * 0.3);
+                    ctx.stroke();
+                }
+
+                // Canopy — opaque base + color variation circles (lightweight)
+                const canopyY = by - trunkH - canopyR * 0.2;
+
+                const clusters = [
+                    { dx: 0, dy: 0, r: canopyR * 0.7 },
+                    { dx: -canopyR * 0.4, dy: canopyR * 0.08, r: canopyR * 0.55 },
+                    { dx: canopyR * 0.35, dy: canopyR * 0.05, r: canopyR * 0.52 },
+                    { dx: -canopyR * 0.12, dy: -canopyR * 0.35, r: canopyR * 0.45 },
+                    { dx: canopyR * 0.2, dy: -canopyR * 0.28, r: canopyR * 0.42 },
+                    { dx: -canopyR * 0.5, dy: -canopyR * 0.08, r: canopyR * 0.4 },
+                    { dx: canopyR * 0.48, dy: canopyR * 0.12, r: canopyR * 0.42 },
+                ];
+
+                // Solid opaque base
+                ctx.fillStyle = `hsl(${hueBase + 8}, 50%, 40%)`;
+                clusters.forEach(c => {
+                    ctx.beginPath();
+                    ctx.arc(sx + c.dx, canopyY + c.dy, c.r, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                // Color variation bumps
+                clusters.forEach((cluster, ci) => {
+                    const cx = sx + cluster.dx, cy = canopyY + cluster.dy;
+                    const count = Math.floor(cluster.r * 0.8);
+                    for (let li = 0; li < count; li++) {
+                        const seed = wx * 0.31 + ci * 100 + li;
+                        const angle = seededRandom(seed) * Math.PI * 2;
+                        const dist = seededRandom(seed + 1) * cluster.r * 0.85;
+                        const lx = cx + Math.cos(angle) * dist;
+                        const ly = cy + Math.sin(angle) * dist * 0.85;
+                        const lr = 3 + seededRandom(seed + 2) * 4;
+                        const lhue = hueBase + seededRandom(seed + 3) * 45 - 10;
+                        const llit = 36 + seededRandom(seed + 4) * 24;
+                        ctx.fillStyle = `hsl(${lhue}, ${58 + seededRandom(seed + 5) * 15}%, ${llit}%)`;
+                        ctx.beginPath(); ctx.arc(lx, ly, lr, 0, Math.PI * 2); ctx.fill();
+                    }
+                });
+
+                // Highlight (upper-left)
+                ctx.fillStyle = `hsla(${hueBase + 25}, 65%, 60%, 0.3)`;
+                ctx.beginPath();
+                ctx.arc(sx - canopyR * 0.2, canopyY - canopyR * 0.2, canopyR * 0.4, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Falling leaves
+                for (let i = 0; i < 2; i++) {
+                    const fallPhase = (t * 2 + seededRandom(wx + i * 37) * 10) % 3;
+                    if (fallPhase > 2) continue;
+                    const fallProgress = fallPhase / 2;
+                    const lx = sx + (seededRandom(wx + i * 41) - 0.5) * canopyR * 2
+                               + Math.sin(fallProgress * 4 + i) * 15;
+                    const ly = canopyY + canopyR * 0.5 + fallProgress * (by - canopyY + canopyR * 0.5 + 10);
+                    const lhue = hueBase + seededRandom(wx + i * 43) * 30;
+                    ctx.fillStyle = `hsl(${lhue}, 60%, 50%)`;
+                    ctx.beginPath(); ctx.ellipse(lx, ly, 3, 1.5, fallProgress * 3, 0, Math.PI * 2); ctx.fill();
+                }
+
+                // Ground fallen leaves
+                for (let i = 0; i < 5; i++) {
+                    const lx = sx + (seededRandom(wx + i * 7) - 0.5) * canopyR * 1.8;
+                    const ly = by + 1 + seededRandom(wx + i * 11) * 6;
+                    const lhue = hueBase + seededRandom(wx + i * 13) * 35;
+                    ctx.fillStyle = `hsl(${lhue}, 55%, ${44 + seededRandom(wx + i * 17) * 12}%)`;
+                    ctx.beginPath(); ctx.ellipse(lx, ly, 2.5, 1.2, seededRandom(wx + i * 19) * Math.PI, 0, Math.PI * 2); ctx.fill();
+                }
+            };
+
+            // Background trees (behind track)
+            if (!isForeground) {
+                // Rising mountain terrain at mountain station (11500+)
+                // Draw BEFORE autumn trees so trees appear in front of mountain
+                // All layers extend off-screen to the right — never cut off
+                if (cameraX + width > 11000) {
+                    ctx.save();
+                    const mbStart = 11000, mbEnd = 18000;
+                    const steps = 24;
+
+                    // Helper: draw a mountain layer that extends off-screen right
+                    const drawMtnLayer = (pStart, pEnd, parallax, gradient, riseMax, sinFreq, sinOff, pts_out) => {
+                        ctx.fillStyle = gradient;
+                        ctx.beginPath();
+                        const pts = [];
+                        for (let i = 0; i <= steps; i++) {
+                            const mwx = pStart + (i / steps) * (pEnd - pStart);
+                            const mx = getParallaxX(mwx, parallax);
+                            const rise = clamp01((mwx - pStart) / (pEnd - pStart));
+                            const mh = rise * rise * riseMax + Math.sin(i * sinFreq + sinOff) * 10 + seededRandom(mwx * 0.5) * 6;
+                            pts.push({ x: mx, y: groundY - mh });
+                        }
+                        ctx.moveTo(pts[0].x, groundY);
+                        ctx.lineTo(pts[0].x, pts[0].y);
+                        for (let i = 1; i < pts.length; i++) {
+                            const cpx = (pts[i - 1].x + pts[i].x) / 2;
+                            ctx.bezierCurveTo(cpx, pts[i - 1].y, cpx, pts[i].y, pts[i].x, pts[i].y);
+                        }
+                        // Extend off-screen at final height
+                        const lastPt = pts[pts.length - 1];
+                        ctx.lineTo(lastPt.x + 3000, lastPt.y);
+                        ctx.lineTo(lastPt.x + 3000, groundY);
+                        ctx.closePath(); ctx.fill();
+                        if (pts_out) pts_out.push(...pts);
+                    };
+
+                    // --- Layer 1: Far mountain (parallax 0.12) ---
+                    const farG = ctx.createLinearGradient(0, groundY - 280, 0, groundY);
+                    farG.addColorStop(0, "#4A3D30");
+                    farG.addColorStop(0.3, "#5A4838");
+                    farG.addColorStop(0.7, "#6B5845");
+                    farG.addColorStop(1, "#5A4A3A");
+                    drawMtnLayer(mbStart, mbEnd, 0.12, farG, 260, 0.12, 0);
+
+                    // --- Layer 2: Mid mountain (parallax 0.22) ---
+                    const midG = ctx.createLinearGradient(0, groundY - 220, 0, groundY);
+                    midG.addColorStop(0, "#6B5540");
+                    midG.addColorStop(0.3, "#7A6650");
+                    midG.addColorStop(0.7, "#6B5B48");
+                    midG.addColorStop(1, "#5A4A38");
+                    drawMtnLayer(mbStart + 500, mbEnd, 0.22, midG, 200, 0.14, 1);
+
+                    // --- Layer 3: Near foothill (parallax 0.35) ---
+                    const nearG = ctx.createLinearGradient(0, groundY - 140, 0, groundY);
+                    nearG.addColorStop(0, "#7A6650");
+                    nearG.addColorStop(0.4, "#70604A");
+                    nearG.addColorStop(1, "#5A4A38");
+                    drawMtnLayer(12000, mbEnd, 0.35, nearG, 130, 0.16, 2);
+
+                    ctx.restore();
+                }
+
+                // Mountain station sign (at worldX=13600)
+                const msx = getParallaxX(13600, 1.0);
+                if (msx > -200 && msx < width + 200) {
+                    ctx.save(); ctx.translate(msx, groundY);
+                    // Wooden posts (thicker, darker)
+                    ctx.fillStyle = "#5A4030";
+                    ctx.fillRect(-48, -115, 10, 117);
+                    ctx.fillRect(38, -115, 10, 117);
+                    // Sign board (warm wood)
+                    ctx.fillStyle = "#EDE0D0";
+                    ctx.beginPath(); ctx.roundRect(-58, -145, 116, 52, 5); ctx.fill();
+                    ctx.strokeStyle = "#5A4030";
+                    ctx.lineWidth = 3;
+                    ctx.beginPath(); ctx.roundRect(-58, -145, 116, 52, 5); ctx.stroke();
+                    // Decorative top
+                    ctx.fillStyle = "#5A4030";
+                    ctx.beginPath();
+                    ctx.moveTo(-55, -145); ctx.lineTo(0, -158); ctx.lineTo(55, -145);
+                    ctx.closePath(); ctx.fill();
+                    // Text
+                    ctx.fillStyle = "#3E2723";
+                    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                    ctx.font = "bold 22px 'Zen Maru Gothic', sans-serif";
+                    ctx.fillText("山の駅", 0, -124);
+                    ctx.font = "500 9px 'Zen Maru Gothic', sans-serif";
+                    ctx.fillStyle = "#6B5B4A";
+                    ctx.fillText("Yama no Eki", 0, -103);
+                    // Brown accent bar
+                    ctx.fillStyle = "#8D6E63";
+                    ctx.beginPath(); ctx.roundRect(-52, -96, 104, 4, 2); ctx.fill();
+                    ctx.restore();
+                }
+
+                // Mountain station platform (worldX 13450-13750)
+                const mPlatL = getParallaxX(13450, 1.0);
+                const mPlatR = getParallaxX(13750, 1.0);
+                if (mPlatR > 0 && mPlatL < width) {
+                    ctx.save();
+                    const mpw = mPlatR - mPlatL;
+                    const mph = 18;
+                    const mpy = groundY - mph;
+                    // Platform base
+                    ctx.fillStyle = "#7A6B5A";
+                    ctx.fillRect(mPlatL, mpy, mpw, mph);
+                    // Platform top surface
+                    ctx.fillStyle = "#9A8B78";
+                    ctx.fillRect(mPlatL, mpy, mpw, 4);
+                    // Yellow safety line
+                    ctx.fillStyle = "#E8C840";
+                    ctx.fillRect(mPlatL, mpy + 4, mpw, 3);
+                    // Platform edge shadow
+                    ctx.fillStyle = "rgba(0,0,0,0.12)";
+                    ctx.fillRect(mPlatL, mpy + mph - 2, mpw, 2);
+                    // Wooden bench
+                    const mbenchX = getParallaxX(13530, 1.0);
+                    ctx.fillStyle = "#6B5040";
+                    ctx.fillRect(mbenchX - 12, mpy - 10, 24, 3);
+                    ctx.fillRect(mbenchX - 10, mpy - 7, 3, 7);
+                    ctx.fillRect(mbenchX + 7, mpy - 7, 3, 7);
+                    ctx.restore();
+                }
+
+                // Autumn trees — drawn AFTER mountain terrain so they appear in front
+                for (let wx = 10000; wx < 15000; wx += 100) {
+                    const density = clamp01((wx - 10000) / 3000);
+                    if (seededRandom(wx * 0.61) > 0.25 + (1 - density) * 0.55) continue;
+                    const seed = wx * 0.73;
+                    const trunkH = 45 + seededRandom(seed) * 45;
+                    const canopyR = 24 + seededRandom(seed + 1) * 28 + density * 12;
+                    const hueBase = seededRandom(seed + 2) > 0.6 ? 5 : (seededRandom(seed + 3) > 0.5 ? 25 : 42);
+                    drawAutumnTree(wx, 0.5, trunkH, canopyR, hueBase);
+                }
+            } else {
+                // Foreground trees (crossing in front of track, sparse)
+                for (let wx = 10500; wx < 14500; wx += 350) {
+                    const density = clamp01((wx - 10500) / 2500);
+                    if (seededRandom(wx * 0.44) > 0.15 + density * 0.25) continue;
+                    const seed = wx * 0.59;
+                    const trunkH = 55 + seededRandom(seed) * 35;
+                    const canopyR = 28 + seededRandom(seed + 1) * 20;
+                    const hueBase = seededRandom(seed + 2) > 0.6 ? 10 : (seededRandom(seed + 3) > 0.5 ? 30 : 45);
+                    drawAutumnTree(wx, 1.0, trunkH, canopyR, hueBase);
+                }
+            }
+        }
+
+        // ======== TRAVEL TRACK ========
+        function drawTravelTrack(ctx, groundY) {
+            // Track bed — dark brown
+            ctx.fillStyle = "#3B2A1A";
+            ctx.fillRect(0, groundY, width, 155);
+
+            // Ballast/gravel — grey stones
+            const step = 8;
+            const startX = Math.floor(cameraX / step) * step;
+            for (let x = startX; x < cameraX + width + 20; x += step) {
+                const seed = x * 0.123;
+                for (let i = 0; i < 3; i++) {
+                    const ss = seed + i * 9.9;
+                    const rand = seededRandom(ss);
+                    const rx = x - cameraX + (rand * 14 - 7);
+                    const ry = groundY + seededRandom(ss + 1) * 150;
+                    const size = 2 + rand * 3.5;
+                    // Grey gravel (lighter near sea for sand blend)
+                    const worldX = x;
+                    const sandBlend = clamp01(1 - worldX / 2500);
+                    const baseGrey = 75 + rand * 45;
+                    const r = baseGrey + sandBlend * 40;
+                    const g = baseGrey + sandBlend * 35;
+                    const b = baseGrey + sandBlend * 25;
+                    ctx.fillStyle = `rgb(${Math.min(r, 180)},${Math.min(g, 175)},${Math.min(b, 170)})`;
+                    ctx.beginPath();
+                    const sides = 5 + Math.floor(rand * 3);
+                    for (let s = 0; s < sides; s++) {
+                        const ang = (s / sides) * Math.PI * 2;
+                        const rr = size * (0.8 + seededRandom(ss + s + 10) * 0.4);
+                        if (s === 0) ctx.moveTo(rx + Math.cos(ang) * rr, ry + Math.sin(ang) * rr);
+                        else ctx.lineTo(rx + Math.cos(ang) * rr, ry + Math.sin(ang) * rr);
+                    }
+                    ctx.fill();
+                }
+            }
+
+            // Fallen leaves on track (right side)
+            if (cameraX > 9000) {
+                for (let x = Math.max(10000, cameraX); x < Math.min(14000, cameraX + width); x += 40) {
+                    if (seededRandom(x * 0.37) > 0.3) continue;
+                    const sx = x - cameraX;
+                    const sy = groundY + 20 + seededRandom(x * 0.41) * 120;
+                    const hue = 10 + seededRandom(x * 0.53) * 35;
+                    ctx.fillStyle = `hsla(${hue}, 60%, 45%, 0.35)`;
+                    ctx.beginPath();
+                    ctx.ellipse(sx, sy, 4, 2.5, seededRandom(x * 0.6) * Math.PI, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            // Sleepers/ties
+            for (let x = Math.floor(cameraX / 80) * 80; x < cameraX + width + 100; x += 80) {
+                const sx = x - cameraX;
+                ctx.fillStyle = "#4a4540";
+                ctx.beginPath(); ctx.roundRect(sx - 16, groundY + 12, 32, 135, 2); ctx.fill();
+                // Wood grain hint
+                ctx.fillStyle = "rgba(255,255,255,0.04)";
+                ctx.fillRect(sx - 12, groundY + 16, 2, 125);
+                ctx.fillRect(sx + 4, groundY + 16, 2, 125);
+            }
+
+            // Rails
+            [groundY + 32, groundY + 72].forEach(ry => {
+                // Rail base
+                ctx.fillStyle = "#383430";
+                ctx.fillRect(0, ry + 3, width, 10);
+                // Rail top (shiny)
+                const railG = ctx.createLinearGradient(0, ry, 0, ry + 5);
+                railG.addColorStop(0, "#ddd");
+                railG.addColorStop(0.5, "#aaa");
+                railG.addColorStop(1, "#888");
+                ctx.fillStyle = railG;
+                ctx.fillRect(0, ry, width, 5);
+            });
+        }
+
+        // ======== TRAVEL OVERHEAD (Power lines & poles) ========
+        function drawTravelOverhead(ctx, groundY) {
+            const poleSpacing = 400;
+            const startX = Math.floor(cameraX / poleSpacing) * poleSpacing;
+            const wireY = groundY - 175;
+
+            // Catenary wire
+            ctx.save();
+            ctx.strokeStyle = "rgba(30,30,30,0.4)";
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            for (let x = startX - poleSpacing; x < cameraX + width + poleSpacing; x += poleSpacing) {
+                const sx = x - cameraX;
+                if (x === startX - poleSpacing) ctx.moveTo(sx, wireY);
+                else ctx.quadraticCurveTo(sx - poleSpacing / 2, wireY + 18, sx, wireY);
+            }
+            ctx.stroke();
+            // Contact wire (straight)
+            ctx.beginPath();
+            ctx.moveTo(0, wireY + 16);
+            ctx.lineTo(width, wireY + 16);
+            ctx.stroke();
+
+            // Poles — skip near station signs to avoid overlapping
+            const poleExclusions = [400, 7000, 13600]; // sea sign, central station, mountain sign
+            for (let x = startX; x < cameraX + width + poleSpacing; x += poleSpacing) {
+                if (poleExclusions.some(ex => Math.abs(x - ex) < 200)) continue;
+                const px = x - cameraX;
+                // Concrete pole (tapered)
+                ctx.fillStyle = "#9a9590";
+                ctx.beginPath();
+                ctx.moveTo(px - 7, groundY + 5);
+                ctx.lineTo(px - 5, groundY - 210);
+                ctx.lineTo(px + 5, groundY - 210);
+                ctx.lineTo(px + 7, groundY + 5);
+                ctx.closePath(); ctx.fill();
+                // Pole edge highlight
+                ctx.fillStyle = "rgba(255,255,255,0.1)";
+                ctx.fillRect(px - 6, groundY - 200, 3, 200);
+                // Top cap
+                ctx.fillStyle = "#807A75";
+                ctx.beginPath(); ctx.roundRect(px - 6, groundY - 213, 12, 5, 1); ctx.fill();
+                // Horizontal arm
+                ctx.fillStyle = "#706A65";
+                ctx.fillRect(px - 42, groundY - 180, 84, 5);
+                // Insulators (ceramic-like)
+                [-36, 36].forEach(off => {
+                    ctx.fillStyle = "#d8d5cc";
+                    ctx.beginPath(); ctx.roundRect(px + off - 4, groundY - 190, 8, 14, 2); ctx.fill();
+                    ctx.fillStyle = "rgba(255,255,255,0.3)";
+                    ctx.fillRect(px + off - 3, groundY - 189, 3, 12);
+                });
+                // Transformer box (every 3rd pole)
+                if (x % (poleSpacing * 3) === 0) {
+                    ctx.fillStyle = "#605A55";
+                    ctx.beginPath(); ctx.roundRect(px + 7, groundY - 145, 18, 28, 2); ctx.fill();
+                    ctx.fillStyle = "rgba(0,0,0,0.15)";
+                    ctx.fillRect(px + 10, groundY - 140, 12, 18);
+                }
+                // Number plate
+                ctx.fillStyle = "#fff";
+                ctx.beginPath(); ctx.roundRect(px - 5, groundY - 100, 10, 14, 1); ctx.fill();
+            }
+            ctx.restore();
+        }
+
+        // ======== TRAVEL CENTRAL STATION ========
+        function drawTravelCentralStation(ctx, groundY, isForeground) {
+            const sw = 1800;
+            const sx = getParallaxX(7000, 1.0) - sw / 2;
+            const groundW = 2200;
+            const gsx = getParallaxX(7000, 1.0) - groundW / 2;
+            const platformH = 55;
+            const platformTopY = groundY - platformH;
+
+            if (gsx + groundW < 0 || gsx > width) return;
+            ctx.save();
+
+            if (!isForeground) {
+                // === BACKGROUND: Station building ===
+                // Platform base
+                const platG = ctx.createLinearGradient(0, platformTopY, 0, platformTopY + platformH + 20);
+                platG.addColorStop(0, "#808080");
+                platG.addColorStop(1, "#5a5a5a");
+                ctx.fillStyle = platG;
+                ctx.fillRect(gsx, platformTopY, groundW, platformH + 20);
+                // Platform edge line
+                ctx.fillStyle = "#999";
+                ctx.fillRect(gsx, platformTopY, groundW, 3);
+
+                // Building wall
+                const wallH = 280;
+                const wallY = platformTopY - wallH;
+                // Brick-like pattern
+                const wallG = ctx.createLinearGradient(0, wallY, 0, wallY + wallH);
+                wallG.addColorStop(0, "#d8c4a8");
+                wallG.addColorStop(0.5, "#d0b898");
+                wallG.addColorStop(1, "#c8b090");
+                ctx.fillStyle = wallG;
+                ctx.fillRect(sx, wallY, sw, wallH);
+
+                // Brick lines
+                ctx.strokeStyle = "rgba(180,160,130,0.3)";
+                ctx.lineWidth = 0.5;
+                for (let by = wallY + 12; by < wallY + wallH; by += 16) {
+                    ctx.beginPath(); ctx.moveTo(sx, by); ctx.lineTo(sx + sw, by); ctx.stroke();
+                    const offset = ((by - wallY) / 16) % 2 === 0 ? 0 : 30;
+                    for (let bx = sx + offset; bx < sx + sw; bx += 60) {
+                        ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx, by + 16); ctx.stroke();
+                    }
+                }
+
+                // Arched windows
+                const winSpacing = sw / 8;
+                for (let i = 1; i < 8; i++) {
+                    if (i === 4) continue; // skip center (sign area)
+                    const wx = sx + i * winSpacing;
+                    const wy = wallY + 60;
+                    const ww = 45, wh = 90;
+                    // Window frame
+                    ctx.fillStyle = "#8B7D6B";
+                    ctx.beginPath();
+                    ctx.roundRect(wx - ww / 2 - 3, wy - 3, ww + 6, wh + 6, [12, 12, 0, 0]);
+                    ctx.fill();
+                    // Glass
+                    const glG = ctx.createLinearGradient(wx, wy, wx, wy + wh);
+                    glG.addColorStop(0, "#a8d4e8");
+                    glG.addColorStop(1, "#6aa0b8");
+                    ctx.fillStyle = glG;
+                    ctx.beginPath();
+                    ctx.roundRect(wx - ww / 2, wy, ww, wh, [10, 10, 0, 0]);
+                    ctx.fill();
+                    // Divider
+                    ctx.fillStyle = "#8B7D6B";
+                    ctx.fillRect(wx - 1, wy, 2, wh);
+                    ctx.fillRect(wx - ww / 2, wy + wh * 0.5, ww, 2);
+                }
+
+                // Central sign area
+                const signX = sx + sw / 2;
+                // White panel
+                ctx.fillStyle = "#FAFAF5";
+                ctx.beginPath(); ctx.roundRect(signX - 200, wallY + 35, 400, 130, 6); ctx.fill();
+                // Double border
+                ctx.strokeStyle = "#8B7D6B";
+                ctx.lineWidth = 4;
+                ctx.beginPath(); ctx.roundRect(signX - 194, wallY + 41, 388, 118, 4); ctx.stroke();
+                ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.roundRect(signX - 188, wallY + 47, 376, 106, 3); ctx.stroke();
+                // Station text
+                ctx.fillStyle = "#333";
+                ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                ctx.font = "bold 42px 'Zen Maru Gothic', sans-serif";
+                ctx.fillText("はじまりの駅", signX, wallY + 90);
+                // Subtitle
+                ctx.font = "500 14px 'Zen Maru Gothic', sans-serif";
+                ctx.fillStyle = "#666";
+                ctx.fillText("Hajimari no Eki", signX, wallY + 118);
+                // Direction indicators
+                ctx.font = "600 13px 'Zen Maru Gothic', sans-serif";
+                ctx.fillStyle = "#5B9BD5";
+                ctx.textAlign = "left";
+                ctx.fillText("← 海の駅", signX - 180, wallY + 142);
+                ctx.fillStyle = "#8D6E63";
+                ctx.textAlign = "right";
+                ctx.fillText("山の駅 →", signX + 180, wallY + 142);
+                // Divider
+                ctx.strokeStyle = "rgba(0,0,0,0.15)";
+                ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(signX - 185, wallY + 130); ctx.lineTo(signX + 185, wallY + 130); ctx.stroke();
+
+                // Clock (centered above sign)
+                const clockX = signX, clockY = wallY + 18;
+                ctx.fillStyle = "#FAFAF5";
+                ctx.beginPath(); ctx.arc(clockX, clockY, 18, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = "#555";
+                ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.arc(clockX, clockY, 18, 0, Math.PI * 2); ctx.stroke();
+                // Clock hands
+                const now = Date.now() * 0.00002;
+                ctx.strokeStyle = "#333"; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(clockX, clockY);
+                ctx.lineTo(clockX + Math.cos(now) * 10, clockY + Math.sin(now) * 10); ctx.stroke();
+                ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.moveTo(clockX, clockY);
+                ctx.lineTo(clockX + Math.cos(now * 12) * 14, clockY + Math.sin(now * 12) * 14); ctx.stroke();
+
+                // Benches on platform
+                [signX - 350, signX + 280].forEach(benchX => {
+                    if (benchX < gsx || benchX > gsx + groundW) return;
+                    ctx.fillStyle = "#6B5B4A";
+                    // Legs
+                    ctx.fillRect(benchX - 18, platformTopY + 8, 4, 20);
+                    ctx.fillRect(benchX + 14, platformTopY + 8, 4, 20);
+                    // Seat
+                    ctx.fillStyle = "#8B7355";
+                    ctx.beginPath(); ctx.roundRect(benchX - 22, platformTopY + 5, 44, 5, 1); ctx.fill();
+                    // Back
+                    ctx.fillRect(benchX - 20, platformTopY - 10, 40, 4);
+                });
+            } else {
+                // === FOREGROUND: Platform, pillars, roof ===
+                // Platform (foreground piece)
+                ctx.fillStyle = "#888";
+                ctx.fillRect(gsx, platformTopY, groundW, platformH + 12);
+                // Yellow safety line
+                ctx.fillStyle = "#E8C840";
+                ctx.fillRect(gsx, platformTopY, groundW, 12);
+                // Tactile dots on yellow line
+                ctx.fillStyle = "rgba(200,170,40,0.5)";
+                for (let dx = gsx + 8; dx < gsx + groundW; dx += 16) {
+                    ctx.beginPath(); ctx.arc(dx, platformTopY + 6, 2.5, 0, Math.PI * 2); ctx.fill();
+                }
+
+                // Pillars (6)
+                for (let i = 0; i < 6; i++) {
+                    const px = sx + (i * (sw / 5)) - 20;
+                    const pillarG = ctx.createLinearGradient(px, 0, px + 40, 0);
+                    pillarG.addColorStop(0, "#444");
+                    pillarG.addColorStop(0.5, "#666");
+                    pillarG.addColorStop(1, "#333");
+                    ctx.fillStyle = pillarG;
+                    ctx.fillRect(px, platformTopY - 460, 40, 460);
+                    // Base detail
+                    ctx.fillStyle = "#555";
+                    ctx.fillRect(px - 4, platformTopY - 8, 48, 10);
+                }
+
+                // Vending machines
+                const vms = [
+                    { x: sx + sw * 0.2, c: "#cc3333" },
+                    { x: sx + sw * 0.35, c: "#2a52be" },
+                    { x: sx + sw * 0.75, c: "#228B22" },
+                ];
+                vms.forEach(m => {
+                    const vmw = 55, vmh = 115;
+                    const vmy = platformTopY - vmh + 5;
+                    ctx.fillStyle = m.c;
+                    ctx.beginPath(); ctx.roundRect(m.x, vmy, vmw, vmh, 3); ctx.fill();
+                    // Product display
+                    ctx.fillStyle = "rgba(255,255,255,0.12)";
+                    ctx.fillRect(m.x + 5, vmy + 6, vmw - 10, vmh * 0.5);
+                    // Items
+                    for (let r = 0; r < 3; r++) {
+                        for (let c = 0; c < 4; c++) {
+                            ctx.fillStyle = `hsl(${(r * 80 + c * 40) % 360}, 60%, 55%)`;
+                            ctx.beginPath(); ctx.roundRect(m.x + 8 + c * 11, vmy + 10 + r * 16, 8, 12, 1); ctx.fill();
+                        }
+                    }
+                    // Slot area
+                    ctx.fillStyle = "rgba(0,0,0,0.3)";
+                    ctx.beginPath(); ctx.roundRect(m.x + 8, vmy + vmh - 28, vmw - 16, 18, 2); ctx.fill();
+                });
+
+                // Station roof
+                const roofH = 220;
+                const roofY = platformTopY - 440;
+                // Roof structure
+                const roofG = ctx.createLinearGradient(0, roofY, 0, roofY + roofH);
+                roofG.addColorStop(0, "rgba(35,40,45,0.97)");
+                roofG.addColorStop(1, "rgba(45,50,55,0.95)");
+                ctx.fillStyle = roofG;
+                ctx.beginPath();
+                ctx.moveTo(sx - 120, roofY);
+                ctx.lineTo(sx + sw + 120, roofY);
+                ctx.lineTo(sx + sw + 200, roofY + roofH);
+                ctx.lineTo(sx - 200, roofY + roofH);
+                ctx.closePath(); ctx.fill();
+                // Roof edge highlight
+                ctx.fillStyle = "rgba(255,255,255,0.08)";
+                ctx.fillRect(sx - 120, roofY, sw + 240, 4);
+                // Roof support beams
+                ctx.fillStyle = "rgba(60,65,70,0.9)";
+                for (let i = 0; i < 5; i++) {
+                    const bx = sx + i * (sw / 4) - 5;
+                    ctx.fillRect(bx, roofY, 10, roofH);
+                }
+            }
+            ctx.restore();
+        }
+
+        // Color Lerp Helper
+        function lerpColor(a, b, amount) {
+            const ah = parseInt(a.replace(/#/g, ''), 16),
+                ar = ah >> 16, ag = ah >> 8 & 0xff, ab = ah & 0xff,
+                bh = parseInt(b.replace(/#/g, ''), 16),
+                br = bh >> 16, bg = bh >> 8 & 0xff, bb = bh & 0xff,
+                rr = ar + amount * (br - ar),
+                rg = ag + amount * (bg - ag),
+                rb = ab + amount * (bb - ab);
+            return '#' + ((1 << 24) + (rr << 16) + (rg << 8) + rb | 0).toString(16).slice(1);
         }
 
         function updateTopDownCamera() {
@@ -2214,6 +4067,9 @@
                 // Window sill
                 ctx.fillStyle = "rgba(200, 195, 185, 0.7)";
                 ctx.beginPath(); ctx.roundRect(x - 8, wy + h - 2, w + 16, 8, 2); ctx.fill();
+
+                // Draw atmosphere: God Rays from window
+                envEffects.drawGodRays(ctx, x + 20, wy, w - 40, wallHeight - wy);
 
                 // Curtains (soft draping)
                 const curtainColor = "rgba(200, 180, 155, 0.55)";
@@ -2369,65 +4225,43 @@
             const wallHeight = height * ROOM_WALL_RATIO;
             const groundY = wallHeight;
 
-            // Sky gradient
+            // 1. SKY (Base)
             const skyG = ctx.createLinearGradient(0, 0, 0, groundY);
-            skyG.addColorStop(0, "#87ceeb");
-            skyG.addColorStop(0.6, "#b8e0f0");
-            skyG.addColorStop(1, "#dceef8");
+            skyG.addColorStop(0, "#87ceeb"); skyG.addColorStop(1, "#dceef8");
             ctx.fillStyle = skyG;
             ctx.fillRect(0, 0, worldWidth, groundY);
 
-            // Clouds
+            // 2. PARALLAX: FAR MOUNTAINS (0.15 speed)
+            envEffects.drawFarMountains(ctx, cameraX);
+
+            // 3. PARALLAX: MIDDLE HOUSES (0.45 speed)
+            envEffects.drawMiddleHouses(ctx, cameraX);
+
+            // 4. CLOUDS (Dynamic)
             childBgClouds.forEach(cl => {
-                cl.x += cl.speed;
-                if (cl.x > worldWidth + 200) cl.x = -200;
-                ctx.fillStyle = "rgba(255,255,255,0.82)";
-                ctx.beginPath();
-                ctx.ellipse(cl.x, cl.y, cl.w * 0.5, cl.h * 0.5, 0, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.beginPath();
-                ctx.ellipse(cl.x - cl.w * 0.25, cl.y + 5, cl.w * 0.3, cl.h * 0.35, 0, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.beginPath();
-                ctx.ellipse(cl.x + cl.w * 0.28, cl.y + 3, cl.w * 0.35, cl.h * 0.4, 0, 0, Math.PI * 2);
-                ctx.fill();
+                cl.x += cl.speed; if (cl.x > worldWidth + 200) cl.x = -200;
+                ctx.fillStyle = "rgba(255,255,255,0.72)";
+                ctx.beginPath(); ctx.ellipse(cl.x, cl.y, cl.w * 0.5, cl.h * 0.5, 0, 0, Math.PI * 2); ctx.fill();
             });
 
-            // Grass ground
+            // 5. FOREGROUND: GRASS & PATH (1.0 speed)
             const grassG = ctx.createLinearGradient(0, groundY, 0, height);
-            grassG.addColorStop(0, "#7ec850");
-            grassG.addColorStop(0.3, "#6ab840");
-            grassG.addColorStop(1, "#4a9030");
-            ctx.fillStyle = grassG;
-            ctx.fillRect(0, groundY, worldWidth, height - groundY);
+            grassG.addColorStop(0, "#7ec850"); grassG.addColorStop(1, "#4a9030");
+            ctx.fillStyle = grassG; ctx.fillRect(0, groundY, worldWidth, height - groundY);
 
-            // Path (dirt)
             const pathY = groundY + 30;
             ctx.fillStyle = "rgba(180, 155, 120, 0.45)";
-            ctx.beginPath();
-            ctx.moveTo(worldWidth * 0.3, pathY);
-            ctx.quadraticCurveTo(worldWidth * 0.5, pathY + 15, worldWidth * 0.7, pathY);
-            ctx.lineTo(worldWidth * 0.7, pathY + 18);
-            ctx.quadraticCurveTo(worldWidth * 0.5, pathY + 33, worldWidth * 0.3, pathY + 18);
-            ctx.closePath();
-            ctx.fill();
+            ctx.beginPath(); ctx.moveTo(worldWidth * 0.1, pathY);
+            ctx.quadraticCurveTo(worldWidth * 0.5, pathY + 15, worldWidth * 0.9, pathY);
+            ctx.lineTo(worldWidth * 0.9, pathY + 18); ctx.quadraticCurveTo(worldWidth * 0.5, pathY + 33, worldWidth * 0.1, pathY + 18);
+            ctx.closePath(); ctx.fill();
 
-            // Trees (behind buildings)
+            // 6. FOREGROUND: TREES & BUILDINGS (1.0 speed)
             childBgTrees.forEach(tr => {
-                // Trunk
                 ctx.fillStyle = "hsl(28, 35%, 38%)";
-                ctx.beginPath();
-                ctx.roundRect(tr.x - 6, groundY - tr.trunkH, 12, tr.trunkH, 3);
-                ctx.fill();
-                // Crown
-                ctx.fillStyle = `hsl(${tr.hue}, 55%, 42%)`;
-                ctx.beginPath();
-                ctx.arc(tr.x, groundY - tr.trunkH - tr.crownR * 0.5, tr.crownR, 0, Math.PI * 2);
-                ctx.fill();
+                ctx.beginPath(); ctx.roundRect(tr.x - 6, groundY - tr.trunkH, 12, tr.trunkH, 3); ctx.fill();
                 ctx.fillStyle = `hsl(${tr.hue}, 50%, 48%)`;
-                ctx.beginPath();
-                ctx.arc(tr.x - tr.crownR * 0.3, groundY - tr.trunkH - tr.crownR * 0.3, tr.crownR * 0.7, 0, Math.PI * 2);
-                ctx.fill();
+                ctx.beginPath(); ctx.arc(tr.x, groundY - tr.trunkH - tr.crownR * 0.5, tr.crownR, 0, Math.PI * 2); ctx.fill();
             });
 
             // Fence
@@ -3735,19 +5569,19 @@
 
         // ======== ADULT PHASE (大人フェーズ) ========
         const ADULT_ACTIVITIES = [
-            { id: "university", name: "大学", keyboardStyle: "piano-gentle",
+            { id: "university", name: "大学", nameEn: "University", keyboardStyle: "piano-gentle",
               color: "hsl(220, 55%, 60%)", worldFraction: [0.04, 0.16],
               labels: { study: 3, curious: 2, focused: 1 } },
-            { id: "parttime", name: "アルバイト", keyboardStyle: "organ-funky",
+            { id: "parttime", name: "アルバイト", nameEn: "Part-time Job", keyboardStyle: "organ-funky",
               color: "hsl(35, 60%, 58%)", worldFraction: [0.20, 0.34],
               labels: { resilient: 3, social: 2, patient: 1 } },
-            { id: "jobhunt", name: "就活", keyboardStyle: "piano-chord",
+            { id: "jobhunt", name: "就活", nameEn: "Job Hunt", keyboardStyle: "piano-sparse",
               color: "hsl(0, 0%, 55%)", worldFraction: [0.40, 0.54],
               labels: { focused: 3, cautious: 2, resilient: 1 } },
-            { id: "travel", name: "旅", keyboardStyle: "piano-arpeggio",
+            { id: "travel", name: "旅", nameEn: "Travel", keyboardStyle: "piano-chord",
               color: "hsl(170, 50%, 55%)", worldFraction: [0.60, 0.74],
               labels: { adventurous: 3, curious: 2, optimistic: 1 } },
-            { id: "startup", name: "起業", keyboardStyle: "organ-power",
+            { id: "startup", name: "起業", nameEn: "Startup", keyboardStyle: "organ-power",
               color: "hsl(45, 70%, 55%)", worldFraction: [0.80, 0.94],
               labels: { creative: 3, adventurous: 2, expressive: 1 } }
         ];
@@ -3846,6 +5680,243 @@
                     ripples: []
                 });
             }
+            primeToneDrops();
+        }
+
+        function initTravelDrops() {
+            disposeToneDrops();
+            toneDrops = [];
+            if (!baseRhythmInfo || !inheritedChordProgression) return;
+            const floorY = height * ROOM_WALL_RATIO + 20;
+
+            const stepsPerPage = baseRhythmInfo.beatsPerBar * baseRhythmInfo.bars * STEPS_PER_BEAT;
+            const stepsPerBar = baseRhythmInfo.beatsPerBar * STEPS_PER_BEAT;
+
+            // Set up 2-page pagination (same as JOB_HUNT2)
+            scoreHudState.pageCount = 2;
+            scoreHudState.currentPage = 0;
+            scoreHudState.stepsPerPage = stepsPerPage;
+            scoreHudState.barHighlights = [];
+
+            // Double all inherited patterns for 2-page loop
+            if (baseRhythmInfo.kickPattern) {
+                baseRhythmInfo._originalKick = baseRhythmInfo._originalKick || baseRhythmInfo.kickPattern.slice();
+                baseRhythmInfo.kickPattern = [...baseRhythmInfo._originalKick, ...baseRhythmInfo._originalKick];
+            }
+            if (inheritedHatPattern) inheritedHatPattern = [...inheritedHatPattern.slice(0, stepsPerPage), ...inheritedHatPattern.slice(0, stepsPerPage)];
+            if (inheritedSnarePattern) inheritedSnarePattern = [...inheritedSnarePattern.slice(0, stepsPerPage), ...inheritedSnarePattern.slice(0, stepsPerPage)];
+            if (inheritedSnareVelocity) inheritedSnareVelocity = [...inheritedSnareVelocity.slice(0, stepsPerPage), ...inheritedSnareVelocity.slice(0, stepsPerPage)];
+            if (inheritedBassPattern) {
+                inheritedBassPattern = [...inheritedBassPattern.slice(0, stepsPerPage), ...inheritedBassPattern.slice(0, stepsPerPage)];
+                if (inheritedBassNotes) inheritedBassNotes = [...inheritedBassNotes.slice(0, stepsPerPage), ...inheritedBassNotes.slice(0, stepsPerPage)];
+                if (inheritedBassAttacks) inheritedBassAttacks = [...inheritedBassAttacks.slice(0, stepsPerPage), ...inheritedBassAttacks.slice(0, stepsPerPage)];
+                if (inheritedBassDurations) inheritedBassDurations = [...inheritedBassDurations.slice(0, stepsPerPage), ...inheritedBassDurations.slice(0, stepsPerPage)];
+                if (inheritedBassSustainType) inheritedBassSustainType = [...inheritedBassSustainType.slice(0, stepsPerPage), ...inheritedBassSustainType.slice(0, stepsPerPage)];
+            }
+            if (inheritedKeyboardPattern) {
+                inheritedKeyboardPattern = [...inheritedKeyboardPattern.slice(0, stepsPerPage), ...inheritedKeyboardPattern.slice(0, stepsPerPage)];
+                if (inheritedKeyboardNotes) inheritedKeyboardNotes = [...inheritedKeyboardNotes.slice(0, stepsPerPage), ...inheritedKeyboardNotes.slice(0, stepsPerPage)];
+                if (inheritedKeyboardAttacks) inheritedKeyboardAttacks = [...inheritedKeyboardAttacks.slice(0, stepsPerPage), ...inheritedKeyboardAttacks.slice(0, stepsPerPage)];
+                if (inheritedKeyboardDurations) inheritedKeyboardDurations = [...inheritedKeyboardDurations.slice(0, stepsPerPage), ...inheritedKeyboardDurations.slice(0, stepsPerPage)];
+                if (inheritedKeyboardSustainType) inheritedKeyboardSustainType = [...inheritedKeyboardSustainType.slice(0, stepsPerPage), ...inheritedKeyboardSustainType.slice(0, stepsPerPage)];
+            }
+            if (inheritedCymbalPattern) {
+                inheritedCymbalPattern = [...inheritedCymbalPattern.slice(0, stepsPerPage), ...inheritedCymbalPattern.slice(0, stepsPerPage)];
+                if (inheritedCymbalVelocity) inheritedCymbalVelocity = [...inheritedCymbalVelocity.slice(0, stepsPerPage), ...inheritedCymbalVelocity.slice(0, stepsPerPage)];
+            }
+
+            // Helper: build a 2-page keyboard pattern with page2 last 2 bars using a different style
+            const buildTravelPattern = (baseStyle, baseVariant, altStyle, altVariant) => {
+                const page1 = buildKeyboardLine(baseRhythmInfo, baseStyle, inheritedChordProgression, baseVariant);
+                const page2Alt = buildKeyboardLine(baseRhythmInfo, altStyle, inheritedChordProgression, altVariant);
+                const lastBarsStart = stepsPerPage - stepsPerBar * 2;
+                // Page2 = page1 copy, but last 2 bars replaced with alt style
+                const p2Pattern = page1.pattern.slice();
+                const p2Notes = page1.notes ? page1.notes.slice() : null;
+                const p2Attacks = page1.attacks ? page1.attacks.slice() : null;
+                const p2Durations = page1.durations ? page1.durations.slice() : null;
+                const p2Sustain = page1.sustainType ? page1.sustainType.slice() : null;
+                for (let s = lastBarsStart; s < stepsPerPage; s++) {
+                    p2Pattern[s] = page2Alt.pattern[s];
+                    if (p2Notes && page2Alt.notes) p2Notes[s] = page2Alt.notes[s];
+                    if (p2Attacks && page2Alt.attacks) p2Attacks[s] = page2Alt.attacks[s];
+                    if (p2Durations && page2Alt.durations) p2Durations[s] = page2Alt.durations[s];
+                    if (p2Sustain && page2Alt.sustainType) p2Sustain[s] = page2Alt.sustainType[s];
+                }
+                return {
+                    pattern: [...page1.pattern, ...p2Pattern],
+                    notes: p2Notes ? [...page1.notes, ...p2Notes] : null,
+                    attacks: p2Attacks ? [...page1.attacks, ...p2Attacks] : null,
+                    durations: p2Durations ? [...page1.durations, ...p2Durations] : null,
+                    sustainType: p2Sustain ? [...page1.sustainType, ...p2Sustain] : null,
+                };
+            };
+
+            const lastBarIdx0 = baseRhythmInfo.bars - 2; // index of 2nd-to-last bar
+            const lastBarIdx1 = baseRhythmInfo.bars - 1; // index of last bar
+            const lastBarsStart = stepsPerPage - stepsPerBar * 2; // step offset within a page
+
+            // Helper: build alt drum patterns for last 2 bars of page 2 (climactic)
+            // Returns replacement arrays (length = stepsPerBar * 2) for kick/hat/snare
+            const buildTravelDrums = (kickType, hatVariant, snareVariant) => {
+                const altInfo = Object.assign({}, baseRhythmInfo, { bars: 2 });
+                const altKick = new Array(stepsPerBar * 2).fill(false);
+                const altHat = buildHiHatPattern(altInfo, hatVariant);
+                const altSnare = buildSnarePattern(altInfo, snareVariant);
+                const S = STEPS_PER_BEAT;
+                const bpb = baseRhythmInfo.beatsPerBar;
+                for (let bar = 0; bar < 2; bar++) {
+                    const b = bar * stepsPerBar;
+                    if (kickType === "sea-drive") {
+                        // Driving pulse — every beat + offbeat push on bar 2
+                        altKick[b] = true;
+                        if (bpb >= 2) altKick[b + S] = true;
+                        if (bpb >= 3) altKick[b + 2 * S] = true;
+                        if (bpb >= 4) altKick[b + 3 * S] = true;
+                        if (bar === 1 && bpb >= 4) altKick[b + 3 * S + 2] = true;
+                    } else if (kickType === "sea-wave") {
+                        // Wave swell — 1 & offbeat-3, bar2 adds offbeat fills
+                        altKick[b] = true;
+                        if (bpb >= 3) altKick[b + 2 * S + 2] = true;
+                        if (bpb >= 4 && bar === 1) { altKick[b + S + 2] = true; altKick[b + 3 * S] = true; }
+                    } else if (kickType === "sea-surge") {
+                        // Surging — beat1, synco 2, beat3, double bar2 ending
+                        altKick[b] = true;
+                        if (bpb >= 2) altKick[b + S + 1] = true;
+                        if (bpb >= 3) altKick[b + 2 * S] = true;
+                        if (bpb >= 4) { altKick[b + 3 * S + 2] = true; if (bar === 1) altKick[b + 3 * S] = true; }
+                    } else if (kickType === "mtn-synco") {
+                        // Syncopated groove — beat1, offbeat 2, beat3, push fills
+                        altKick[b] = true;
+                        if (bpb >= 2) altKick[b + S + 2] = true;
+                        if (bpb >= 3) altKick[b + 2 * S] = true;
+                        if (bpb >= 4) {
+                            altKick[b + 3 * S + 1] = true;
+                            if (bar === 1) { altKick[b + 3 * S + 3] = true; altKick[b + S] = true; }
+                        }
+                    } else if (kickType === "mtn-stomp") {
+                        // Heavy stomp — 1 & 3 + offbeat 4, double-time bar2
+                        altKick[b] = true;
+                        if (bpb >= 3) altKick[b + 2 * S] = true;
+                        if (bpb >= 4) altKick[b + 3 * S + 2] = true;
+                        if (bar === 1) {
+                            if (bpb >= 2) altKick[b + S] = true;
+                            if (bpb >= 4) altKick[b + 3 * S] = true;
+                        }
+                    } else if (kickType === "mtn-gallop") {
+                        // Galloping — 1, push-2, 3, 16th fill into next
+                        altKick[b] = true;
+                        if (bpb >= 2) altKick[b + S + 1] = true;
+                        if (bpb >= 3) altKick[b + 2 * S] = true;
+                        if (bpb >= 4) {
+                            altKick[b + 3 * S] = true;
+                            altKick[b + 3 * S + 2] = true;
+                            if (bar === 1) altKick[b + 3 * S + 3] = true;
+                        }
+                    }
+                }
+                return { kick: altKick, hat: altHat, snare: altSnare };
+            };
+
+            // Helper: build alt bass for last 2 bars of page 2
+            const buildTravelBass = (bassStyle, bassVariant) => {
+                const altInfo = Object.assign({}, baseRhythmInfo, { bars: 2 });
+                return buildBassLine(altInfo, bassStyle, inheritedChordProgression, bassVariant);
+            };
+
+            // Helper: build a full alt variation set (keys, keys2, drums, bass)
+            const buildVariation = (keysAltStyle, keysAltV, k2AltStyle, k2AltV,
+                                    kickType, hatV, snareV, bassStyle, bassV,
+                                    baseKeysStyle, baseKeysV, baseK2Style, baseK2V) => {
+                const kbData = buildTravelPattern(baseKeysStyle, baseKeysV, keysAltStyle, keysAltV);
+                const k2Data = buildTravelPattern(baseK2Style, baseK2V, k2AltStyle, k2AltV);
+                const drums = buildTravelDrums(kickType, hatV, snareV);
+                const bass = buildTravelBass(bassStyle, bassV);
+                return { kbData, k2Data, drums, bass };
+            };
+
+            // === SEA: 3 variation sets for page2 last 2 bars ===
+            const seaVariations = [
+                // A: 大海原の高まり — organ-power chords + melodic-run descent, driving drums, groovy bass
+                buildVariation("organ-power", 0, "melodic-run", 1,
+                    "sea-drive", 2, 4, "groovy", 0,
+                    "piano-gentle", 0, "syncopated", 0),
+                // B: 潮の奔流 — melodic-run descent + synco-punch accents, wave kick, energetic bass
+                buildVariation("melodic-run", 1, "synco-punch", 0,
+                    "sea-wave", 3, 1, "energetic", 1,
+                    "piano-gentle", 0, "syncopated", 0),
+                // C: 深海の共鳴 — piano-chord sustain + staccato-burst sparks, surging kick, melodic bass
+                buildVariation("piano-chord", 1, "staccato-burst", 1,
+                    "sea-surge", 2, 0, "melodic", 1,
+                    "piano-gentle", 0, "syncopated", 0),
+            ];
+            const seaV = seaVariations[Math.floor(Math.random() * seaVariations.length)];
+
+            // 1. Sea End Station Tone (at worldX 400)
+            const seaKb = createKeyboardSynth("piano-gentle");
+            const seaK2Synth = createKeyboardSynth("syncopated");
+            toneDrops.push({
+                x: 400, y: floorY,
+                pattern: seaV.kbData.pattern, keyboardNotes: seaV.kbData.notes,
+                keyboardAttacks: seaV.kbData.attacks, keyboardDurations: seaV.kbData.durations,
+                keyboardSustainType: seaV.kbData.sustainType,
+                keyboardSynth: seaKb.synth, keyboardEffects: seaKb.effects,
+                keys2Pattern: seaV.k2Data.pattern, keys2Notes: seaV.k2Data.notes,
+                keys2Attacks: seaV.k2Data.attacks, keys2Durations: seaV.k2Data.durations,
+                keys2SustainType: seaV.k2Data.sustainType,
+                keys2Synth: seaK2Synth.synth, keys2Effects: seaK2Synth.effects,
+                travelAltKick: seaV.drums.kick, travelAltHat: seaV.drums.hat,
+                travelAltSnare: seaV.drums.snare.pattern,
+                travelAltBassPattern: seaV.bass.pattern, travelAltBassNotes: seaV.bass.notes,
+                travelAltBassAttacks: seaV.bass.attacks, travelAltBassDurations: seaV.bass.durations,
+                travelAltBassSustainType: seaV.bass.sustainType,
+                instrument: "keyboard", activityId: "sea_end", activityName: "海", dropColor: "hsl(200, 70%, 60%)",
+                activityNameEn: "Sea",
+                activityLabels: { empathetic: 5, patient: 3 }, proximityVol: -100, isHovered: false, overlapAlpha: 0, ripples: [],
+                travelPage2Bars: [lastBarIdx0, lastBarIdx1]
+            });
+
+            // === MOUNTAIN: 3 variation sets for page2 last 2 bars ===
+            const mtnVariations = [
+                // A: 頂の轟き — organ-power chords + staccato-burst sparks, synco kick, playful bass
+                buildVariation("organ-power", 0, "staccato-burst", 0,
+                    "mtn-synco", 3, 1, "playful", 0,
+                    "piano-arpeggio", 1, "staccato-bounce", 0),
+                // B: 山嵐の疾走 — melodic-run ascending + rapid-tap bursts, gallop kick, energetic bass
+                buildVariation("melodic-run", 0, "rapid-tap", 0,
+                    "mtn-gallop", 2, 4, "energetic", 0,
+                    "piano-arpeggio", 1, "staccato-bounce", 0),
+                // C: 峰の鼓動 — synco-punch accents + staccato-bounce dense, stomp kick, groovy bass
+                buildVariation("synco-punch", 1, "staccato-bounce", 1,
+                    "mtn-stomp", 3, 0, "groovy", 1,
+                    "piano-arpeggio", 1, "staccato-bounce", 0),
+            ];
+            const mtnV = mtnVariations[Math.floor(Math.random() * mtnVariations.length)];
+
+            // 2. Mountain End Station Tone (at worldX 13600)
+            const mtnKb = createKeyboardSynth("piano-arpeggio");
+            const mtnK2Synth = createKeyboardSynth("staccato-bounce");
+            toneDrops.push({
+                x: 13600, y: floorY,
+                pattern: mtnV.kbData.pattern, keyboardNotes: mtnV.kbData.notes,
+                keyboardAttacks: mtnV.kbData.attacks, keyboardDurations: mtnV.kbData.durations,
+                keyboardSustainType: mtnV.kbData.sustainType,
+                keyboardSynth: mtnKb.synth, keyboardEffects: mtnKb.effects,
+                keys2Pattern: mtnV.k2Data.pattern, keys2Notes: mtnV.k2Data.notes,
+                keys2Attacks: mtnV.k2Data.attacks, keys2Durations: mtnV.k2Data.durations,
+                keys2SustainType: mtnV.k2Data.sustainType,
+                keys2Synth: mtnK2Synth.synth, keys2Effects: mtnK2Synth.effects,
+                travelAltKick: mtnV.drums.kick, travelAltHat: mtnV.drums.hat,
+                travelAltSnare: mtnV.drums.snare.pattern,
+                travelAltBassPattern: mtnV.bass.pattern, travelAltBassNotes: mtnV.bass.notes,
+                travelAltBassAttacks: mtnV.bass.attacks, travelAltBassDurations: mtnV.bass.durations,
+                travelAltBassSustainType: mtnV.bass.sustainType,
+                instrument: "keyboard", activityId: "mtn_end", activityName: "山", dropColor: "hsl(20, 70%, 50%)",
+                activityNameEn: "Mountain",
+                activityLabels: { adventurous: 5, creative: 3 }, proximityVol: -100, isHovered: false, overlapAlpha: 0, ripples: [],
+                travelPage2Bars: [lastBarIdx0, lastBarIdx1]
+            });
+
             primeToneDrops();
         }
 
@@ -4421,7 +6492,8 @@
             if (!clickedDrop.keyboardNotes) return;
             if (clickedDrop.activityId !== "university" &&
                 clickedDrop.activityId !== "parttime" &&
-                clickedDrop.activityId !== "jobhunt") return;
+                clickedDrop.activityId !== "jobhunt" &&
+                clickedDrop.activityId !== "travel") return;
             if (adultTransitionLock) return;
             playTitleToneConfirmSound();
             addVolumeTrack('keyboard');
@@ -4464,6 +6536,13 @@
                     ripple.remove();
                     adultTransitionLock = false;
                 }, 1400);
+            } else if (clickedDrop.activityId === "travel") {
+                setTimeout(() => {
+                    startTravelPhase();
+                    fadeScreenTo(0, 1300);
+                    ripple.remove();
+                    adultTransitionLock = false;
+                }, 1400);
             } else if (clickedDrop.activityId === "parttime") {
                 setTimeout(() => {
                     startPartTimePhase();
@@ -4479,6 +6558,2138 @@
                     adultTransitionLock = false;
                 }, 1400);
             }
+        }
+
+        // ======== TRAVEL TONE SELECTION ========
+        function handleTravelChoice(clickedDrop) {
+            if (!clickedDrop.activityLabels) return;
+            if (travelChoiceTransitioning) return;
+            travelChoiceTransitioning = true;
+            playTitleToneConfirmSound();
+
+            selectedToys.push({
+                id: clickedDrop.activityId,
+                name: clickedDrop.activityName,
+                labels: clickedDrop.activityLabels
+            });
+
+            disposeToneDrops();
+            toneDrops = [];
+
+            const sx = clickedDrop.x - cameraX;
+            const sy = clickedDrop.y;
+            const ripple = document.createElement('div');
+            ripple.className = 'ripple ripple-anim';
+            ripple.style.position = 'fixed';
+            ripple.style.left = (sx - 40) + 'px';
+            ripple.style.top = (sy - 40) + 'px';
+            document.body.appendChild(ripple);
+
+            const stillType = clickedDrop.activityId === "sea_end" ? "sea" : "mountain";
+
+            fadeScreenTo(1, 1400);
+            setTimeout(() => {
+                // Hide score HUD during still
+                if (scoreHud) scoreHud.style.display = 'none';
+
+                travelStill.active = true;
+                travelStill.type = stillType;
+                travelStill.progress = 0;
+                travelStill.startTime = Date.now();
+                travelStill.endScheduled = false;
+
+                // Play ambient sound
+                if (stillType === "sea") {
+                    travelStillAudio = new Audio('sounds/seaside.mp3');
+                    travelStillAudio.loop = true;
+                    travelStillAudio.volume = 0.18;
+                    travelStillAudio.play().catch(() => {});
+                } else if (stillType === "mountain") {
+                    travelStillAudio = new Audio('sounds/mountaintop.mp3');
+                    travelStillAudio.loop = true;
+                    travelStillAudio.volume = 0.18;
+                    travelStillAudio.play().catch(() => {});
+                }
+
+                fadeScreenTo(0, 1300);
+                ripple.remove();
+                travelChoiceTransitioning = false;
+            }, 1400);
+        }
+
+        // ======== SEA STILL DRAWING ========
+        function drawSeaStill(ctx, progress) {
+            const w = width, h = height;
+            const now = Date.now();
+
+            // Helper: layer fade-in based on progress threshold
+            const layerAlpha = (threshold, fadeLen) => {
+                if (progress < threshold) return 0;
+                return Math.min(1, (progress - threshold) / (fadeLen || 0.12));
+            };
+
+            // Layout constants
+            const horizonY = h * 0.38;
+            const shoreY   = h * 0.58;
+            const sandTop  = h * 0.60;
+
+            // Character walk animation: enters from left, stops at center
+            // Walk phase: 0→0.5 = walking in, 0.5→1 = standing still
+            const walkEnd = 0.45;
+            const walkT = Math.min(1, progress / walkEnd); // 0→1 during walk phase
+            const charStartX = -40;
+            const charEndX = w * 0.42;
+            const charX = charStartX + (charEndX - charStartX) * (walkT < 1 ? (1 - Math.pow(1 - walkT, 2.5)) : 1); // ease-out
+            const charFeetY = sandTop + (h - sandTop) * 0.32;
+            const isWalking = progress < walkEnd;
+            const walkCycle = now * 0.008;
+
+            // ══════════════════════════════════════════
+            // BACKGROUND — always visible from the start
+            // ══════════════════════════════════════════
+
+            // ── A. Sky ──
+            {
+                const skyG = ctx.createLinearGradient(0, 0, 0, horizonY + 10);
+                skyG.addColorStop(0, '#4A98D4');
+                skyG.addColorStop(0.25, '#68B8E8');
+                skyG.addColorStop(0.55, '#8ECEF0');
+                skyG.addColorStop(0.8, '#B8E4FA');
+                skyG.addColorStop(1, '#D8F0FF');
+                ctx.fillStyle = skyG;
+                ctx.fillRect(0, 0, w, horizonY + 10);
+
+                // Warm haze near horizon
+                const hazeG = ctx.createLinearGradient(0, horizonY - 30, 0, horizonY + 10);
+                hazeG.addColorStop(0, 'rgba(255,248,235,0)');
+                hazeG.addColorStop(1, 'rgba(255,248,235,0.25)');
+                ctx.fillStyle = hazeG;
+                ctx.fillRect(0, horizonY - 30, w, 40);
+
+                // Cumulus clouds
+                const drawCloud = (cx, cy, scale, brightness) => {
+                    const s = scale;
+                    ctx.fillStyle = `rgba(200,210,225,${0.25 * brightness})`;
+                    [[0,8,34],[-28,12,26],[30,10,28],[14,-6,22],[-14,-2,20],[-40,14,18],[42,13,20]].forEach(([ox,oy,r]) => {
+                        ctx.beginPath(); ctx.arc(cx+ox*s, cy+(oy+4)*s, r*s, 0, Math.PI*2); ctx.fill();
+                    });
+                    ctx.fillStyle = `rgba(255,255,255,${0.92 * brightness})`;
+                    [[0,0,32],[-26,6,24],[28,4,26],[12,-14,22],[-12,-8,20],[-38,10,16],[40,9,18],[0,-22,16],[20,-18,14]].forEach(([ox,oy,r]) => {
+                        ctx.beginPath(); ctx.arc(cx+ox*s, cy+oy*s, r*s, 0, Math.PI*2); ctx.fill();
+                    });
+                    ctx.fillStyle = `rgba(255,255,255,${0.5 * brightness})`;
+                    [[0,-8,24],[10,-18,16],[-8,-12,14]].forEach(([ox,oy,r]) => {
+                        ctx.beginPath(); ctx.arc(cx+ox*s, cy+oy*s, r*s*0.7, 0, Math.PI*2); ctx.fill();
+                    });
+                };
+                drawCloud(w*0.72, h*0.06, 2.2, 1);
+                drawCloud(w*0.72, h*0.06-35, 1.4, 0.95);
+                drawCloud(w*0.72, h*0.06-55, 0.9, 0.9);
+                drawCloud(w*0.18, h*0.10, 1.1, 0.85);
+                drawCloud(w*0.40, h*0.14, 0.7, 0.75);
+            }
+
+            // ── B. Sea ──
+            {
+                const seaG = ctx.createLinearGradient(0, horizonY, 0, shoreY);
+                seaG.addColorStop(0, '#3B8EC0');
+                seaG.addColorStop(0.15, '#4598C8');
+                seaG.addColorStop(0.4, '#3A8AB8');
+                seaG.addColorStop(0.7, '#5AB0D8');
+                seaG.addColorStop(1, '#7CCCE8');
+                ctx.fillStyle = seaG;
+                ctx.fillRect(0, horizonY, w, shoreY - horizonY);
+
+                // Distant ships
+                ctx.fillStyle = 'rgba(90,110,130,0.15)';
+                ctx.fillRect(w*0.15, horizonY+6, 12, 3);
+                ctx.fillRect(w*0.55, horizonY+8, 8, 2);
+
+                // Sparkles
+                for (let row = 0; row < 6; row++) {
+                    const ry = horizonY + 15 + row * ((shoreY - horizonY - 30) / 6);
+                    for (let i = 0; i < 8 + row * 3; i++) {
+                        const sx = (i * 97.3 + row * 43.7 + 20) % w;
+                        const phase = now * 0.004 + i * 2.1 + row * 0.9;
+                        const sparkle = Math.max(0, Math.sin(phase)) * Math.max(0, Math.sin(phase * 0.7 + 1));
+                        if (sparkle < 0.1) continue;
+                        const size = (1 + sparkle * 2.5) * (1 - row * 0.08);
+                        ctx.fillStyle = `rgba(255,255,240,${sparkle * 0.7 * (1 - row * 0.12)})`;
+                        ctx.beginPath();
+                        ctx.moveTo(sx, ry-size); ctx.lineTo(sx+size*0.6, ry);
+                        ctx.lineTo(sx, ry+size); ctx.lineTo(sx-size*0.6, ry);
+                        ctx.closePath(); ctx.fill();
+                    }
+                }
+
+                // Wave patterns
+                for (let wl = 0; wl < 8; wl++) {
+                    const wy = horizonY + 20 + wl * ((shoreY - horizonY - 25) / 8);
+                    const waveShift = Math.sin(now * 0.001 + wl * 1.5) * 15;
+                    ctx.strokeStyle = `rgba(150,210,240,${0.15 - wl * 0.012})`;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    for (let x = -10; x <= w+10; x += 4) {
+                        const y = wy + Math.sin(x*0.008 + now*0.0012 + wl) * 2.5;
+                        if (x <= -10) ctx.moveTo(x+waveShift, y); else ctx.lineTo(x+waveShift, y);
+                    }
+                    ctx.stroke();
+                }
+
+                // Shore foam
+                for (let sw = 0; sw < 5; sw++) {
+                    const baseY = shoreY - 10 + sw * 5;
+                    const waveOffset = Math.sin(now * 0.0008 + sw * 0.7) * 8;
+                    const foamAlpha = 0.5 - sw * 0.08;
+                    ctx.fillStyle = `rgba(230,245,255,${foamAlpha * 0.4})`;
+                    ctx.beginPath();
+                    for (let x = 0; x <= w; x += 3) {
+                        const y = baseY + waveOffset + Math.sin(x*0.018 + now*0.002 + sw*1.3) * 3;
+                        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                    }
+                    ctx.lineTo(w, baseY+12); ctx.lineTo(0, baseY+12); ctx.closePath(); ctx.fill();
+                    ctx.strokeStyle = `rgba(255,255,255,${foamAlpha})`;
+                    ctx.lineWidth = 2.2 - sw * 0.3;
+                    ctx.beginPath();
+                    for (let x = 0; x <= w; x += 2) {
+                        const y = baseY + waveOffset + Math.sin(x*0.018 + now*0.002 + sw*1.3) * 3;
+                        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                    }
+                    ctx.stroke();
+                }
+            }
+
+            // ── C. Beach / Sand ──
+            {
+                const sandG = ctx.createLinearGradient(0, sandTop, 0, h);
+                sandG.addColorStop(0, '#D4BC90');
+                sandG.addColorStop(0.08, '#E0CCA0');
+                sandG.addColorStop(0.25, '#F0DDB5');
+                sandG.addColorStop(0.6, '#F5E2BE');
+                sandG.addColorStop(1, '#EED8A8');
+                ctx.fillStyle = sandG;
+                ctx.fillRect(0, sandTop, w, h - sandTop);
+
+                // Wet sand near shore
+                const wetG = ctx.createLinearGradient(0, sandTop, 0, sandTop + 20);
+                wetG.addColorStop(0, 'rgba(140,190,220,0.2)');
+                wetG.addColorStop(1, 'rgba(140,190,220,0)');
+                ctx.fillStyle = wetG;
+                ctx.fillRect(0, sandTop, w, 20);
+
+                // Sand texture
+                ctx.fillStyle = 'rgba(180,155,110,0.15)';
+                for (let i = 0; i < 60; i++) {
+                    const dx = (i * 127.7 + 30) % w;
+                    const dy = sandTop + 8 + ((i * 83.1 + 15) % (h - sandTop - 10));
+                    ctx.beginPath(); ctx.arc(dx, dy, 0.8 + (i%3)*0.4, 0, Math.PI*2); ctx.fill();
+                }
+
+                // Shore wave wash
+                for (let sw = 0; sw < 3; sw++) {
+                    const washY = sandTop + sw * 6;
+                    const washAlpha = (0.25 - sw*0.06) * (0.7 + Math.sin(now*0.0006 + sw*0.5) * 0.3);
+                    ctx.fillStyle = `rgba(160,210,235,${washAlpha})`;
+                    ctx.beginPath();
+                    for (let x = 0; x <= w; x += 3) {
+                        const y = washY + Math.sin(x*0.015 + now*0.0015 + sw*2) * 3;
+                        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                    }
+                    ctx.lineTo(w, washY+8); ctx.lineTo(0, washY+8); ctx.closePath(); ctx.fill();
+                }
+
+                // Shells & starfish
+                const drawShell = (cx, cy, sz, hue) => {
+                    ctx.save(); ctx.translate(cx, cy);
+                    ctx.fillStyle = 'rgba(0,0,0,0.06)';
+                    ctx.beginPath(); ctx.ellipse(1, 2, sz+1, sz*0.4, 0, 0, Math.PI*2); ctx.fill();
+                    const sg = ctx.createRadialGradient(-sz*0.2, -sz*0.2, 0, 0, 0, sz);
+                    sg.addColorStop(0, `hsl(${hue},40%,88%)`); sg.addColorStop(1, `hsl(${hue},35%,72%)`);
+                    ctx.fillStyle = sg;
+                    ctx.beginPath(); ctx.arc(0, 0, sz, Math.PI, 0); ctx.fill();
+                    ctx.strokeStyle = `hsla(${hue},30%,60%,0.4)`; ctx.lineWidth = 0.6;
+                    for (let r = 0; r < 5; r++) {
+                        const a = Math.PI + (r+1)*(Math.PI/6);
+                        ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(Math.cos(a)*sz, Math.sin(a)*sz); ctx.stroke();
+                    }
+                    ctx.restore();
+                };
+                const drawStarfish = (cx, cy, sz, hue) => {
+                    ctx.save(); ctx.translate(cx, cy);
+                    const sfg = ctx.createRadialGradient(0,0,0,0,0,sz);
+                    sfg.addColorStop(0, `hsl(${hue},55%,65%)`); sfg.addColorStop(1, `hsl(${hue},50%,50%)`);
+                    ctx.fillStyle = sfg;
+                    ctx.beginPath();
+                    for (let i = 0; i < 5; i++) {
+                        const a = (i*Math.PI*2)/5-Math.PI/2;
+                        const ax = Math.cos(a)*sz, ay = Math.sin(a)*sz;
+                        const b = a+Math.PI/5;
+                        const bx = Math.cos(b)*sz*0.38, by = Math.sin(b)*sz*0.38;
+                        if (i===0) ctx.moveTo(ax,ay); else ctx.lineTo(ax,ay);
+                        ctx.lineTo(bx,by);
+                    }
+                    ctx.closePath(); ctx.fill();
+                    ctx.restore();
+                };
+                drawShell(w*0.12, h*0.78, 5, 30);
+                drawShell(w*0.38, h*0.88, 4.5, 340);
+                drawShell(w*0.62, h*0.92, 3.5, 50);
+                drawStarfish(w*0.25, h*0.84, 7, 15);
+                drawStarfish(w*0.52, h*0.80, 5, 25);
+            }
+
+            // ── D. Beach parasol (left side, always visible) ──
+            {
+                const parasX = w * 0.15;
+                const parasBaseY = sandTop + (h - sandTop) * 0.28;
+                const parasR = 55;
+                const poleTopY = parasBaseY - 90;
+
+                // Pole shadow on sand
+                ctx.fillStyle = 'rgba(0,0,0,0.06)';
+                ctx.beginPath(); ctx.ellipse(parasX + 2, parasBaseY + 2, 6, 2.5, 0, 0, Math.PI*2); ctx.fill();
+                // Pole
+                ctx.strokeStyle = '#C0C0C0'; ctx.lineWidth = 3.5;
+                ctx.beginPath(); ctx.moveTo(parasX, parasBaseY); ctx.lineTo(parasX, poleTopY); ctx.stroke();
+                // Pole cap
+                ctx.fillStyle = '#DDD';
+                ctx.beginPath(); ctx.arc(parasX, poleTopY, 3.5, 0, Math.PI*2); ctx.fill();
+
+                // Canopy — dome shape hanging DOWN from pole top
+                ctx.save();
+                const canopyTopY = poleTopY;
+                const canopyBottomY = poleTopY + parasR * 0.35;
+                // Draw each stripe as a sector
+                const stripeCount = 10;
+                for (let i = 0; i < stripeCount; i++) {
+                    const a1 = (i / stripeCount) * Math.PI * 2;
+                    const a2 = ((i + 1) / stripeCount) * Math.PI * 2;
+                    // Project 3D dome to 2D: each stripe spans an angle
+                    const x1 = parasX + Math.cos(a1) * parasR;
+                    const x2 = parasX + Math.cos(a2) * parasR;
+                    ctx.fillStyle = i % 2 === 0 ? '#DD5555' : '#FFFFFF';
+                    ctx.beginPath();
+                    ctx.moveTo(parasX, canopyTopY);
+                    ctx.quadraticCurveTo(x1, canopyBottomY + 4, x1, canopyBottomY);
+                    ctx.lineTo(x2, canopyBottomY);
+                    ctx.quadraticCurveTo(x2, canopyBottomY + 4, parasX, canopyTopY);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+                // Simplified dome overlay — a filled ellipse with stripes
+                for (let i = 0; i < stripeCount; i++) {
+                    const xL = parasX - parasR + (i * 2 * parasR) / stripeCount;
+                    const xR = parasX - parasR + ((i + 1) * 2 * parasR) / stripeCount;
+                    ctx.fillStyle = i % 2 === 0 ? '#DD5555' : '#FFFFFF';
+                    ctx.beginPath();
+                    ctx.moveTo(parasX, canopyTopY);
+                    ctx.lineTo(xL, canopyBottomY);
+                    ctx.lineTo(xR, canopyBottomY);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+                // Curved bottom edge of canopy
+                ctx.strokeStyle = 'rgba(0,0,0,0.1)'; ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(parasX - parasR, canopyBottomY);
+                ctx.quadraticCurveTo(parasX, canopyBottomY + 10, parasX + parasR, canopyBottomY);
+                ctx.stroke();
+                // Bottom fill to round the dome
+                ctx.fillStyle = 'rgba(200,50,50,0.06)';
+                ctx.beginPath();
+                ctx.moveTo(parasX - parasR, canopyBottomY);
+                ctx.quadraticCurveTo(parasX, canopyBottomY + 10, parasX + parasR, canopyBottomY);
+                ctx.lineTo(parasX + parasR, canopyBottomY);
+                ctx.closePath();
+                ctx.fill();
+                // Scalloped fringe
+                ctx.strokeStyle = 'rgba(200,60,60,0.25)'; ctx.lineWidth = 1.2;
+                const fringeY = canopyBottomY;
+                for (let sc = 0; sc < 14; sc++) {
+                    const fx = parasX - parasR + (sc * 2 * parasR) / 14;
+                    const fxn = parasX - parasR + ((sc + 1) * 2 * parasR) / 14;
+                    const sag = 3 + Math.sin(sc * 1.1) * 1.5;
+                    ctx.beginPath();
+                    ctx.moveTo(fx, fringeY + (Math.abs(fx - parasX) / parasR) * 8);
+                    ctx.quadraticCurveTo((fx + fxn) / 2, fringeY + sag + (Math.abs((fx+fxn)/2 - parasX) / parasR) * 8, fxn, fringeY + (Math.abs(fxn - parasX) / parasR) * 8);
+                    ctx.stroke();
+                }
+                ctx.restore();
+
+                // Sandals near parasol
+                const drawSandal = (sx, sy, angle, color) => {
+                    ctx.save(); ctx.translate(sx, sy); ctx.rotate(angle);
+                    ctx.fillStyle = 'rgba(0,0,0,0.06)';
+                    ctx.beginPath(); ctx.ellipse(1, 2, 8, 12, 0, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = color;
+                    ctx.beginPath(); ctx.ellipse(0, 0, 7, 11, 0, 0, Math.PI*2); ctx.fill();
+                    ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.moveTo(-4,-3); ctx.lineTo(0,5); ctx.lineTo(4,-3); ctx.stroke();
+                    ctx.restore();
+                };
+                drawSandal(w*0.18, h*0.84, -0.2, '#4499CC');
+                drawSandal(w*0.21, h*0.85, 0.15, '#4499CC');
+
+                // Towel
+                ctx.save(); ctx.translate(w*0.09, h*0.78); ctx.rotate(-0.05);
+                const towelG = ctx.createLinearGradient(0,0,35,0);
+                towelG.addColorStop(0,'#FFD488'); towelG.addColorStop(0.5,'#FFCC66'); towelG.addColorStop(1,'#EEBC55');
+                ctx.fillStyle = towelG;
+                ctx.beginPath(); ctx.roundRect(0, 0, 36, 10, 2); ctx.fill();
+                ctx.fillStyle = '#FFF'; ctx.fillRect(4, 2, 28, 2); ctx.fillRect(4, 6, 28, 2);
+                ctx.restore();
+            }
+
+            // ── E. Beach house / 海の家 (RIGHT side, always visible) ──
+            {
+                const hx = w * 0.78;
+                const hy = sandTop + (h - sandTop) * 0.38;
+                const hw = w * 0.34;
+                const hh = h * 0.18;
+
+                // Ground shadow
+                ctx.fillStyle = 'rgba(0,0,0,0.06)';
+                ctx.beginPath(); ctx.ellipse(hx, hy+4, hw*0.55, 8, 0, 0, Math.PI*2); ctx.fill();
+
+                // Wooden posts
+                const postW = 7;
+                [-hw/2+4, -hw/6, hw/6, hw/2-4].forEach(px => {
+                    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+                    ctx.fillRect(hx+px+2, hy-hh+5, postW, hh);
+                    const pg = ctx.createLinearGradient(hx+px, 0, hx+px+postW, 0);
+                    pg.addColorStop(0,'#8B6545'); pg.addColorStop(0.3,'#9A7555'); pg.addColorStop(0.7,'#7A5535'); pg.addColorStop(1,'#6B4828');
+                    ctx.fillStyle = pg;
+                    ctx.fillRect(hx+px, hy-hh, postW, hh);
+                    ctx.strokeStyle = 'rgba(0,0,0,0.07)'; ctx.lineWidth = 0.5;
+                    for (let g = 0; g < 3; g++) { ctx.beginPath(); ctx.moveTo(hx+px+1.5+g*2, hy-hh+3); ctx.lineTo(hx+px+1.5+g*2, hy-2); ctx.stroke(); }
+                });
+
+                // Counter
+                const counterY = hy - hh * 0.30, counterH = 7;
+                ctx.fillStyle = 'rgba(0,0,0,0.08)';
+                ctx.fillRect(hx-hw/2+2, counterY+3, hw, counterH);
+                const cg = ctx.createLinearGradient(0,counterY,0,counterY+counterH);
+                cg.addColorStop(0,'#B8956A'); cg.addColorStop(0.4,'#A88558'); cg.addColorStop(1,'#907040');
+                ctx.fillStyle = cg;
+                ctx.beginPath(); ctx.roundRect(hx-hw/2, counterY, hw, counterH, 1.5); ctx.fill();
+                ctx.fillStyle = 'rgba(255,255,255,0.12)';
+                ctx.fillRect(hx-hw/2+2, counterY, hw-4, 1.5);
+
+                // Roof
+                const roofPeakY = hy - hh - hh*0.35, roofOH = 18;
+                ctx.fillStyle = 'rgba(0,0,0,0.06)';
+                ctx.beginPath(); ctx.moveTo(hx-hw/2-roofOH+3, hy-hh+4); ctx.lineTo(hx, roofPeakY+4); ctx.lineTo(hx+hw/2+roofOH+3, hy-hh+4); ctx.closePath(); ctx.fill();
+                const rg = ctx.createLinearGradient(0,roofPeakY,0,hy-hh);
+                rg.addColorStop(0,'#C4A058'); rg.addColorStop(0.5,'#D4B468'); rg.addColorStop(1,'#BA9448');
+                ctx.fillStyle = rg;
+                ctx.beginPath(); ctx.moveTo(hx-hw/2-roofOH, hy-hh); ctx.lineTo(hx, roofPeakY); ctx.lineTo(hx+hw/2+roofOH, hy-hh); ctx.closePath(); ctx.fill();
+                ctx.strokeStyle = 'rgba(100,70,30,0.12)'; ctx.lineWidth = 0.8;
+                for (let rl = 0; rl < 6; rl++) {
+                    const ry = roofPeakY + (hy-hh-roofPeakY)*(rl+1)/7;
+                    const ratio = (ry-roofPeakY)/(hy-hh-roofPeakY);
+                    ctx.beginPath(); ctx.moveTo(hx-(hw/2+roofOH)*ratio, ry); ctx.lineTo(hx+(hw/2+roofOH)*ratio, ry); ctx.stroke();
+                }
+                ctx.fillStyle = '#8B6545';
+                ctx.fillRect(hx-hw/2-roofOH, hy-hh-2, hw+roofOH*2, 4);
+
+                // Noren
+                const norenW = hw/7, norenH = hh*0.28;
+                for (let i = 0; i < 5; i++) {
+                    const sway = Math.sin(now*0.002+i*0.9)*3;
+                    const sway2 = Math.sin(now*0.003+i*1.2)*1.5;
+                    const nx = hx-hw*0.35 + i*norenW + sway;
+                    const ny = hy-hh;
+                    ctx.fillStyle = i%2===0 ? '#CC3333' : '#F8F0F0';
+                    ctx.beginPath();
+                    ctx.moveTo(nx, ny); ctx.lineTo(nx+norenW-3, ny);
+                    ctx.quadraticCurveTo(nx+norenW-3+sway2, ny+norenH*0.5, nx+norenW-3+sway*0.5, ny+norenH);
+                    ctx.quadraticCurveTo(nx+sway2*0.5, ny+norenH*0.7, nx+sway*0.3, ny+norenH-3);
+                    ctx.closePath(); ctx.fill();
+                    ctx.strokeStyle = 'rgba(0,0,0,0.08)'; ctx.lineWidth = 0.5; ctx.stroke();
+                }
+
+                // Sign
+                const signX = hx-hw/2-30, signY = hy-hh-5, signW = 26, signH = 60;
+                ctx.strokeStyle = '#8B6545'; ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.moveTo(signX+signW/2, hy-hh-10); ctx.lineTo(signX+signW/2, signY); ctx.stroke();
+                ctx.fillStyle = 'rgba(0,0,0,0.1)';
+                ctx.beginPath(); ctx.roundRect(signX+2, signY+2, signW, signH, 3); ctx.fill();
+                const sbg = ctx.createLinearGradient(signX,signY,signX+signW,signY);
+                sbg.addColorStop(0,'#D4B888'); sbg.addColorStop(0.5,'#E4C898'); sbg.addColorStop(1,'#C4A878');
+                ctx.fillStyle = sbg;
+                ctx.beginPath(); ctx.roundRect(signX, signY, signW, signH, 3); ctx.fill();
+                ctx.strokeStyle = '#8B6545'; ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.roundRect(signX, signY, signW, signH, 3); ctx.stroke();
+                ctx.fillStyle = '#2A1A0A'; ctx.font = "bold 11px 'Zen Maru Gothic', sans-serif";
+                ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+                ['焼','き','そ','ば'].forEach((ch, ci) => ctx.fillText(ch, signX+signW/2, signY+5+ci*13));
+
+                // Lanterns
+                const drawLantern = (lx, ly, size) => {
+                    ctx.strokeStyle = '#666'; ctx.lineWidth = 1;
+                    ctx.beginPath(); ctx.moveTo(lx, ly-size*1.5); ctx.lineTo(lx, ly-size); ctx.stroke();
+                    const lg = ctx.createRadialGradient(lx-size*0.2, ly-size*0.3, 0, lx, ly, size);
+                    lg.addColorStop(0,'#FF6644'); lg.addColorStop(0.7,'#CC3322'); lg.addColorStop(1,'#AA2211');
+                    ctx.fillStyle = lg;
+                    ctx.beginPath(); ctx.ellipse(lx, ly, size*0.8, size, 0, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+                    ctx.fillRect(lx-size*0.75, ly-2, size*1.5, 4);
+                    ctx.fillStyle = '#333';
+                    ctx.beginPath(); ctx.ellipse(lx, ly-size, size*0.45, 2.5, 0, 0, Math.PI*2); ctx.fill();
+                    ctx.beginPath(); ctx.ellipse(lx, ly+size, size*0.45, 2.5, 0, 0, Math.PI*2); ctx.fill();
+                    const gg = ctx.createRadialGradient(lx,ly,0,lx,ly,size*3);
+                    gg.addColorStop(0,'rgba(255,200,100,0.18)'); gg.addColorStop(1,'rgba(255,200,100,0)');
+                    ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(lx,ly,size*3,0,Math.PI*2); ctx.fill();
+                };
+                drawLantern(hx-hw*0.25, hy-hh+14, 8);
+                drawLantern(hx+hw*0.15, hy-hh+12, 7);
+
+                // Griddle
+                const gridX = hx+hw*0.1, gridY = counterY-3;
+                ctx.fillStyle = '#444'; ctx.beginPath(); ctx.roundRect(gridX-22,gridY-5,44,8,2); ctx.fill();
+                ctx.fillStyle = '#555'; ctx.beginPath(); ctx.roundRect(gridX-20,gridY-4,40,6,1); ctx.fill();
+                ctx.lineWidth = 1.2;
+                for (let s = 0; s < 5; s++) {
+                    ctx.strokeStyle = `rgba(220,220,230,${0.35-s*0.04})`;
+                    ctx.beginPath();
+                    for (let y = 0; y < 22; y++) {
+                        const yy = gridY-8-y, xx = gridX-12+s*6 + Math.sin((yy+now*0.004+s*1.8)*0.35)*3;
+                        if (y===0) ctx.moveTo(xx,yy); else ctx.lineTo(xx,yy);
+                    }
+                    ctx.stroke();
+                }
+
+                // Counter items
+                ctx.fillStyle = '#2A1A0A';
+                ctx.beginPath(); ctx.roundRect(hx-hw*0.08, counterY-14, 6, 12, 1); ctx.fill();
+                ctx.fillStyle = '#CC3333';
+                ctx.beginPath(); ctx.roundRect(hx-hw*0.08+1, counterY-16, 4, 4, 1); ctx.fill();
+            }
+
+            // ── F. Beach grass (always visible) ──
+            {
+                const drawGrassClump = (bx, by, count, maxH) => {
+                    for (let g = 0; g < count; g++) {
+                        const gx = bx + (g-count/2)*5;
+                        const sway = Math.sin(now*0.0018+g*1.5+bx*0.01)*6;
+                        const gh = maxH*(0.6+(g%3)*0.2);
+                        ctx.strokeStyle = `rgba(100,140,60,${0.6+(g%3)*0.1})`; ctx.lineWidth = 1.8;
+                        ctx.beginPath(); ctx.moveTo(gx,by);
+                        ctx.quadraticCurveTo(gx+sway*0.5, by-gh*0.5, gx+sway, by-gh); ctx.stroke();
+                    }
+                };
+                drawGrassClump(w*0.94, h*0.74, 5, 25);
+                drawGrassClump(w*0.02, h*0.78, 4, 22);
+            }
+
+            // ══════════════════════════════════════════
+            // CHARACTER — walks in from left, stops at center (back view, barefoot)
+            // ══════════════════════════════════════════
+            const charAlpha = layerAlpha(0.02, 0.08);
+            if (charAlpha > 0) {
+                ctx.save();
+                ctx.globalAlpha = charAlpha;
+
+                const skinC = babyColorScheme.skin;
+                const hairC = babyColorScheme.hair;
+                const bodyC = babyColorScheme.body;
+                const limbC = babyColorScheme.limb;
+                const cheekC = babyColorScheme.cheek;
+                const HR = 18;
+                const charScale = 1.15;
+
+                ctx.save();
+                ctx.translate(charX, charFeetY);
+                ctx.scale(charScale, charScale);
+
+                // Walk animation values
+                const t = walkCycle;
+                const legSwingL = isWalking ? Math.sin(t) * 0.32 : 0;
+                const legSwingR = isWalking ? Math.sin(t + Math.PI) * 0.32 : 0;
+                const armSwingL = isWalking ? Math.sin(t + Math.PI) * 0.25 : 0.05;
+                const armSwingR = isWalking ? Math.sin(t) * 0.25 : -0.05;
+                const bodyBob = isWalking ? Math.abs(Math.sin(t)) * 2 : 0;
+
+                const drawPart = (x, y, ang, fn) => {
+                    ctx.save(); ctx.translate(x, y); ctx.rotate(ang); fn(ctx); ctx.restore();
+                };
+
+                ctx.translate(0, -bodyBob);
+
+                // ─ Back leg ─
+                drawPart(-7, -6, legSwingL, c => {
+                    c.fillStyle = limbC;
+                    c.beginPath(); c.roundRect(-7, -3, 14, 22, 5); c.fill();
+                    drawPart(0, 16, Math.max(0, -legSwingL)*0.4, c2 => {
+                        c2.fillStyle = skinC;
+                        c2.beginPath(); c2.roundRect(-5, 0, 10, 16, 4); c2.fill();
+                        c2.fillStyle = limbC;
+                        c2.beginPath(); c2.roundRect(-6.5, -4, 13, 8, 4); c2.fill();
+                        // Bare feet
+                        c2.fillStyle = skinC;
+                        c2.beginPath(); c2.ellipse(1, 17, 7, 4, 0, 0, Math.PI*2); c2.fill();
+                    });
+                });
+
+                // ─ Back arm ─
+                drawPart(-15, -52, armSwingL, c => {
+                    c.fillStyle = bodyC;
+                    c.beginPath(); c.roundRect(-5.5, -2, 11, 10, 4); c.fill();
+                    c.fillStyle = skinC;
+                    c.beginPath(); c.roundRect(-4.5, 8, 9, 12, 4); c.fill();
+                    drawPart(0, 20, 0.12, c2 => {
+                        c2.fillStyle = skinC;
+                        c2.beginPath(); c2.roundRect(-3.5, 0, 7, 11, 3.5); c2.fill();
+                    });
+                });
+
+                // ─ Body (torso back view) ─
+                ctx.fillStyle = bodyC;
+                ctx.beginPath(); ctx.roundRect(-17, -56, 34, 32, 8); ctx.fill();
+                // Neckline
+                ctx.fillStyle = skinC;
+                ctx.beginPath(); ctx.moveTo(-7, -56); ctx.quadraticCurveTo(0, -51, 7, -56); ctx.fill();
+                // Back wrinkles
+                ctx.strokeStyle = 'rgba(0,0,0,0.05)'; ctx.lineWidth = 0.8;
+                ctx.beginPath(); ctx.moveTo(-8,-48); ctx.quadraticCurveTo(0,-45,8,-48); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(-6,-40); ctx.quadraticCurveTo(0,-38,6,-40); ctx.stroke();
+                ctx.fillStyle = 'rgba(255,255,255,0.08)';
+                ctx.beginPath(); ctx.ellipse(0, -52, 12, 5, 0, Math.PI, 0); ctx.fill();
+
+                // Pants
+                ctx.fillStyle = limbC;
+                ctx.beginPath(); ctx.roundRect(-16, -26, 32, 22, [0,0,6,6]); ctx.fill();
+                ctx.fillStyle = 'rgba(0,0,0,0.08)';
+                ctx.beginPath(); ctx.roundRect(-16, -26, 32, 3, 1); ctx.fill();
+
+                // ─ Front leg ─
+                drawPart(7, -6, legSwingR, c => {
+                    c.fillStyle = limbC;
+                    c.beginPath(); c.roundRect(-7, -3, 14, 22, 5); c.fill();
+                    drawPart(0, 16, Math.max(0, -legSwingR)*0.4, c2 => {
+                        c2.fillStyle = skinC;
+                        c2.beginPath(); c2.roundRect(-5, 0, 10, 16, 4); c2.fill();
+                        c2.fillStyle = limbC;
+                        c2.beginPath(); c2.roundRect(-6.5, -4, 13, 8, 4); c2.fill();
+                        // Bare feet
+                        c2.fillStyle = skinC;
+                        c2.beginPath(); c2.ellipse(1, 17, 7, 4, 0, 0, Math.PI*2); c2.fill();
+                    });
+                });
+
+                // ─ Front arm ─
+                drawPart(15, -52, armSwingR, c => {
+                    c.fillStyle = bodyC;
+                    c.beginPath(); c.roundRect(-5.5, -2, 11, 10, 4); c.fill();
+                    c.fillStyle = skinC;
+                    c.beginPath(); c.roundRect(-4.5, 8, 9, 12, 4); c.fill();
+                    drawPart(0, 20, 0.12, c2 => {
+                        c2.fillStyle = skinC;
+                        c2.beginPath(); c2.roundRect(-3.5, 0, 7, 11, 3.5); c2.fill();
+                    });
+                });
+
+                // ─ Head (back view) ─
+                ctx.save();
+                ctx.translate(0, -70);
+                if (isWalking) ctx.rotate(Math.sin(t * 2) * 0.02);
+
+                ctx.fillStyle = skinC;
+                ctx.beginPath(); ctx.arc(0, 0, HR, 0, Math.PI*2); ctx.fill();
+                // Ears
+                ctx.beginPath(); ctx.arc(-HR+2, 3, 4.5, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(HR-2, 3, 4.5, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = cheekC;
+                ctx.beginPath(); ctx.arc(-HR+2, 3, 2.5, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(HR-2, 3, 2.5, 0, Math.PI*2); ctx.fill();
+
+                // Hair (back view)
+                ctx.fillStyle = hairC;
+                if (babyIsBoy) {
+                    if (babyFaceType % 3 === 0) {
+                        ctx.beginPath(); ctx.arc(0,-3, HR+1, 0, Math.PI*2); ctx.fill();
+                    } else if (babyFaceType % 3 === 1) {
+                        ctx.beginPath(); ctx.arc(0,-2, HR+3, 0, Math.PI*2); ctx.fill();
+                        [[-8,-HR-3],[0,-HR-5],[8,-HR-2],[-12,-HR+2],[12,-HR+2]].forEach(([sx,sy]) => {
+                            ctx.beginPath(); ctx.moveTo(sx-3,sy+5); ctx.lineTo(sx,sy); ctx.lineTo(sx+3,sy+5); ctx.fill();
+                        });
+                    } else {
+                        ctx.beginPath(); ctx.arc(0,-1, HR+2, 0, Math.PI*2); ctx.fill();
+                        ctx.strokeStyle = 'rgba(0,0,0,0.12)'; ctx.lineWidth = 1;
+                        ctx.beginPath(); ctx.moveTo(-2,-HR-1); ctx.lineTo(-2,-2); ctx.stroke();
+                    }
+                    ctx.fillStyle = skinC;
+                    ctx.beginPath(); ctx.roundRect(-5, HR-6, 10, 10, 3); ctx.fill();
+                } else {
+                    if (babyFaceType % 3 === 0) {
+                        ctx.beginPath(); ctx.arc(0,-1, HR+3, 0, Math.PI*2); ctx.fill();
+                        ctx.beginPath();
+                        ctx.moveTo(-HR-2,0); ctx.quadraticCurveTo(-HR-3,HR+8,-HR+2,HR+16);
+                        ctx.lineTo(HR-2,HR+16); ctx.quadraticCurveTo(HR+3,HR+8,HR+2,0);
+                        ctx.closePath(); ctx.fill();
+                    } else if (babyFaceType % 3 === 1) {
+                        ctx.beginPath(); ctx.arc(0,-1, HR+3, 0, Math.PI*2); ctx.fill();
+                        ctx.beginPath(); ctx.moveTo(-HR+2,-4); ctx.quadraticCurveTo(-HR-8,8,-HR-4,HR+14);
+                        ctx.quadraticCurveTo(-HR+2,HR+10,-HR+6,2); ctx.closePath(); ctx.fill();
+                        ctx.beginPath(); ctx.moveTo(HR-2,-4); ctx.quadraticCurveTo(HR+8,8,HR+4,HR+14);
+                        ctx.quadraticCurveTo(HR-2,HR+10,HR-6,2); ctx.closePath(); ctx.fill();
+                        ctx.fillStyle = cheekC;
+                        ctx.beginPath(); ctx.ellipse(-HR+1,-4,4,3,-0.3,0,Math.PI*2); ctx.fill();
+                        ctx.beginPath(); ctx.ellipse(HR-1,-4,4,3,0.3,0,Math.PI*2); ctx.fill();
+                    } else {
+                        ctx.beginPath(); ctx.arc(0,-1, HR+3, 0, Math.PI*2); ctx.fill();
+                        ctx.beginPath(); ctx.moveTo(-HR-2,-2); ctx.quadraticCurveTo(-HR-1,HR-2,-HR+6,HR+2);
+                        ctx.lineTo(HR-6,HR+2); ctx.quadraticCurveTo(HR+1,HR-2,HR+2,-2); ctx.closePath(); ctx.fill();
+                    }
+                }
+                // Hair shine
+                ctx.fillStyle = 'rgba(255,255,255,0.08)';
+                ctx.beginPath(); ctx.ellipse(-3, -HR+4, 8, 4, -0.2, 0, Math.PI*2); ctx.fill();
+
+                ctx.restore(); // head
+                ctx.restore(); // char scale
+                ctx.restore(); // main
+            }
+
+            // ── G. Text overlay (progress 0.8〜) ──
+            const textAlpha = layerAlpha(0.8, 0.12);
+            if (textAlpha > 0) {
+                ctx.save();
+                ctx.globalAlpha = textAlpha;
+
+                // Golden-hour glow
+                const sunG = ctx.createRadialGradient(w*0.75, h*0.08, 0, w*0.75, h*0.08, w*0.6);
+                sunG.addColorStop(0, 'rgba(255,248,220,0.12)');
+                sunG.addColorStop(0.5, 'rgba(255,240,200,0.05)');
+                sunG.addColorStop(1, 'rgba(255,240,200,0)');
+                ctx.fillStyle = sunG;
+                ctx.fillRect(0, 0, w, h);
+
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                const textY = h * 0.20 + Math.sin(now * 0.001) * 2;
+
+                ctx.shadowColor = 'rgba(255,255,255,0.9)'; ctx.shadowBlur = 18;
+                ctx.fillStyle = 'rgba(55, 50, 42, 0.88)';
+                ctx.font = "700 26px 'Zen Maru Gothic', sans-serif";
+                ctx.fillText('海辺の午後', w/2, textY);
+                ctx.fillText('海辺の午後', w/2, textY);
+
+                ctx.shadowBlur = 12;
+                ctx.fillStyle = 'rgba(85, 78, 65, 0.55)';
+                ctx.font = "400 13px 'Zen Maru Gothic', sans-serif";
+                ctx.fillText('An Afternoon by the Sea', w/2, textY + 24);
+
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = 'rgba(85, 78, 65, 0.15)'; ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(w/2-50, textY+38); ctx.lineTo(w/2+50, textY+38); ctx.stroke();
+
+                ctx.restore();
+            }
+        }
+
+        // ======== MOUNTAIN STILL DRAWING ========
+        function drawMountainStill(ctx, progress) {
+            const w = width, h = height;
+            const now = Date.now();
+
+            const layerAlpha = (threshold, fadeLen) => {
+                if (progress < threshold) return 0;
+                return Math.min(1, (progress - threshold) / (fadeLen || 0.12));
+            };
+
+            // ── Ground reveal mechanic ──
+            // Initial horizon slightly below center; drops to reveal city
+            const groundBase = h * 0.55;
+            const groundRevealed = h * 0.78;
+            const revealStart = 0.5;
+            const revealEnd = 0.75;
+            const revealT = progress < revealStart ? 0 : Math.min(1, (progress - revealStart) / (revealEnd - revealStart));
+            const groundY = groundBase + (groundRevealed - groundBase) * (1 - Math.pow(1 - revealT, 3));
+
+            // Character walk: walks toward horizon (shrinking), stops at 0.5
+            const walkEnd = 0.5;
+            const walkT = Math.min(1, progress / walkEnd);
+            const charStartY = h * 0.92;
+            const charX = w * 0.46;
+            const charTargetY = groundBase + 5;
+            const charY = charStartY + (charTargetY - charStartY) * (walkT < 1 ? (1 - Math.pow(1 - walkT, 2.5)) : 1);
+            const charScaleStart = 1.8;
+            const charScaleEnd = 0.8;
+            const charScale = charScaleStart + (charScaleEnd - charScaleStart) * (walkT < 1 ? (1 - Math.pow(1 - walkT, 2.5)) : 1);
+            const isWalking = progress < walkEnd;
+            const walkCycle = now * 0.008;
+
+            // After walk ends, character sticks to groundY
+            const finalCharY = progress >= walkEnd ? groundY : charY;
+
+            // ══════════════════════════════════════════
+            // 1. SUNSET SKY (matching train phase sunset)
+            // ══════════════════════════════════════════
+            {
+                const skyG = ctx.createLinearGradient(0, 0, 0, h);
+                skyG.addColorStop(0, 'rgb(255,100,50)');
+                skyG.addColorStop(0.7, 'rgb(255,126,60)');
+                skyG.addColorStop(1, 'rgb(255,86,30)');
+                ctx.fillStyle = skyG;
+                ctx.fillRect(0, 0, w, h);
+
+                // Atmospheric warm haze bands
+                for (let i = 0; i < 6; i++) {
+                    const bandY = h * (0.2 + i * 0.1);
+                    const bandG = ctx.createLinearGradient(0, bandY - 20, 0, bandY + 20);
+                    bandG.addColorStop(0, 'rgba(255,200,100,0)');
+                    bandG.addColorStop(0.5, `rgba(255,${200 - i*12},${100 + i*8},${0.06 - i*0.006})`);
+                    bandG.addColorStop(1, 'rgba(255,200,100,0)');
+                    ctx.fillStyle = bandG;
+                    ctx.fillRect(0, bandY - 20, w, 40);
+                }
+
+                // Sunset clouds — thin elliptical (matching train phase style)
+                ctx.save();
+                const cloudData = [
+                    { x: w*0.12, y: h*0.06, cw: 180, ch: 10 },
+                    { x: w*0.45, y: h*0.04, cw: 220, ch: 12 },
+                    { x: w*0.75, y: h*0.08, cw: 160, ch: 9 },
+                    { x: w*0.30, y: h*0.12, cw: 140, ch: 8 },
+                    { x: w*0.60, y: h*0.14, cw: 200, ch: 11 },
+                    { x: w*0.88, y: h*0.10, cw: 130, ch: 7 },
+                    { x: w*0.05, y: h*0.16, cw: 100, ch: 6 },
+                ];
+                cloudData.forEach(c => {
+                    const cg = ctx.createLinearGradient(c.x, c.y, c.x + c.cw, c.y);
+                    cg.addColorStop(0, 'rgba(255,200,120,0)');
+                    cg.addColorStop(0.3, 'rgba(255,180,100,0.55)');
+                    cg.addColorStop(0.7, 'rgba(255,160,80,0.45)');
+                    cg.addColorStop(1, 'rgba(255,140,60,0)');
+                    ctx.fillStyle = cg;
+                    ctx.beginPath();
+                    ctx.ellipse(c.x + c.cw / 2, c.y, c.cw / 2, c.ch, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+                ctx.restore();
+            }
+
+            // ══════════════════════════════════════════
+            // 2. SUN (matching train phase sun style)
+            // ══════════════════════════════════════════
+            {
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(0, 0, w, groundY);
+                ctx.clip();
+
+                const sunX = w * 0.55;
+                const sunY = groundRevealed * 0.42;
+
+                // Atmospheric glow (train phase style: 800px equivalent)
+                const glowR = Math.max(w, h) * 0.85;
+                const glow = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, glowR);
+                glow.addColorStop(0, 'rgba(255,180,60,0.35)');
+                glow.addColorStop(0.3, 'rgba(255,140,40,0.15)');
+                glow.addColorStop(1, 'rgba(255,100,20,0)');
+                ctx.fillStyle = glow;
+                ctx.beginPath(); ctx.arc(sunX, sunY, glowR, 0, Math.PI*2); ctx.fill();
+
+                // Sun disk (train phase style: #FFF8DD → #FFDD55 → #FFCC33)
+                const diskR = Math.min(w, h) * 0.09;
+                const disk = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, diskR);
+                disk.addColorStop(0, '#FFF8DD');
+                disk.addColorStop(0.5, '#FFDD55');
+                disk.addColorStop(0.85, '#FFCC33');
+                disk.addColorStop(1, 'rgba(255,180,40,0)');
+                ctx.fillStyle = disk;
+                ctx.beginPath(); ctx.arc(sunX, sunY, diskR, 0, Math.PI*2); ctx.fill();
+
+                ctx.restore();
+            }
+
+            // ══════════════════════════════════════════
+            // 3. CITY — "光の絨毯" (Carpet of Lights)
+            //    5 layers + river + street lights + atmosphere
+            // ══════════════════════════════════════════
+            {
+                if (revealT <= 0) { /* skip city entirely */ } else {
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(0, 0, w, groundY);
+                ctx.clip();
+
+                const spreadT = 1 - Math.pow(1 - revealT, 2);
+                const cityAnchor = groundBase + 5;
+
+                // Y bases for 5 layers (0=farthest, 4=nearest)
+                const layerY0 = cityAnchor + spreadT * -90;
+                const layerY1 = cityAnchor + spreadT * -65;
+                const layerY2 = cityAnchor + spreadT * -38;
+                const layerY3 = cityAnchor + spreadT * -12;
+                const layerY4 = cityAnchor + spreadT * 8;
+
+                ctx.globalAlpha = Math.min(1, revealT * 3);
+
+                // ── Light-pollution dome (city glow into sky) ──
+                const glowCx = w * 0.5, glowCy = layerY2;
+                const glowR = Math.max(w, 200) * 0.6;
+                const dome = ctx.createRadialGradient(glowCx, glowCy, 0, glowCx, glowCy, glowR);
+                dome.addColorStop(0, 'rgba(255,180,80,0.08)');
+                dome.addColorStop(0.5, 'rgba(255,160,70,0.04)');
+                dome.addColorStop(1, 'rgba(255,140,60,0)');
+                ctx.fillStyle = dome;
+                ctx.fillRect(0, glowCy - glowR, w, glowR);
+
+                // Helper: draw asphalt ground strip for a city layer
+                function drawCityGround(yTop, yBottom, darkness) {
+                    const grd = ctx.createLinearGradient(0, yTop, 0, yBottom);
+                    const d = darkness;
+                    grd.addColorStop(0, `rgba(${35+d},${25+d},${40+d},1)`);
+                    grd.addColorStop(0.5, `rgba(${30+d},${22+d},${35+d},1)`);
+                    grd.addColorStop(1, `rgba(${28+d},${20+d},${32+d},1)`);
+                    ctx.fillStyle = grd;
+                    ctx.fillRect(0, yTop, w, yBottom - yTop);
+                    // Subtle road markings
+                    for (let rx = 0; rx < w; rx += 12 + d * 0.5) {
+                        ctx.fillStyle = `rgba(60,50,55,${0.15 + Math.sin(rx * 0.7) * 0.05})`;
+                        ctx.fillRect(rx, yTop + (yBottom - yTop) * 0.4, 4 + Math.sin(rx) * 2, 1);
+                    }
+                }
+
+                // Helper: draw street-light dot row between layers
+                function drawStreetLights(y, dotSpacing, dotR, alpha) {
+                    for (let sx = 0; sx < w; sx += dotSpacing) {
+                        const flick = alpha + Math.sin(now * 0.0015 + sx * 0.8) * 0.08;
+                        ctx.fillStyle = `rgba(255,200,120,${Math.max(0, flick)})`;
+                        ctx.beginPath();
+                        ctx.arc(sx + Math.sin(sx * 0.3) * 1.5, y, dotR, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+
+                // Helper: draw a building with given style
+                // styles: 0=box, 1=tower, 2=wide-flat, 3=peaked, 4=dome, 5=factory, 6=stepped, 7=spire, 8=L-shape, 9=twin-tower
+                function drawBuilding(bx, bh, bw, style, baseY, color) {
+                    ctx.fillStyle = color;
+                    if (style === 4) {
+                        // Dome
+                        ctx.fillRect(bx - bw / 2, baseY - bh + bw * 0.25, bw, bh - bw * 0.25 + 6);
+                        ctx.beginPath(); ctx.arc(bx, baseY - bh + bw * 0.25, bw / 2, Math.PI, 0); ctx.fill();
+                    } else if (style === 6) {
+                        // Stepped / setback
+                        ctx.fillRect(bx - bw / 2, baseY - bh * 0.5, bw, bh * 0.5 + 6);
+                        ctx.fillRect(bx - bw * 0.35, baseY - bh * 0.75, bw * 0.7, bh * 0.25);
+                        ctx.fillRect(bx - bw * 0.2, baseY - bh, bw * 0.4, bh * 0.25);
+                    } else if (style === 7) {
+                        // Spire / church
+                        ctx.fillRect(bx - bw / 2, baseY - bh * 0.6, bw, bh * 0.6 + 6);
+                        ctx.beginPath();
+                        ctx.moveTo(bx - bw * 0.2, baseY - bh * 0.6);
+                        ctx.lineTo(bx, baseY - bh);
+                        ctx.lineTo(bx + bw * 0.2, baseY - bh * 0.6);
+                        ctx.closePath(); ctx.fill();
+                    } else if (style === 8) {
+                        // L-shape
+                        ctx.fillRect(bx - bw / 2, baseY - bh, bw * 0.55, bh + 6);
+                        ctx.fillRect(bx - bw / 2, baseY - bh * 0.55, bw, bh * 0.55 + 6);
+                    } else if (style === 9) {
+                        // Twin tower
+                        const gap = bw * 0.15;
+                        ctx.fillRect(bx - bw / 2, baseY - bh, bw * 0.4, bh + 6);
+                        ctx.fillRect(bx + gap, baseY - bh * 0.85, bw * 0.4, bh * 0.85 + 6);
+                        ctx.fillRect(bx - bw / 2, baseY - bh * 0.4, bw, bh * 0.12);
+                    } else {
+                        // Box / tower / wide-flat / peaked / factory (base rect)
+                        ctx.fillRect(bx - bw / 2, baseY - bh, bw, bh + 6);
+                    }
+                    // Rooftop details per style
+                    if (style === 1 && bh > 20) {
+                        ctx.fillRect(bx - 1.5, baseY - bh - 5, 3, 5);
+                        ctx.fillRect(bx + bw * 0.3, baseY - bh - 3, 1.5, 3);
+                    }
+                    if (style === 2) {
+                        ctx.fillRect(bx - bw / 2, baseY - bh - 1.5, bw, 1.5);
+                    }
+                    if (style === 3) {
+                        ctx.beginPath();
+                        ctx.moveTo(bx - bw / 2 - 1, baseY - bh);
+                        ctx.lineTo(bx, baseY - bh - Math.min(6, bh * 0.15));
+                        ctx.lineTo(bx + bw / 2 + 1, baseY - bh);
+                        ctx.closePath(); ctx.fill();
+                    }
+                    if (style === 5) {
+                        ctx.fillRect(bx + bw * 0.2, baseY - bh - 8, 2.5, 8);
+                        ctx.fillRect(bx - bw * 0.25, baseY - bh - 5, 2, 5);
+                    }
+                }
+
+                // ═══ LAYER 0: Horizon glow (farthest) ═══
+                {
+                    const y0 = layerY0;
+                    // Dark ground strip below horizon glow
+                    drawCityGround(y0 + 2, layerY1 - 2, 20);
+                    // Warm gradient band
+                    const hg = ctx.createLinearGradient(0, y0 - 8, 0, y0 + 18);
+                    hg.addColorStop(0, 'rgba(255,180,80,0)');
+                    hg.addColorStop(0.3, 'rgba(255,180,80,0.25)');
+                    hg.addColorStop(0.7, 'rgba(255,160,70,0.18)');
+                    hg.addColorStop(1, 'rgba(255,140,60,0)');
+                    ctx.fillStyle = hg;
+                    ctx.fillRect(0, y0 - 8, w, 26);
+                    // Scattered light particles
+                    for (let i = 0; i < 80; i++) {
+                        const px = (Math.sin(i * 7.31 + 2.1) * 0.5 + 0.5) * w;
+                        const py = y0 + Math.sin(i * 4.17) * 6;
+                        const r = 0.5 + Math.abs(Math.sin(i * 3.91)) * 0.5;
+                        const twinkle = 0.2 + Math.sin(now * 0.002 + i * 1.7) * 0.15;
+                        ctx.fillStyle = `rgba(255,200,120,${twinkle})`;
+                        ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
+                    }
+                    // Haze overlay
+                    const hz0 = ctx.createLinearGradient(0, y0 - 10, 0, y0 + 20);
+                    hz0.addColorStop(0, 'rgba(255,140,60,0)');
+                    hz0.addColorStop(0.5, 'rgba(255,140,60,0.15)');
+                    hz0.addColorStop(1, 'rgba(255,140,60,0)');
+                    ctx.fillStyle = hz0;
+                    ctx.fillRect(0, y0 - 10, w, 30);
+                }
+
+                // Street lights between L0 and L1
+                drawStreetLights((layerY0 + layerY1) * 0.5 + 4, 3, 0.6, 0.25);
+
+                // ═══ LAYER 1: Far city (dense, 100 buildings) ═══
+                {
+                    const y1 = layerY1;
+                    // Ground strip
+                    drawCityGround(y1 + 2, layerY2 - 2, 15);
+                    // Generate packed buildings
+                    const farB = [];
+                    for (let i = 0; i < 100; i++) {
+                        const bx = w * (i / 100) + Math.sin(i * 7.1) * 1.5;
+                        const bh = 3 + Math.abs(Math.sin(i * 3.7 + 1.2)) * 10;
+                        const bw = 2.5 + Math.abs(Math.sin(i * 2.1)) * 3;
+                        const style = [0,0,1,3,0,7,0,3,0,0][i % 10];
+                        farB.push([bx, bh, bw, style]);
+                    }
+                    // Fill buildings (packed, overlapping slightly)
+                    const farColors = ['#4A2838','#4E2C3A','#462636','#4C2A3C','#482838'];
+                    farB.forEach(([bx, bh, bw, style], idx) => {
+                        drawBuilding(bx, bh, bw, style, y1, farColors[idx % farColors.length]);
+                    });
+                    // Gap-filler: small buildings in between
+                    for (let i = 0; i < 50; i++) {
+                        const bx = w * ((i + 0.5) / 50);
+                        const bh = 2 + Math.abs(Math.sin(i * 5.3)) * 5;
+                        ctx.fillStyle = '#44263A';
+                        ctx.fillRect(bx - 1.5, y1 - bh, 3, bh + 4);
+                    }
+                    // Window lights — dense tiny dots
+                    farB.forEach(([bx, bh, bw]) => {
+                        for (let wy = y1 - bh + 1; wy < y1; wy += 2.5) {
+                            for (let wx = bx - bw / 2 + 0.5; wx < bx + bw / 2; wx += 1.8) {
+                                if (Math.sin(wx * 19.3 + wy * 13.1) > 0.3) {
+                                    const a = 0.25 + Math.sin(now * 0.002 + wx * 2 + wy) * 0.15;
+                                    ctx.fillStyle = `rgba(255,200,100,${a})`;
+                                    ctx.fillRect(wx, wy, 1, 1);
+                                }
+                            }
+                        }
+                    });
+                    // Road line below layer
+                    drawStreetLights(y1 + 3, 3, 0.7, 0.3);
+                    // Haze
+                    const hz1 = ctx.createLinearGradient(0, y1 - 15, 0, y1 + 10);
+                    hz1.addColorStop(0, 'rgba(255,130,50,0)');
+                    hz1.addColorStop(0.5, 'rgba(255,130,50,0.12)');
+                    hz1.addColorStop(1, 'rgba(255,130,50,0)');
+                    ctx.fillStyle = hz1;
+                    ctx.fillRect(0, y1 - 15, w, 25);
+                }
+
+                // Street lights between L1 and L2
+                drawStreetLights((layerY1 + layerY2) * 0.5 + 2, 4, 0.8, 0.3);
+
+                // ═══ LAYER 2: Mid city + River (70 buildings) ═══
+                {
+                    const y2 = layerY2;
+                    // Ground strip
+                    drawCityGround(y2 + 2, layerY3 - 2, 10);
+
+                    // River (drawn behind buildings)
+                    ctx.save();
+                    ctx.beginPath();
+                    const riverW = 8 + spreadT * 6;
+                    const rY = y2 + 6;
+                    ctx.moveTo(-5, rY + 2);
+                    ctx.bezierCurveTo(w * 0.2, rY - 4, w * 0.35, rY + 5, w * 0.5, rY + 1);
+                    ctx.bezierCurveTo(w * 0.65, rY - 3, w * 0.8, rY + 4, w + 5, rY);
+                    ctx.lineTo(w + 5, rY + riverW);
+                    ctx.bezierCurveTo(w * 0.8, rY + riverW + 4, w * 0.65, rY + riverW - 3, w * 0.5, rY + riverW + 1);
+                    ctx.bezierCurveTo(w * 0.35, rY + riverW + 5, w * 0.2, rY + riverW - 4, -5, rY + riverW + 2);
+                    ctx.closePath();
+                    const riverG = ctx.createLinearGradient(0, rY, w, rY);
+                    riverG.addColorStop(0, 'rgba(255,160,80,0.4)');
+                    riverG.addColorStop(0.5, 'rgba(255,145,70,0.32)');
+                    riverG.addColorStop(1, 'rgba(255,130,60,0.25)');
+                    ctx.fillStyle = riverG;
+                    ctx.fill();
+                    // River sparkle
+                    for (let sx = 0; sx < w; sx += 5) {
+                        const sparkleA = 0.15 + Math.sin(now * 0.003 + sx * 0.5) * 0.12;
+                        const sy = rY + riverW * 0.5 + Math.sin(sx * 0.08 + now * 0.001) * 2;
+                        ctx.fillStyle = `rgba(255,220,160,${sparkleA})`;
+                        ctx.beginPath(); ctx.arc(sx, sy, 0.8, 0, Math.PI * 2); ctx.fill();
+                    }
+                    ctx.restore();
+
+                    // Buildings — packed, 70 total with varied styles
+                    const midB = [];
+                    for (let i = 0; i < 70; i++) {
+                        const bx = w * (i / 70) + Math.sin(i * 5.3) * 3;
+                        const bh = 8 + Math.abs(Math.sin(i * 4.1 + 0.7)) * 22;
+                        const bw = 5 + Math.abs(Math.sin(i * 2.9 + 1)) * 5;
+                        // 10 styles cycling
+                        const style = [0,1,2,3,0,6,0,8,5,0][i % 10];
+                        midB.push([bx, bh, bw, style]);
+                    }
+                    const midColors = ['#3A1E30','#3E2234','#361C2C','#3C2032','#382030'];
+                    midB.forEach(([bx, bh, bw, style], idx) => {
+                        drawBuilding(bx, bh, bw, style, y2, midColors[idx % midColors.length]);
+                    });
+                    // Gap-filler buildings
+                    for (let i = 0; i < 35; i++) {
+                        const bx = w * ((i + 0.5) / 35);
+                        const bh = 4 + Math.abs(Math.sin(i * 6.1)) * 10;
+                        ctx.fillStyle = '#381E2E';
+                        ctx.fillRect(bx - 2.5, y2 - bh, 5, bh + 5);
+                    }
+                    // Window lights — 3 color variations
+                    midB.forEach(([bx, bh, bw]) => {
+                        for (let wy = y2 - bh + 3; wy < y2 - 1; wy += 3.5) {
+                            for (let wx = bx - bw / 2 + 1.5; wx < bx + bw / 2 - 1; wx += 2.5) {
+                                const hash = Math.sin(wx * 14.3 + wy * 8.9);
+                                if (hash > 0.2) {
+                                    const flick = 0.4 + Math.sin(now * 0.0025 + wx * 2.5 + wy * 1.8) * 0.2;
+                                    const cp = Math.sin(wx * 6.1 + wy * 4.3);
+                                    ctx.fillStyle = cp > 0.3 ? `rgba(255,210,120,${flick * 0.7})` :
+                                        cp > -0.3 ? `rgba(255,235,170,${flick * 0.55})` :
+                                        `rgba(255,180,90,${flick * 0.5})`;
+                                    ctx.fillRect(wx, wy, 1.5, 1.5);
+                                }
+                            }
+                        }
+                    });
+                    // Haze
+                    const hz2 = ctx.createLinearGradient(0, y2 - 30, 0, y2 + 10);
+                    hz2.addColorStop(0, 'rgba(255,120,50,0)');
+                    hz2.addColorStop(0.5, 'rgba(255,120,50,0.08)');
+                    hz2.addColorStop(1, 'rgba(255,120,50,0)');
+                    ctx.fillStyle = hz2;
+                    ctx.fillRect(0, y2 - 30, w, 40);
+                }
+
+                // Street lights between L2 and L3
+                drawStreetLights((layerY2 + layerY3) * 0.5, 4.5, 1.0, 0.35);
+
+                // ═══ LAYER 3: Near city (45 buildings, 10 styles) ═══
+                {
+                    const y3 = layerY3;
+                    // Ground strip
+                    drawCityGround(y3 + 2, layerY4 - 2, 5);
+
+                    const nearB = [];
+                    for (let i = 0; i < 45; i++) {
+                        const bx = w * (i / 45) + Math.sin(i * 4.7) * 5;
+                        const bh = 12 + Math.abs(Math.sin(i * 3.3 + 0.5)) * 43;
+                        const bw = 8 + Math.abs(Math.sin(i * 2.7 + 0.8)) * 8;
+                        const style = [0,1,2,3,4,5,6,7,8,9][i % 10];
+                        nearB.push([bx, bh, bw, style]);
+                    }
+                    const nearColors = ['#2A1425','#2E1828','#261222','#30192A','#241020','#2C1626'];
+                    nearB.forEach(([bx, bh, bw, style], idx) => {
+                        drawBuilding(bx, bh, bw, style, y3, nearColors[idx % nearColors.length]);
+                        // Signage on some buildings
+                        if (idx % 6 === 0 && bh > 20) {
+                            ctx.fillStyle = `rgba(255,180,100,${0.15 + Math.sin(now * 0.001 + idx) * 0.08})`;
+                            ctx.fillRect(bx - bw * 0.3, y3 - bh + 4, bw * 0.6, 2);
+                        }
+                    });
+                    // Gap-filler buildings
+                    for (let i = 0; i < 22; i++) {
+                        const bx = w * ((i + 0.5) / 22);
+                        const bh = 8 + Math.abs(Math.sin(i * 4.7)) * 18;
+                        ctx.fillStyle = '#281426';
+                        ctx.fillRect(bx - 4, y3 - bh, 8, bh + 5);
+                    }
+                    // Window lights — flickering with glow halos
+                    nearB.forEach(([bx, bh, bw, style]) => {
+                        const topY = style === 4 ? y3 - bh + bw * 0.3 : y3 - bh;
+                        for (let wy = topY + 4; wy < y3 - 2; wy += 4.5) {
+                            for (let wx = bx - bw / 2 + 2; wx < bx + bw / 2 - 1; wx += 3) {
+                                const hash = Math.sin(wx * 13.1 + wy * 7.7);
+                                if (hash > 0.15) {
+                                    const flick = 0.45 + Math.sin(now * 0.003 + wx * 3 + wy * 2.5) * 0.25;
+                                    const cp = Math.sin(wx * 5.5 + wy * 3.1);
+                                    ctx.fillStyle = cp > 0.3 ? `rgba(255,215,130,${flick * 0.85})` :
+                                        cp > -0.1 ? `rgba(255,240,185,${flick * 0.7})` :
+                                        `rgba(255,190,100,${flick * 0.6})`;
+                                    ctx.fillRect(wx, wy, 2, 2);
+                                    // Glow halo
+                                    if (hash > 0.5 && flick > 0.55) {
+                                        ctx.fillStyle = `rgba(255,200,100,${flick * 0.1})`;
+                                        ctx.beginPath(); ctx.arc(wx + 1, wy + 1, 3.5, 0, Math.PI * 2); ctx.fill();
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    // Road lines below layer (2 lines)
+                    drawStreetLights(y3 + 4, 4.5, 1.2, 0.4);
+                    drawStreetLights(y3 + 8, 5, 1.0, 0.35);
+                    // Haze
+                    const hz3 = ctx.createLinearGradient(0, y3 - 50, 0, y3 + 5);
+                    hz3.addColorStop(0, 'rgba(255,110,45,0)');
+                    hz3.addColorStop(0.5, 'rgba(255,110,45,0.05)');
+                    hz3.addColorStop(1, 'rgba(255,110,45,0)');
+                    ctx.fillStyle = hz3;
+                    ctx.fillRect(0, y3 - 50, w, 55);
+                }
+
+                // Street lights between L3 and L4
+                drawStreetLights((layerY3 + layerY4) * 0.5, 5, 1.3, 0.45);
+
+                // ═══ LAYER 4: Front city (nearest, packed, 30+ buildings) ═══
+                {
+                    const y4 = layerY4;
+                    // Ground strip (extends down to groundY)
+                    drawCityGround(y4 + 2, groundY, 0);
+
+                    const frontB = [
+                        // [xFrac, height, width, style]
+                        [0.01,45,15,0],[0.04,30,12,3],[0.07,55,16,1],[0.10,35,14,8],
+                        [0.13,70,18,6],[0.16,28,11,3],[0.19,80,20,1],[0.22,40,14,9],
+                        [0.25,50,16,0],[0.28,62,17,7],[0.31,32,13,2],[0.34,48,15,5],
+                        [0.37,72,19,1],[0.40,38,13,4],[0.43,55,16,6],[0.46,30,12,3],
+                        [0.49,65,18,1],[0.52,42,14,8],[0.55,35,12,0],[0.58,75,20,1],
+                        [0.61,28,11,3],[0.64,60,17,9],[0.67,45,15,2],[0.70,52,16,7],
+                        [0.73,38,13,0],[0.76,68,18,6],[0.79,32,12,5],[0.82,58,17,1],
+                        [0.85,40,14,4],[0.88,48,15,0],[0.91,25,11,3],[0.94,55,16,1],
+                        [0.97,35,13,8],
+                    ];
+                    const frontColors = ['#221020','#281428','#1E0E1E','#2C1830','#200E1C','#261226'];
+                    frontB.forEach(([xf, bh, bw, style], idx) => {
+                        drawBuilding(w * xf, bh, bw, style, y4, frontColors[idx % frontColors.length]);
+                    });
+                    // Gap-filler buildings
+                    for (let i = 0; i < 16; i++) {
+                        const bx = w * ((i + 0.5) / 16);
+                        const bh = 15 + Math.abs(Math.sin(i * 3.9)) * 30;
+                        ctx.fillStyle = '#241222';
+                        ctx.fillRect(bx - 5, y4 - bh, 10, bh + 6);
+                    }
+
+                    // Radio towers with blinking red lights
+                    ctx.fillStyle = '#1A0E20';
+                    ctx.fillRect(w * 0.76 - 2, y4 - 105, 4, 105);
+                    ctx.fillRect(w * 0.76 - 12, y4 - 90, 24, 3);
+                    ctx.fillRect(w * 0.76 - 8, y4 - 72, 16, 2.5);
+                    ctx.fillRect(w * 0.76 - 5, y4 - 56, 10, 2);
+                    const blink1 = Math.sin(now * 0.004) > 0.3 ? 0.9 : 0.15;
+                    ctx.fillStyle = `rgba(255,50,50,${blink1})`;
+                    ctx.beginPath(); ctx.arc(w * 0.76, y4 - 106, 2.5, 0, Math.PI * 2); ctx.fill();
+
+                    ctx.fillStyle = '#1A0E20';
+                    ctx.fillRect(w * 0.22 - 1.5, y4 - 78, 3, 78);
+                    ctx.fillRect(w * 0.22 - 7, y4 - 65, 14, 2);
+                    const blink2 = Math.sin(now * 0.003 + 1.5) > 0.3 ? 0.8 : 0.15;
+                    ctx.fillStyle = `rgba(255,50,50,${blink2})`;
+                    ctx.beginPath(); ctx.arc(w * 0.22, y4 - 79, 2, 0, Math.PI * 2); ctx.fill();
+
+                    // Window lights — largest, brightest, 4 colors, with halos
+                    frontB.forEach(([xf, bh, bw, style]) => {
+                        const bx = w * xf;
+                        const topY = style === 4 ? y4 - bh + bw * 0.3 : y4 - bh;
+                        for (let wy = topY + 4; wy < y4 - 2; wy += 4.5) {
+                            for (let wx = bx - bw / 2 + 2; wx < bx + bw / 2 - 1; wx += 3) {
+                                const hash = Math.sin(wx * 12.7 + wy * 6.9);
+                                if (hash > 0.08) {
+                                    const flicker = 0.5 + Math.sin(now * 0.003 + wx * 3.1 + wy * 2.7) * 0.25;
+                                    const cp = Math.sin(wx * 4.9 + wy * 3.7);
+                                    if (cp > 0.4) ctx.fillStyle = `rgba(255,215,130,${flicker * 0.9})`;
+                                    else if (cp > 0) ctx.fillStyle = `rgba(255,240,185,${flicker * 0.75})`;
+                                    else if (cp > -0.4) ctx.fillStyle = `rgba(255,190,100,${flicker * 0.65})`;
+                                    else ctx.fillStyle = `rgba(255,170,80,${flicker * 0.55})`;
+                                    ctx.fillRect(wx, wy, 2.5, 2.5);
+                                    // Glow halo on brighter windows
+                                    if (hash > 0.45 && flicker > 0.55) {
+                                        ctx.fillStyle = `rgba(255,200,100,${flicker * 0.12})`;
+                                        ctx.beginPath(); ctx.arc(wx + 1.2, wy + 1.2, 4, 0, Math.PI * 2); ctx.fill();
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    // Atmospheric haze (minimal for front layer)
+                    const hz4 = ctx.createLinearGradient(0, y4 - 80, 0, y4 + 5);
+                    hz4.addColorStop(0, 'rgba(255,100,40,0)');
+                    hz4.addColorStop(0.5, 'rgba(255,100,40,0.03)');
+                    hz4.addColorStop(1, 'rgba(255,100,40,0)');
+                    ctx.fillStyle = hz4;
+                    ctx.fillRect(0, y4 - 80, w, 85);
+                }
+
+                // ── Sunset reflection overlay (top of cityscape) ──
+                const sunReflect = ctx.createLinearGradient(0, layerY0 - 15, 0, layerY1 + 10);
+                sunReflect.addColorStop(0, 'rgba(255,140,50,0.07)');
+                sunReflect.addColorStop(1, 'rgba(255,140,50,0)');
+                ctx.fillStyle = sunReflect;
+                ctx.fillRect(0, layerY0 - 15, w, layerY1 - layerY0 + 25);
+
+                ctx.restore();
+            } // end if revealT > 0
+            }
+
+            // ══════════════════════════════════════════
+            // 4. GROUND (groundY → h)
+            // ══════════════════════════════════════════
+            {
+                // Rich earth gradient
+                const groundG = ctx.createLinearGradient(0, groundY, 0, h);
+                groundG.addColorStop(0, '#7A6840');
+                groundG.addColorStop(0.08, '#8B7355');
+                groundG.addColorStop(0.3, '#7A6648');
+                groundG.addColorStop(0.6, '#6B5540');
+                groundG.addColorStop(1, '#5A4835');
+                ctx.fillStyle = groundG;
+                ctx.fillRect(0, groundY, w, h - groundY);
+
+                // Warm sunset light on ground surface
+                const groundLightG = ctx.createLinearGradient(0, groundY, 0, groundY + (h - groundY) * 0.25);
+                groundLightG.addColorStop(0, 'rgba(255,160,60,0.15)');
+                groundLightG.addColorStop(1, 'rgba(255,160,60,0)');
+                ctx.fillStyle = groundLightG;
+                ctx.fillRect(0, groundY, w, (h - groundY) * 0.25);
+
+                // Ground texture — earth detail
+                for (let gx = 0; gx < w; gx += 10) {
+                    for (let gy = groundY + 4; gy < h; gy += 12) {
+                        const jx = gx + Math.sin(gx * 0.5 + gy * 0.3) * 4;
+                        const jy = gy + Math.cos(gx * 0.3 + gy * 0.7) * 3;
+                        if (jy > groundY) {
+                            ctx.fillStyle = Math.sin(gx*0.7+gy*0.5) > 0 ? 'rgba(0,0,0,0.03)' : 'rgba(120,100,60,0.04)';
+                            ctx.beginPath(); ctx.arc(jx, jy, 1 + Math.sin(gx+gy) * 0.3, 0, Math.PI*2); ctx.fill();
+                        }
+                    }
+                }
+
+                // Undergrowth / dense bushes and foliage covering ground
+                const drawBush = (bx, by, size, autumnShift) => {
+                    if (by < groundY) return;
+                    const s = autumnShift || 0;
+                    const colors = [
+                        `rgba(${90+s*40},${110-s*30},${50-s*20},0.4)`,
+                        `rgba(${120+s*30},${90-s*20},${40},0.35)`,
+                        `rgba(${100+s*35},${120-s*40},${55-s*30},0.3)`,
+                        `rgba(${140+s*20},${80-s*10},${35},0.3)`,
+                    ];
+                    for (let b = 0; b < 7; b++) {
+                        ctx.fillStyle = colors[b % colors.length];
+                        const ox = (b - 3) * size * 0.4;
+                        const r = size * (0.35 + Math.sin(b * 1.7) * 0.15);
+                        ctx.beginPath(); ctx.arc(bx + ox, by - r * 0.5, r, 0, Math.PI*2); ctx.fill();
+                    }
+                };
+                // Dense ground-cover fern clusters
+                const drawFern = (fx, fy, size, flip) => {
+                    if (fy < groundY) return;
+                    ctx.save();
+                    ctx.translate(fx, fy);
+                    if (flip) ctx.scale(-1, 1);
+                    const sway = Math.sin(now * 0.0015 + fx * 0.03) * 3;
+                    for (let f = 0; f < 5; f++) {
+                        const ang = -0.6 + f * 0.3;
+                        const len = size * (0.7 + Math.sin(f * 2.1) * 0.3);
+                        ctx.strokeStyle = `rgba(${80+f*15},${100+f*8},${40+f*5},0.5)`;
+                        ctx.lineWidth = 1.5;
+                        ctx.beginPath();
+                        ctx.moveTo(0, 0);
+                        ctx.quadraticCurveTo(Math.cos(ang) * len * 0.5 + sway, -len * 0.6, Math.cos(ang) * len + sway, -len);
+                        ctx.stroke();
+                        // Leaflets
+                        for (let l = 0; l < 4; l++) {
+                            const t = 0.25 + l * 0.2;
+                            const lx = Math.cos(ang) * len * t + sway * t;
+                            const ly = -len * t * 0.7;
+                            ctx.fillStyle = `rgba(${90+f*12},${110+f*5},${45},0.35)`;
+                            ctx.beginPath(); ctx.ellipse(lx, ly, 2.5, 1, ang + 0.3, 0, Math.PI * 2); ctx.fill();
+                            ctx.beginPath(); ctx.ellipse(lx, ly, 2.5, 1, ang - 0.3, 0, Math.PI * 2); ctx.fill();
+                        }
+                    }
+                    ctx.restore();
+                };
+                // Autumn ground cover (low spreading plant)
+                const drawGroundCover = (cx, cy, spread) => {
+                    if (cy < groundY) return;
+                    const autumnC = ['rgba(180,80,30,0.3)','rgba(200,120,40,0.25)','rgba(160,100,35,0.28)','rgba(140,70,25,0.3)','rgba(190,150,50,0.22)'];
+                    for (let g = 0; g < 12; g++) {
+                        const gx = cx + (Math.sin(g * 2.7 + cx) * 0.5) * spread;
+                        const gy = cy + Math.cos(g * 3.1) * spread * 0.3;
+                        if (gy < groundY) continue;
+                        ctx.fillStyle = autumnC[g % autumnC.length];
+                        ctx.beginPath(); ctx.ellipse(gx, gy, 3 + Math.sin(g) * 1.5, 2, g * 0.5, 0, Math.PI * 2); ctx.fill();
+                    }
+                };
+
+                // LEFT side bushes (dense, covering ground)
+                drawBush(w*0.03, groundY + (h-groundY)*0.08, 12, 0.8);
+                drawBush(w*0.08, groundY + (h-groundY)*0.06, 14, 0.6);
+                drawBush(w*0.13, groundY + (h-groundY)*0.10, 11, 0.9);
+                drawBush(w*0.06, groundY + (h-groundY)*0.18, 10, 0.7);
+                drawBush(w*0.15, groundY + (h-groundY)*0.15, 10, 0.5);
+                drawBush(w*0.10, groundY + (h-groundY)*0.25, 9, 0.8);
+                drawBush(w*0.18, groundY + (h-groundY)*0.22, 8, 0.4);
+                drawBush(w*0.04, groundY + (h-groundY)*0.32, 11, 0.7);
+                drawBush(w*0.12, groundY + (h-groundY)*0.35, 9, 0.6);
+                drawBush(w*0.20, groundY + (h-groundY)*0.30, 8, 0.9);
+                drawBush(w*0.07, groundY + (h-groundY)*0.45, 10, 0.5);
+                drawBush(w*0.16, groundY + (h-groundY)*0.42, 8, 0.8);
+                drawBush(w*0.22, groundY + (h-groundY)*0.48, 7, 0.6);
+                drawBush(w*0.05, groundY + (h-groundY)*0.55, 9, 0.7);
+                drawBush(w*0.14, groundY + (h-groundY)*0.52, 8, 0.4);
+                drawBush(w*0.10, groundY + (h-groundY)*0.65, 9, 0.8);
+                drawBush(w*0.18, groundY + (h-groundY)*0.60, 7, 0.6);
+                drawBush(w*0.06, groundY + (h-groundY)*0.72, 10, 0.5);
+                drawBush(w*0.15, groundY + (h-groundY)*0.70, 8, 0.9);
+                drawBush(w*0.08, groundY + (h-groundY)*0.82, 9, 0.7);
+                drawBush(w*0.20, groundY + (h-groundY)*0.78, 7, 0.4);
+                drawBush(w*0.12, groundY + (h-groundY)*0.88, 8, 0.6);
+
+                // RIGHT side bushes (dense, covering ground)
+                drawBush(w*0.97, groundY + (h-groundY)*0.07, 13, 0.7);
+                drawBush(w*0.92, groundY + (h-groundY)*0.06, 12, 0.9);
+                drawBush(w*0.87, groundY + (h-groundY)*0.10, 10, 0.5);
+                drawBush(w*0.94, groundY + (h-groundY)*0.17, 11, 0.8);
+                drawBush(w*0.85, groundY + (h-groundY)*0.14, 9, 0.6);
+                drawBush(w*0.90, groundY + (h-groundY)*0.24, 10, 0.4);
+                drawBush(w*0.82, groundY + (h-groundY)*0.20, 8, 0.9);
+                drawBush(w*0.96, groundY + (h-groundY)*0.30, 11, 0.7);
+                drawBush(w*0.88, groundY + (h-groundY)*0.34, 9, 0.5);
+                drawBush(w*0.80, groundY + (h-groundY)*0.28, 8, 0.8);
+                drawBush(w*0.93, groundY + (h-groundY)*0.42, 10, 0.6);
+                drawBush(w*0.84, groundY + (h-groundY)*0.40, 8, 0.4);
+                drawBush(w*0.78, groundY + (h-groundY)*0.46, 7, 0.9);
+                drawBush(w*0.95, groundY + (h-groundY)*0.52, 9, 0.5);
+                drawBush(w*0.86, groundY + (h-groundY)*0.50, 8, 0.7);
+                drawBush(w*0.90, groundY + (h-groundY)*0.62, 9, 0.8);
+                drawBush(w*0.82, groundY + (h-groundY)*0.58, 7, 0.6);
+                drawBush(w*0.94, groundY + (h-groundY)*0.70, 10, 0.4);
+                drawBush(w*0.85, groundY + (h-groundY)*0.68, 8, 0.9);
+                drawBush(w*0.92, groundY + (h-groundY)*0.80, 9, 0.7);
+                drawBush(w*0.80, groundY + (h-groundY)*0.76, 7, 0.5);
+                drawBush(w*0.88, groundY + (h-groundY)*0.86, 8, 0.6);
+
+                // Ferns scattered on both sides
+                drawFern(w*0.05, groundY + (h-groundY)*0.12, 15, false);
+                drawFern(w*0.12, groundY + (h-groundY)*0.28, 12, false);
+                drawFern(w*0.08, groundY + (h-groundY)*0.45, 14, true);
+                drawFern(w*0.18, groundY + (h-groundY)*0.38, 10, false);
+                drawFern(w*0.06, groundY + (h-groundY)*0.60, 13, false);
+                drawFern(w*0.15, groundY + (h-groundY)*0.55, 11, true);
+                drawFern(w*0.10, groundY + (h-groundY)*0.75, 12, false);
+                drawFern(w*0.20, groundY + (h-groundY)*0.68, 9, true);
+                drawFern(w*0.95, groundY + (h-groundY)*0.10, 14, true);
+                drawFern(w*0.88, groundY + (h-groundY)*0.25, 12, true);
+                drawFern(w*0.92, groundY + (h-groundY)*0.42, 13, false);
+                drawFern(w*0.82, groundY + (h-groundY)*0.36, 10, true);
+                drawFern(w*0.94, groundY + (h-groundY)*0.58, 12, true);
+                drawFern(w*0.85, groundY + (h-groundY)*0.52, 11, false);
+                drawFern(w*0.90, groundY + (h-groundY)*0.72, 13, true);
+                drawFern(w*0.80, groundY + (h-groundY)*0.65, 10, false);
+
+                // Autumn ground cover patches
+                drawGroundCover(w*0.04, groundY + (h-groundY)*0.15, 15);
+                drawGroundCover(w*0.10, groundY + (h-groundY)*0.30, 12);
+                drawGroundCover(w*0.16, groundY + (h-groundY)*0.50, 10);
+                drawGroundCover(w*0.08, groundY + (h-groundY)*0.68, 13);
+                drawGroundCover(w*0.19, groundY + (h-groundY)*0.82, 11);
+                drawGroundCover(w*0.96, groundY + (h-groundY)*0.14, 14);
+                drawGroundCover(w*0.90, groundY + (h-groundY)*0.32, 12);
+                drawGroundCover(w*0.84, groundY + (h-groundY)*0.48, 10);
+                drawGroundCover(w*0.92, groundY + (h-groundY)*0.65, 13);
+                drawGroundCover(w*0.81, groundY + (h-groundY)*0.80, 11);
+                // Middle-ground cover near trail edges
+                drawGroundCover(w*0.24, groundY + (h-groundY)*0.20, 8);
+                drawGroundCover(w*0.76, groundY + (h-groundY)*0.22, 8);
+                drawGroundCover(w*0.26, groundY + (h-groundY)*0.45, 7);
+                drawGroundCover(w*0.74, groundY + (h-groundY)*0.43, 7);
+                drawGroundCover(w*0.28, groundY + (h-groundY)*0.65, 6);
+                drawGroundCover(w*0.72, groundY + (h-groundY)*0.62, 6);
+
+                // Trail path — wide, earthy, winding
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(w * 0.28, h + 10);
+                ctx.bezierCurveTo(w * 0.34, h * 0.85, w * 0.40, h * 0.70, w * 0.44, groundY);
+                ctx.lineTo(w * 0.48, groundY);
+                ctx.bezierCurveTo(w * 0.54, h * 0.70, w * 0.60, h * 0.85, w * 0.72, h + 10);
+                ctx.closePath();
+                const trailG = ctx.createLinearGradient(0, groundY, 0, h);
+                trailG.addColorStop(0, '#B8A070');
+                trailG.addColorStop(0.3, '#A89060');
+                trailG.addColorStop(0.7, '#988050');
+                trailG.addColorStop(1, '#887040');
+                ctx.fillStyle = trailG;
+                ctx.fill();
+
+                // Trail edge shadows
+                ctx.strokeStyle = 'rgba(60,45,30,0.2)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(w * 0.28, h + 10);
+                ctx.bezierCurveTo(w * 0.34, h * 0.85, w * 0.40, h * 0.70, w * 0.44, groundY);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(w * 0.72, h + 10);
+                ctx.bezierCurveTo(w * 0.60, h * 0.85, w * 0.54, h * 0.70, w * 0.48, groundY);
+                ctx.stroke();
+
+                // Trail surface detail — tracks, ruts, pebbles
+                for (let r = 0; r < 12; r++) {
+                    const ry = groundY + (h - groundY) * (0.06 + r * 0.075);
+                    if (ry < groundY) continue;
+                    const rx = w * 0.46 + Math.sin(r * 2.3) * (h - ry) * 0.04;
+                    const rw = 5 + (ry - groundY) * 0.03;
+                    ctx.strokeStyle = 'rgba(80,60,40,0.06)';
+                    ctx.lineWidth = 0.8;
+                    ctx.beginPath();
+                    ctx.ellipse(rx, ry, rw, 1.5, 0.1 * Math.sin(r), 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+
+                // Trail edge grass/weeds
+                const drawTrailGrass = (gx, gy, count, maxH) => {
+                    if (gy < groundY) return;
+                    for (let g = 0; g < count; g++) {
+                        const x = gx + (g - count/2) * 3.5;
+                        const sway = Math.sin(now * 0.002 + g * 1.8 + gx * 0.02) * 5;
+                        const gh = maxH * (0.5 + (g % 3) * 0.25);
+                        const autumn = Math.sin(g * 2.1 + gx) > 0;
+                        ctx.strokeStyle = autumn ?
+                            `rgba(${140+g*8},${95+g*6},35,0.55)` :
+                            `rgba(90,${120+g*8},50,0.45)`;
+                        ctx.lineWidth = 1.3;
+                        ctx.beginPath(); ctx.moveTo(x, gy);
+                        ctx.quadraticCurveTo(x + sway * 0.5, gy - gh * 0.6, x + sway, gy - gh);
+                        ctx.stroke();
+                        // Seed head on some
+                        if (g % 3 === 0 && gh > maxH * 0.6) {
+                            ctx.fillStyle = 'rgba(180,150,80,0.3)';
+                            ctx.beginPath(); ctx.arc(x + sway, gy - gh, 1.5, 0, Math.PI*2); ctx.fill();
+                        }
+                    }
+                };
+                drawTrailGrass(w*0.26, groundY + (h-groundY)*0.25, 7, 20);
+                drawTrailGrass(w*0.74, groundY + (h-groundY)*0.28, 6, 18);
+                drawTrailGrass(w*0.22, groundY + (h-groundY)*0.50, 5, 16);
+                drawTrailGrass(w*0.76, groundY + (h-groundY)*0.48, 6, 17);
+                drawTrailGrass(w*0.30, groundY + (h-groundY)*0.70, 5, 14);
+                drawTrailGrass(w*0.70, groundY + (h-groundY)*0.68, 5, 15);
+                drawTrailGrass(w*0.35, groundY + (h-groundY)*0.88, 4, 12);
+                drawTrailGrass(w*0.65, groundY + (h-groundY)*0.85, 4, 13);
+                ctx.restore();
+
+                // Stones — varied sizes with shadow and highlight
+                const stones = [
+                    [w*0.34, 0.22, 5, 0.5], [w*0.62, 0.28, 4, 0.3],
+                    [w*0.38, 0.45, 3, 0.8], [w*0.57, 0.55, 5.5, 0.2],
+                    [w*0.36, 0.72, 3.5, 0.6], [w*0.64, 0.15, 3.5, 0.4],
+                    [w*0.24, 0.38, 6, 0.7], [w*0.75, 0.42, 4.5, 0.1],
+                    [w*0.40, 0.88, 4, 0.9], [w*0.58, 0.82, 3, 0.5],
+                ];
+                stones.forEach(([sx, frac, sr, rot]) => {
+                    const sy = groundY + (h - groundY) * frac;
+                    if (sy <= groundY || sy >= h) return;
+                    // Shadow
+                    ctx.fillStyle = 'rgba(60,45,30,0.15)';
+                    ctx.beginPath(); ctx.ellipse(sx + 1, sy + 1, sr * 1.1, sr * 0.4, rot, 0, Math.PI*2); ctx.fill();
+                    // Stone body
+                    ctx.fillStyle = 'rgba(105,90,70,0.5)';
+                    ctx.beginPath(); ctx.ellipse(sx, sy, sr, sr * 0.55, rot, 0, Math.PI*2); ctx.fill();
+                    // Highlight
+                    ctx.fillStyle = 'rgba(210,190,150,0.18)';
+                    ctx.beginPath(); ctx.ellipse(sx - sr*0.2, sy - sr*0.2, sr*0.45, sr*0.25, rot, 0, Math.PI*2); ctx.fill();
+                });
+
+                // Fallen leaves on ground — detailed maple/oak shapes
+                const drawFallenLeaf = (lx, ly, rot, color, sz) => {
+                    if (ly < groundY || ly > h) return;
+                    ctx.save();
+                    ctx.translate(lx, ly);
+                    ctx.rotate(rot);
+                    // Shadow
+                    ctx.fillStyle = 'rgba(0,0,0,0.06)';
+                    ctx.beginPath();
+                    ctx.moveTo(1, -sz + 1);
+                    ctx.quadraticCurveTo(sz * 1.3 + 1, -sz * 0.2 + 1, 1, sz + 1);
+                    ctx.quadraticCurveTo(-sz * 1.3 + 1, -sz * 0.2 + 1, 1, -sz + 1);
+                    ctx.fill();
+                    // Leaf body
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    ctx.moveTo(0, -sz);
+                    ctx.quadraticCurveTo(sz * 1.3, -sz * 0.2, 0, sz);
+                    ctx.quadraticCurveTo(-sz * 1.3, -sz * 0.2, 0, -sz);
+                    ctx.fill();
+                    // Leaf vein
+                    ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+                    ctx.lineWidth = 0.4;
+                    ctx.beginPath(); ctx.moveTo(0, -sz * 0.7); ctx.lineTo(0, sz * 0.7); ctx.stroke();
+                    // Side veins
+                    ctx.lineWidth = 0.3;
+                    ctx.beginPath(); ctx.moveTo(0, -sz*0.3); ctx.lineTo(sz*0.5, -sz*0.5); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(0, -sz*0.3); ctx.lineTo(-sz*0.5, -sz*0.5); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(0, sz*0.1); ctx.lineTo(sz*0.4, -sz*0.1); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(0, sz*0.1); ctx.lineTo(-sz*0.4, -sz*0.1); ctx.stroke();
+                    ctx.restore();
+                };
+                const leafColors = ['#CC3333', '#DD6633', '#DDA033', '#558844', '#BB4422', '#CC8833', '#AA2828', '#DD7744', '#CC5522', '#BB6633'];
+                // Dense fallen leaves scattered across the entire ground
+                const fallenLeaves = [
+                    // Left side — dense coverage
+                    [w*0.02,0.08,0.3,4.5],[w*0.06,0.05,1.1,5],[w*0.04,0.15,2.3,3.5],[w*0.09,0.12,0.7,4],
+                    [w*0.03,0.22,1.8,4.5],[w*0.11,0.18,3.2,3],[w*0.07,0.28,0.5,5],[w*0.14,0.25,2.6,4],
+                    [w*0.05,0.35,1.4,3.5],[w*0.12,0.32,3.8,4.5],[w*0.08,0.42,0.9,5],[w*0.16,0.38,2.1,3],
+                    [w*0.03,0.48,1.6,4],[w*0.10,0.45,3.5,3.5],[w*0.06,0.55,0.4,5],[w*0.15,0.52,2.8,4.5],
+                    [w*0.04,0.62,1.2,3],[w*0.13,0.58,3.1,4],[w*0.09,0.68,0.8,5],[w*0.17,0.65,2.4,3.5],
+                    [w*0.02,0.75,1.9,4.5],[w*0.11,0.72,3.6,3],[w*0.07,0.82,0.6,5],[w*0.16,0.78,2.2,4],
+                    [w*0.05,0.88,1.5,3.5],[w*0.14,0.85,3.3,4.5],[w*0.10,0.92,0.3,5],[w*0.19,0.90,2.7,3],
+                    // Right side — dense coverage
+                    [w*0.98,0.07,0.5,5],[w*0.94,0.05,1.3,4],[w*0.96,0.14,2.5,3.5],[w*0.91,0.11,0.8,4.5],
+                    [w*0.97,0.20,1.9,3],[w*0.89,0.17,3.4,5],[w*0.93,0.27,0.6,4],[w*0.86,0.24,2.8,3.5],
+                    [w*0.95,0.34,1.5,4.5],[w*0.88,0.31,3.9,3],[w*0.92,0.41,0.9,5],[w*0.84,0.37,2.2,4],
+                    [w*0.97,0.47,1.7,3.5],[w*0.90,0.44,3.6,4.5],[w*0.94,0.54,0.4,5],[w*0.85,0.51,2.9,3],
+                    [w*0.96,0.61,1.3,4],[w*0.87,0.57,3.2,3.5],[w*0.91,0.67,0.7,5],[w*0.83,0.64,2.5,4.5],
+                    [w*0.98,0.74,2.0,3],[w*0.89,0.71,3.7,4],[w*0.93,0.81,0.5,5],[w*0.84,0.77,2.3,3.5],
+                    [w*0.95,0.87,1.6,4.5],[w*0.86,0.84,3.4,3],[w*0.90,0.91,0.8,5],[w*0.81,0.88,2.6,4],
+                    // Trail area and middle
+                    [w*0.26,0.18,0.5,5],[w*0.56,0.24,1.2,4],[w*0.73,0.38,2.1,5.5],
+                    [w*0.18,0.50,3.0,3.5],[w*0.64,0.65,0.8,4.5],[w*0.48,0.35,1.9,3.5],
+                    [w*0.33,0.80,2.5,4],[w*0.59,0.85,4.1,3.5],[w*0.42,0.12,0.3,5],
+                    [w*0.69,0.20,1.7,4],[w*0.14,0.62,3.8,3.5],[w*0.80,0.55,2.2,4],
+                    [w*0.45,0.92,5.0,3],[w*0.52,0.08,1.0,4.5],[w*0.38,0.60,4.5,3],
+                    [w*0.24,0.35,1.1,4],[w*0.76,0.30,2.3,3.5],[w*0.30,0.55,0.7,5],
+                    [w*0.70,0.50,3.0,4],[w*0.35,0.70,1.8,3.5],[w*0.65,0.72,2.6,4.5],
+                ];
+                fallenLeaves.forEach(([lx, frac, rot, sz], i) => {
+                    drawFallenLeaf(lx, groundY + (h-groundY)*frac, rot, leafColors[i % leafColors.length], sz);
+                });
+            }
+
+            // ══════════════════════════════════════════
+            // 5. AUTUMN TREES (foreground, large, richly detailed)
+            // ══════════════════════════════════════════
+            {
+                const drawAutumnTree = (tx, scale, foliageColors, treeStyle) => {
+                    const treeBase = groundY + (h - groundY) * 0.06;
+                    if (treeBase > h + 30) return;
+                    const trunkH = 110 * scale;
+                    const trunkW = 14 * scale;
+
+                    ctx.save();
+                    ctx.translate(tx, treeBase);
+
+                    // Trunk — tapered with bark texture
+                    ctx.fillStyle = '#3E2818';
+                    ctx.beginPath();
+                    ctx.moveTo(-trunkW * 0.65, 5);
+                    ctx.lineTo(-trunkW * 0.35, -trunkH);
+                    ctx.lineTo(trunkW * 0.35, -trunkH);
+                    ctx.lineTo(trunkW * 0.65, 5);
+                    ctx.closePath();
+                    ctx.fill();
+
+                    // Bark texture — vertical grooves
+                    ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+                    for (let b = 0; b < 7; b++) {
+                        const bx = trunkW * (-0.35 + b * 0.1);
+                        ctx.lineWidth = 0.5;
+                        ctx.beginPath();
+                        ctx.moveTo(bx * 0.6, 3);
+                        ctx.lineTo(bx * 0.4, -trunkH + 5);
+                        ctx.stroke();
+                    }
+                    // Bark horizontal marks
+                    for (let b = 0; b < 5; b++) {
+                        const by = -trunkH * (0.12 + b * 0.18);
+                        const bx = Math.sin(b * 2.3) * trunkW * 0.12;
+                        ctx.lineWidth = 0.6;
+                        ctx.beginPath();
+                        ctx.moveTo(bx - trunkW * 0.28, by);
+                        ctx.quadraticCurveTo(bx, by - 3, bx + trunkW * 0.28, by + 1);
+                        ctx.stroke();
+                    }
+                    // Trunk warm highlight (sunset light)
+                    ctx.fillStyle = 'rgba(255,180,100,0.06)';
+                    ctx.fillRect(trunkW * 0.05, -trunkH, trunkW * 0.25, trunkH);
+
+                    // Major branches — more, with sub-branches
+                    ctx.strokeStyle = '#3E2818';
+                    const branchSets = treeStyle === 0 ?
+                        [[0.8, -0.7, 0.18], [0.65, 0.6, 0.15], [0.9, -0.4, 0.12], [0.55, 0.75, 0.1], [0.45, -0.5, 0.08]] :
+                        [[0.75, -0.6, 0.16], [0.6, 0.65, 0.15], [0.85, 0.35, 0.11], [0.7, -0.8, 0.13], [0.5, 0.5, 0.09]];
+                    branchSets.forEach(([hFrac, xDir, len]) => {
+                        const bStartY = -trunkH * hFrac;
+                        const bEndX = xDir * trunkH * len * 3;
+                        const bEndY = bStartY - trunkH * len * 1.3;
+                        ctx.lineWidth = 4 * scale;
+                        ctx.beginPath(); ctx.moveTo(0, bStartY);
+                        ctx.quadraticCurveTo(bEndX * 0.4, bStartY - 6 * scale, bEndX, bEndY);
+                        ctx.stroke();
+                        // Sub-branch
+                        ctx.lineWidth = 1.5 * scale;
+                        ctx.beginPath(); ctx.moveTo(bEndX * 0.6, (bStartY + bEndY) * 0.5);
+                        ctx.lineTo(bEndX * 0.8, bEndY - 8 * scale);
+                        ctx.stroke();
+                    });
+
+                    // Foliage canopy — rich, many layers
+                    const canopyR = trunkH * 0.6;
+                    const canopyCY = -trunkH - canopyR * 0.25;
+                    const foliagePositions = [
+                        [0, canopyCY, canopyR * 0.9],
+                        [-canopyR * 0.55, canopyCY + canopyR * 0.2, canopyR * 0.75],
+                        [canopyR * 0.55, canopyCY + canopyR * 0.2, canopyR * 0.75],
+                        [0, canopyCY - canopyR * 0.4, canopyR * 0.65],
+                        [-canopyR * 0.8, canopyCY + canopyR * 0.4, canopyR * 0.6],
+                        [canopyR * 0.8, canopyCY + canopyR * 0.4, canopyR * 0.6],
+                        [-canopyR * 0.35, canopyCY - canopyR * 0.55, canopyR * 0.5],
+                        [canopyR * 0.35, canopyCY - canopyR * 0.5, canopyR * 0.5],
+                        [-canopyR, canopyCY + canopyR * 0.1, canopyR * 0.45],
+                        [canopyR, canopyCY + canopyR * 0.15, canopyR * 0.45],
+                        [0, canopyCY + canopyR * 0.65, canopyR * 0.5],
+                        [-canopyR * 0.6, canopyCY - canopyR * 0.35, canopyR * 0.4],
+                        [canopyR * 0.6, canopyCY - canopyR * 0.3, canopyR * 0.4],
+                        [-canopyR * 0.2, canopyCY + canopyR * 0.5, canopyR * 0.42],
+                        [canopyR * 0.2, canopyCY + canopyR * 0.48, canopyR * 0.4],
+                    ];
+                    foliagePositions.forEach(([fx, fy, fr], i) => {
+                        ctx.fillStyle = foliageColors[i % foliageColors.length];
+                        ctx.beginPath(); ctx.arc(fx, fy, fr, 0, Math.PI*2); ctx.fill();
+                    });
+                    // Depth shadows between clusters
+                    foliagePositions.slice(0, 5).forEach(([fx, fy, fr]) => {
+                        ctx.fillStyle = 'rgba(0,0,0,0.07)';
+                        ctx.beginPath(); ctx.arc(fx + fr * 0.12, fy + fr * 0.18, fr * 0.45, 0, Math.PI*2); ctx.fill();
+                    });
+                    // Sunset highlight on canopy
+                    foliagePositions.slice(0, 8).forEach(([fx, fy, fr]) => {
+                        ctx.fillStyle = 'rgba(255,200,120,0.1)';
+                        ctx.beginPath(); ctx.arc(fx + fr * 0.15, fy - fr * 0.25, fr * 0.4, 0, Math.PI*2); ctx.fill();
+                    });
+                    // Individual leaf clusters on edges (detail)
+                    for (let l = 0; l < 8; l++) {
+                        const ang = (l / 8) * Math.PI * 2;
+                        const dist = canopyR * (0.85 + Math.sin(l * 3.7) * 0.15);
+                        const lx = Math.cos(ang) * dist;
+                        const ly = canopyCY + Math.sin(ang) * dist * 0.7;
+                        ctx.fillStyle = foliageColors[(l + 3) % foliageColors.length];
+                        ctx.beginPath(); ctx.arc(lx, ly, canopyR * 0.15, 0, Math.PI*2); ctx.fill();
+                    }
+
+                    // Root system
+                    ctx.fillStyle = '#3E2818';
+                    ctx.beginPath(); ctx.ellipse(-trunkW * 0.9, 2, trunkW * 0.6, 4 * scale, -0.3, 0, Math.PI); ctx.fill();
+                    ctx.beginPath(); ctx.ellipse(trunkW * 0.8, 2, trunkW * 0.5, 3 * scale, 0.2, 0, Math.PI); ctx.fill();
+                    ctx.beginPath(); ctx.ellipse(-trunkW * 0.3, 3, trunkW * 0.3, 2 * scale, 0.1, 0, Math.PI); ctx.fill();
+
+                    ctx.restore();
+                };
+
+                // Left side trees — dense, layered back-to-front
+                // Back layer (smaller, partially hidden)
+                drawAutumnTree(w * -0.08, 1.6,
+                    ['#BB4422','#CC5533','#BB4422','#CC6633','#AA3322','#CC8833','#BB4422','#CC5533','#AA2828','#558844','#CC6633','#BB4422','#AA3333','#CC6644','#BB4422'], 1);
+                drawAutumnTree(w * 0.16, 1.0,
+                    ['#CC8833','#BB4422','#DDA033','#558844','#BB4422','#CC8833','#AA3322','#BB4422','#DDA033','#CC8833','#558844','#BB4422','#CC8833','#DDA033','#AA3333'], 0);
+                drawAutumnTree(w * 0.24, 0.8,
+                    ['#558844','#DDA033','#CC3333','#558844','#DDA033','#BB4422','#558844','#CC3333','#DDA033','#558844','#CC8833','#558844','#DDA033','#CC3333','#558844'], 1);
+                // Main layer (large, prominent)
+                drawAutumnTree(w * -0.03, 2.6,
+                    ['#CC3333','#DD5533','#CC3333','#DD6633','#BB2222','#DDA033','#CC3333','#DD6633','#CC4422','#558844','#DD6633','#CC3333','#BB3333','#DD7744','#CC4422'], 0);
+                drawAutumnTree(w * 0.11, 1.8,
+                    ['#DD6633','#DDA033','#558844','#CC3333','#DD6633','#BB4422','#DDA033','#558844','#CC3333','#DD6633','#DDA033','#CC8833','#558844','#CC3333','#DD6633'], 1);
+                drawAutumnTree(w * 0.20, 1.2,
+                    ['#DDA033','#CC3333','#DD6633','#558844','#CC3333','#DDA033','#BB4422','#CC3333','#DD6633','#DDA033','#558844','#CC3333','#DD6633','#DDA033','#BB3333'], 0);
+                // Front small trees / saplings
+                drawAutumnTree(w * 0.05, 0.7,
+                    ['#DD7744','#CC3333','#DD6633','#DDA033','#DD7744','#CC3333','#BB4422','#DD7744','#CC3333','#DD6633','#DDA033','#DD7744','#CC3333','#DD6633','#BB4422'], 1);
+                drawAutumnTree(w * 0.26, 0.6,
+                    ['#CC8833','#DDA033','#CC3333','#BB4422','#CC8833','#DDA033','#558844','#CC8833','#DDA033','#CC3333','#BB4422','#CC8833','#DDA033','#CC3333','#BB3333'], 0);
+
+                // Right side trees — dense, layered back-to-front
+                // Back layer
+                drawAutumnTree(w * 1.08, 1.5,
+                    ['#CC5533','#BB4422','#CC5533','#AA3322','#CC6633','#BB4422','#CC5533','#AA2828','#558844','#CC6633','#BB4422','#CC5533','#AA3333','#CC6644','#BB4422'], 0);
+                drawAutumnTree(w * 0.84, 0.9,
+                    ['#BB4422','#CC8833','#DDA033','#558844','#BB4422','#CC8833','#AA3322','#BB4422','#DDA033','#CC8833','#558844','#BB4422','#CC8833','#DDA033','#AA3333'], 1);
+                drawAutumnTree(w * 0.74, 0.7,
+                    ['#558844','#CC3333','#DDA033','#558844','#CC3333','#DDA033','#558844','#BB4422','#CC3333','#DDA033','#558844','#CC8833','#DDA033','#558844','#CC3333'], 0);
+                // Main layer
+                drawAutumnTree(w * 1.03, 2.4,
+                    ['#DD6633','#CC3333','#DDA033','#DD6633','#BB3333','#CC3333','#DDA033','#DD6633','#558844','#CC3333','#BB4422','#DD6633','#DDA033','#CC4422','#DD5533'], 1);
+                drawAutumnTree(w * 0.87, 1.7,
+                    ['#CC3333','#558844','#DD6633','#DDA033','#CC3333','#BB2222','#558844','#DD6633','#DDA033','#CC3333','#DD6633','#558844','#CC8833','#DD6633','#CC3333'], 0);
+                drawAutumnTree(w * 0.78, 1.1,
+                    ['#DDA033','#DD6633','#CC3333','#558844','#DDA033','#CC3333','#DD6633','#BB4422','#558844','#DDA033','#CC3333','#DD6633','#CC8833','#BB3333','#558844'], 1);
+                // Front small trees / saplings
+                drawAutumnTree(w * 0.95, 0.7,
+                    ['#CC3333','#DD7744','#DD6633','#DDA033','#CC3333','#DD7744','#BB4422','#CC3333','#DD7744','#DD6633','#DDA033','#CC3333','#DD7744','#DD6633','#BB4422'], 0);
+                drawAutumnTree(w * 0.72, 0.55,
+                    ['#DDA033','#CC8833','#CC3333','#BB4422','#DDA033','#CC8833','#558844','#DDA033','#CC8833','#CC3333','#BB4422','#DDA033','#CC8833','#CC3333','#BB3333'], 1);
+            }
+
+            // ══════════════════════════════════════════
+            // 6. FALLING LEAVES animation (abundant, varied)
+            // ══════════════════════════════════════════
+            {
+                const leafSeeds = [0, 1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8, 9.9, 11.0, 12.1, 13.2, 14.3, 15.4];
+                const fallColors = ['#CC3333', '#DD6633', '#DDA033', '#558844', '#BB4422', '#CC8833', '#AA2828', '#DD7744'];
+                leafSeeds.forEach((seed, i) => {
+                    const cycle = (now * 0.0003 + seed) % 5;
+                    if (cycle > 1.5) return;
+                    const t = cycle / 1.5;
+                    const startX = w * (0.03 + (seed * 0.069) % 0.94);
+                    const lx = startX + Math.sin(t * Math.PI * 2.5 + seed) * 40 + Math.sin(t * Math.PI * 6 + seed * 2.3) * 12;
+                    const ly = h * 0.02 + t * h * 0.95;
+                    const rot = t * 9 + seed * 1.7;
+                    const alpha = t < 0.06 ? t / 0.06 : (t > 0.9 ? (1 - t) / 0.1 : 1);
+                    const sz = 3 + (seed % 4) * 1.2;
+
+                    ctx.save();
+                    ctx.globalAlpha = alpha * 0.7;
+                    ctx.translate(lx, ly);
+                    ctx.rotate(rot);
+                    ctx.fillStyle = fallColors[i % fallColors.length];
+                    ctx.beginPath();
+                    ctx.moveTo(0, -sz);
+                    ctx.quadraticCurveTo(sz * 1.3, -sz * 0.2, 0, sz);
+                    ctx.quadraticCurveTo(-sz * 1.3, -sz * 0.2, 0, -sz);
+                    ctx.fill();
+                    ctx.restore();
+                });
+            }
+
+            // ══════════════════════════════════════════
+            // 7. CHARACTER (backpack hiker, back view — larger)
+            // ══════════════════════════════════════════
+            const charAlpha = layerAlpha(0.02, 0.08);
+            if (charAlpha > 0) {
+                ctx.save();
+                ctx.globalAlpha = charAlpha;
+
+                const skinC = babyColorScheme.skin;
+                const hairC = babyColorScheme.hair;
+                const bodyC = babyColorScheme.body;
+                const limbC = babyColorScheme.limb;
+                const cheekC = babyColorScheme.cheek;
+                const HR = 18;
+
+                ctx.save();
+                ctx.translate(charX, finalCharY);
+                ctx.scale(charScale, charScale);
+
+                // Walk animation values
+                const t = walkCycle;
+                const legSwingL = isWalking ? Math.sin(t) * 0.32 : 0;
+                const legSwingR = isWalking ? Math.sin(t + Math.PI) * 0.32 : 0;
+                const armSwingL = isWalking ? Math.sin(t + Math.PI) * 0.25 : 0.05;
+                const armSwingR = isWalking ? Math.sin(t) * 0.25 : -0.05;
+                const bodyBob = isWalking ? Math.abs(Math.sin(t)) * 2 : 0;
+
+                const drawPart = (x, y, ang, fn) => {
+                    ctx.save(); ctx.translate(x, y); ctx.rotate(ang); fn(ctx); ctx.restore();
+                };
+
+                ctx.translate(0, -bodyBob);
+
+                // ─ Back leg ─
+                drawPart(-7, -6, legSwingL, c => {
+                    c.fillStyle = limbC;
+                    c.beginPath(); c.roundRect(-7, -3, 14, 22, 5); c.fill();
+                    drawPart(0, 16, Math.max(0, -legSwingL)*0.4, c2 => {
+                        c2.fillStyle = skinC;
+                        c2.beginPath(); c2.roundRect(-5, 0, 10, 16, 4); c2.fill();
+                        c2.fillStyle = limbC;
+                        c2.beginPath(); c2.roundRect(-6.5, -4, 13, 8, 4); c2.fill();
+                        // Hiking boots — detailed
+                        c2.fillStyle = '#6B4E30';
+                        c2.beginPath(); c2.roundRect(-7.5, 12, 15, 10, [2,2,4,4]); c2.fill();
+                        c2.fillStyle = '#5C4028';
+                        c2.beginPath(); c2.roundRect(-8, 18, 16, 5, [0,0,4,4]); c2.fill();
+                        // Sole
+                        c2.fillStyle = '#3A2A18';
+                        c2.beginPath(); c2.roundRect(-8, 21, 16, 2.5, [0,0,3,3]); c2.fill();
+                        // Laces
+                        c2.strokeStyle = '#A08060'; c2.lineWidth = 0.7;
+                        for (let l = 0; l < 3; l++) {
+                            const ly = 13 + l * 2.5;
+                            c2.beginPath(); c2.moveTo(-3, ly); c2.lineTo(3, ly); c2.stroke();
+                        }
+                        // Ankle cuff
+                        c2.fillStyle = '#7A5C3A';
+                        c2.beginPath(); c2.roundRect(-7, 11, 14, 4, 2); c2.fill();
+                    });
+                });
+
+                // ─ Back arm ─
+                drawPart(-15, -52, armSwingL, c => {
+                    c.fillStyle = bodyC;
+                    c.beginPath(); c.roundRect(-5.5, -2, 11, 10, 4); c.fill();
+                    c.fillStyle = skinC;
+                    c.beginPath(); c.roundRect(-4.5, 8, 9, 12, 4); c.fill();
+                    drawPart(0, 20, 0.12, c2 => {
+                        c2.fillStyle = skinC;
+                        c2.beginPath(); c2.roundRect(-3.5, 0, 7, 11, 3.5); c2.fill();
+                    });
+                });
+
+                // ─ Body (torso back view) ─
+                ctx.fillStyle = bodyC;
+                ctx.beginPath(); ctx.roundRect(-17, -56, 34, 32, 8); ctx.fill();
+                // Neckline
+                ctx.fillStyle = skinC;
+                ctx.beginPath(); ctx.moveTo(-7, -56); ctx.quadraticCurveTo(0, -51, 7, -56); ctx.fill();
+
+                // ─ Backpack — detailed ─
+                {
+                    // Main pack body
+                    ctx.fillStyle = limbC;
+                    ctx.beginPath(); ctx.roundRect(-14, -52, 28, 30, 6); ctx.fill();
+                    // Depth shadow on pack
+                    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+                    ctx.beginPath(); ctx.roundRect(-14, -52, 28, 30, 6); ctx.fill();
+                    // Pack top flap
+                    ctx.fillStyle = limbC;
+                    ctx.beginPath(); ctx.roundRect(-15, -55, 30, 11, [6,6,1,1]); ctx.fill();
+                    // Flap shadow line
+                    ctx.strokeStyle = 'rgba(0,0,0,0.1)'; ctx.lineWidth = 0.8;
+                    ctx.beginPath(); ctx.moveTo(-13, -44); ctx.lineTo(13, -44); ctx.stroke();
+                    // Buckle clip
+                    ctx.fillStyle = '#B0B0B0';
+                    ctx.beginPath(); ctx.roundRect(-2.5, -45, 5, 4, 1); ctx.fill();
+                    ctx.fillStyle = '#888';
+                    ctx.fillRect(-1.5, -43, 3, 1);
+                    // Front pocket
+                    ctx.strokeStyle = 'rgba(0,0,0,0.1)'; ctx.lineWidth = 0.8;
+                    ctx.beginPath(); ctx.roundRect(-11, -38, 22, 12, 3); ctx.stroke();
+                    // Pocket zipper
+                    ctx.strokeStyle = 'rgba(0,0,0,0.06)'; ctx.lineWidth = 0.5;
+                    ctx.beginPath(); ctx.moveTo(-8, -38); ctx.lineTo(8, -38); ctx.stroke();
+                    // Side compression straps
+                    ctx.strokeStyle = 'rgba(0,0,0,0.12)'; ctx.lineWidth = 1;
+                    ctx.beginPath(); ctx.moveTo(-14, -48); ctx.lineTo(-14, -28); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(14, -48); ctx.lineTo(14, -28); ctx.stroke();
+                    // Shoulder straps (visible from back)
+                    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+                    ctx.beginPath();
+                    ctx.moveTo(-14, -54); ctx.lineTo(-16, -54); ctx.lineTo(-17, -38); ctx.lineTo(-14, -38); ctx.closePath(); ctx.fill();
+                    ctx.beginPath();
+                    ctx.moveTo(14, -54); ctx.lineTo(16, -54); ctx.lineTo(17, -38); ctx.lineTo(14, -38); ctx.closePath(); ctx.fill();
+                    // Pack bottom — slightly different shade
+                    ctx.fillStyle = 'rgba(0,0,0,0.04)';
+                    ctx.beginPath(); ctx.roundRect(-14, -30, 28, 8, [0,0,6,6]); ctx.fill();
+                }
+
+                // Pants
+                ctx.fillStyle = limbC;
+                ctx.beginPath(); ctx.roundRect(-16, -26, 32, 22, [0,0,6,6]); ctx.fill();
+                ctx.fillStyle = 'rgba(0,0,0,0.06)';
+                ctx.beginPath(); ctx.roundRect(-16, -26, 32, 3, 1); ctx.fill();
+                // Subtle knee crease
+                ctx.strokeStyle = 'rgba(0,0,0,0.04)'; ctx.lineWidth = 0.8;
+                ctx.beginPath(); ctx.moveTo(-10, -14); ctx.quadraticCurveTo(-5, -12, 0, -14); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(2, -14); ctx.quadraticCurveTo(7, -12, 12, -14); ctx.stroke();
+
+                // ─ Front leg ─
+                drawPart(7, -6, legSwingR, c => {
+                    c.fillStyle = limbC;
+                    c.beginPath(); c.roundRect(-7, -3, 14, 22, 5); c.fill();
+                    drawPart(0, 16, Math.max(0, -legSwingR)*0.4, c2 => {
+                        c2.fillStyle = skinC;
+                        c2.beginPath(); c2.roundRect(-5, 0, 10, 16, 4); c2.fill();
+                        c2.fillStyle = limbC;
+                        c2.beginPath(); c2.roundRect(-6.5, -4, 13, 8, 4); c2.fill();
+                        // Hiking boots
+                        c2.fillStyle = '#6B4E30';
+                        c2.beginPath(); c2.roundRect(-7.5, 12, 15, 10, [2,2,4,4]); c2.fill();
+                        c2.fillStyle = '#5C4028';
+                        c2.beginPath(); c2.roundRect(-8, 18, 16, 5, [0,0,4,4]); c2.fill();
+                        c2.fillStyle = '#3A2A18';
+                        c2.beginPath(); c2.roundRect(-8, 21, 16, 2.5, [0,0,3,3]); c2.fill();
+                        c2.strokeStyle = '#A08060'; c2.lineWidth = 0.7;
+                        for (let l = 0; l < 3; l++) {
+                            const ly = 13 + l * 2.5;
+                            c2.beginPath(); c2.moveTo(-3, ly); c2.lineTo(3, ly); c2.stroke();
+                        }
+                        c2.fillStyle = '#7A5C3A';
+                        c2.beginPath(); c2.roundRect(-7, 11, 14, 4, 2); c2.fill();
+                    });
+                });
+
+                // ─ Front arm ─
+                drawPart(15, -52, armSwingR, c => {
+                    c.fillStyle = bodyC;
+                    c.beginPath(); c.roundRect(-5.5, -2, 11, 10, 4); c.fill();
+                    c.fillStyle = skinC;
+                    c.beginPath(); c.roundRect(-4.5, 8, 9, 12, 4); c.fill();
+                    drawPart(0, 20, 0.12, c2 => {
+                        c2.fillStyle = skinC;
+                        c2.beginPath(); c2.roundRect(-3.5, 0, 7, 11, 3.5); c2.fill();
+                    });
+                });
+
+                // ─ Head (back view) ─
+                ctx.save();
+                ctx.translate(0, -70);
+                if (isWalking) ctx.rotate(Math.sin(t * 2) * 0.02);
+
+                ctx.fillStyle = skinC;
+                ctx.beginPath(); ctx.arc(0, 0, HR, 0, Math.PI*2); ctx.fill();
+                // Ears
+                ctx.beginPath(); ctx.arc(-HR+2, 3, 4.5, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(HR-2, 3, 4.5, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = cheekC;
+                ctx.beginPath(); ctx.arc(-HR+2, 3, 2.5, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(HR-2, 3, 2.5, 0, Math.PI*2); ctx.fill();
+
+                // Hair (back view)
+                ctx.fillStyle = hairC;
+                if (babyIsBoy) {
+                    if (babyFaceType % 3 === 0) {
+                        ctx.beginPath(); ctx.arc(0,-3, HR+1, 0, Math.PI*2); ctx.fill();
+                    } else if (babyFaceType % 3 === 1) {
+                        ctx.beginPath(); ctx.arc(0,-2, HR+3, 0, Math.PI*2); ctx.fill();
+                        [[-8,-HR-3],[0,-HR-5],[8,-HR-2],[-12,-HR+2],[12,-HR+2]].forEach(([sx,sy]) => {
+                            ctx.beginPath(); ctx.moveTo(sx-3,sy+5); ctx.lineTo(sx,sy); ctx.lineTo(sx+3,sy+5); ctx.fill();
+                        });
+                    } else {
+                        ctx.beginPath(); ctx.arc(0,-1, HR+2, 0, Math.PI*2); ctx.fill();
+                        ctx.strokeStyle = 'rgba(0,0,0,0.12)'; ctx.lineWidth = 1;
+                        ctx.beginPath(); ctx.moveTo(-2,-HR-1); ctx.lineTo(-2,-2); ctx.stroke();
+                    }
+                    ctx.fillStyle = skinC;
+                    ctx.beginPath(); ctx.roundRect(-5, HR-6, 10, 10, 3); ctx.fill();
+                } else {
+                    if (babyFaceType % 3 === 0) {
+                        ctx.beginPath(); ctx.arc(0,-1, HR+3, 0, Math.PI*2); ctx.fill();
+                        ctx.beginPath();
+                        ctx.moveTo(-HR-2,0); ctx.quadraticCurveTo(-HR-3,HR+8,-HR+2,HR+16);
+                        ctx.lineTo(HR-2,HR+16); ctx.quadraticCurveTo(HR+3,HR+8,HR+2,0);
+                        ctx.closePath(); ctx.fill();
+                    } else if (babyFaceType % 3 === 1) {
+                        ctx.beginPath(); ctx.arc(0,-1, HR+3, 0, Math.PI*2); ctx.fill();
+                        ctx.beginPath(); ctx.moveTo(-HR+2,-4); ctx.quadraticCurveTo(-HR-8,8,-HR-4,HR+14);
+                        ctx.quadraticCurveTo(-HR+2,HR+10,-HR+6,2); ctx.closePath(); ctx.fill();
+                        ctx.beginPath(); ctx.moveTo(HR-2,-4); ctx.quadraticCurveTo(HR+8,8,HR+4,HR+14);
+                        ctx.quadraticCurveTo(HR-2,HR+10,HR-6,2); ctx.closePath(); ctx.fill();
+                        ctx.fillStyle = cheekC;
+                        ctx.beginPath(); ctx.ellipse(-HR+1,-4,4,3,-0.3,0,Math.PI*2); ctx.fill();
+                        ctx.beginPath(); ctx.ellipse(HR-1,-4,4,3,0.3,0,Math.PI*2); ctx.fill();
+                    } else {
+                        ctx.beginPath(); ctx.arc(0,-1, HR+3, 0, Math.PI*2); ctx.fill();
+                        ctx.beginPath(); ctx.moveTo(-HR-2,-2); ctx.quadraticCurveTo(-HR-1,HR-2,-HR+6,HR+2);
+                        ctx.lineTo(HR-6,HR+2); ctx.quadraticCurveTo(HR+1,HR-2,HR+2,-2); ctx.closePath(); ctx.fill();
+                    }
+                }
+                // Hair shine (warm sunset tint)
+                ctx.fillStyle = 'rgba(255,230,180,0.1)';
+                ctx.beginPath(); ctx.ellipse(-3, -HR+4, 8, 4, -0.2, 0, Math.PI*2); ctx.fill();
+
+                ctx.restore(); // head
+
+                // Warm sunset rim light on character
+                ctx.fillStyle = 'rgba(255,180,80,0.06)';
+                ctx.beginPath(); ctx.roundRect(10, -70, 8, 65, 4); ctx.fill();
+
+                ctx.restore(); // char scale
+                ctx.restore(); // main
+            }
+
+            // ══════════════════════════════════════════
+            // 8. GOLDEN HOUR OVERLAY (atmospheric)
+            // ══════════════════════════════════════════
+            {
+                // Vignette
+                const vigG = ctx.createRadialGradient(w*0.5, h*0.45, Math.min(w,h)*0.2, w*0.5, h*0.45, Math.max(w,h)*0.75);
+                vigG.addColorStop(0, 'rgba(0,0,0,0)');
+                vigG.addColorStop(1, 'rgba(20,10,5,0.18)');
+                ctx.fillStyle = vigG;
+                ctx.fillRect(0, 0, w, h);
+            }
+
+            // ══════════════════════════════════════════
+            // 9. TEXT OVERLAY (progress 0.8〜)
+            // ══════════════════════════════════════════
+            const textAlpha = layerAlpha(0.8, 0.12);
+            if (textAlpha > 0) {
+                ctx.save();
+                ctx.globalAlpha = textAlpha;
+
+                // Warm sunset glow overlay
+                const glowG = ctx.createRadialGradient(w*0.55, h*0.4, 0, w*0.55, h*0.4, w*0.5);
+                glowG.addColorStop(0, 'rgba(255,200,120,0.12)');
+                glowG.addColorStop(0.5, 'rgba(255,180,100,0.05)');
+                glowG.addColorStop(1, 'rgba(255,180,100,0)');
+                ctx.fillStyle = glowG;
+                ctx.fillRect(0, 0, w, h);
+
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                const textY = h * 0.18 + Math.sin(now * 0.001) * 2;
+
+                ctx.shadowColor = 'rgba(255,200,120,0.95)'; ctx.shadowBlur = 22;
+                ctx.fillStyle = 'rgba(255, 252, 245, 0.95)';
+                ctx.font = "700 26px 'Zen Maru Gothic', sans-serif";
+                ctx.fillText('山頂の夕暮れ', w/2, textY);
+                ctx.fillText('山頂の夕暮れ', w/2, textY);
+
+                ctx.shadowColor = 'rgba(255,200,120,0.7)';
+                ctx.shadowBlur = 14;
+                ctx.fillStyle = 'rgba(255, 245, 225, 0.65)';
+                ctx.font = "400 13px 'Zen Maru Gothic', sans-serif";
+                ctx.fillText('Sunset from the Summit', w/2, textY + 26);
+
+                ctx.shadowBlur = 0;
+                // Decorative line with gradient
+                const lineG = ctx.createLinearGradient(w/2-55, 0, w/2+55, 0);
+                lineG.addColorStop(0, 'rgba(255,230,180,0)');
+                lineG.addColorStop(0.3, 'rgba(255,230,180,0.25)');
+                lineG.addColorStop(0.5, 'rgba(255,230,180,0.35)');
+                lineG.addColorStop(0.7, 'rgba(255,230,180,0.25)');
+                lineG.addColorStop(1, 'rgba(255,230,180,0)');
+                ctx.strokeStyle = lineG; ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(w/2-55, textY+42); ctx.lineTo(w/2+55, textY+42); ctx.stroke();
+
+                ctx.restore();
+            }
+        }
+
+        // ======== TRAVEL PHASE (旅フェーズ) ========
+        function startTravelPhase() {
+            currentScene = SCENE.TRAVEL;
+            worldWidth = 14000; // Wide world: 0-14000
+            cameraX = 7000 - width / 2; // Center at 7000
+            
+            baby = new Train(); 
+            baby.x = 7000;
+            
+            initTravelDrops();
+            initCarryHatLayer();
+            initCarrySnareLayer();
+            initCarryCymbalLayer();
+            initCarryBassLayer();
+            initCarryKeyboardLayer();
+            startBaseGroove();
+            buildScoreHud();
+            updateScoreToggleUi();
+            orbWorldX = baby.x;
+            orbWorldY = height * ROOM_WALL_RATIO;
+            orbParticles = [];
         }
 
         // ======== UNIVERSITY PHASE (大学フェーズ) ========
@@ -4522,8 +8733,8 @@
             const styleMap = {
                 university: "piano-gentle",
                 parttime: "organ-funky",
-                jobhunt: "piano-chord",
-                travel: "piano-arpeggio",
+                jobhunt: "piano-sparse",
+                travel: "piano-chord",
                 startup: "organ-power"
             };
             const style = styleMap[inheritedKeyboardSoundConfig] || "piano-gentle";
@@ -7693,11 +11904,15 @@
             if (inheritedSnarePattern) {
                 inheritedSnarePattern = [...inheritedSnarePattern.slice(0, stepsPerPage), ...inheritedSnarePattern.slice(0, stepsPerPage)];
             }
+            if (inheritedSnareVelocity) {
+                inheritedSnareVelocity = [...inheritedSnareVelocity.slice(0, stepsPerPage), ...inheritedSnareVelocity.slice(0, stepsPerPage)];
+            }
             if (inheritedBassPattern) {
                 inheritedBassPattern = [...inheritedBassPattern.slice(0, stepsPerPage), ...inheritedBassPattern.slice(0, stepsPerPage)];
                 if (inheritedBassNotes) inheritedBassNotes = [...inheritedBassNotes.slice(0, stepsPerPage), ...inheritedBassNotes.slice(0, stepsPerPage)];
                 if (inheritedBassAttacks) inheritedBassAttacks = [...inheritedBassAttacks.slice(0, stepsPerPage), ...inheritedBassAttacks.slice(0, stepsPerPage)];
                 if (inheritedBassDurations) inheritedBassDurations = [...inheritedBassDurations.slice(0, stepsPerPage), ...inheritedBassDurations.slice(0, stepsPerPage)];
+                if (inheritedBassSustainType) inheritedBassSustainType = [...inheritedBassSustainType.slice(0, stepsPerPage), ...inheritedBassSustainType.slice(0, stepsPerPage)];
             }
             if (inheritedKeyboardPattern) {
                 inheritedKeyboardPattern = [...inheritedKeyboardPattern.slice(0, stepsPerPage), ...inheritedKeyboardPattern.slice(0, stepsPerPage)];
@@ -9692,7 +13907,7 @@
         let hoveredToyHudAlpha = 0;
         let lastHoveredToy = null;
         function drawToyStatsHud() {
-            if (currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2) {
+            if (currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL) {
                 hoveredToyHudAlpha = 0;
                 return;
             }
@@ -9700,8 +13915,8 @@
             let hovToy = null;
             toneDrops.forEach(drop => {
                 if (drop.isHovered && drop.toy) hovToy = drop.toy;
-                if (drop.isHovered && drop.activityLabels && (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2)) {
-                    hovToy = { name: drop.activityName, labels: drop.activityLabels };
+                if (drop.isHovered && drop.activityLabels && (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL)) {
+                    hovToy = { name: drop.activityNameEn ? `${drop.activityName} / ${drop.activityNameEn}` : drop.activityName, labels: drop.activityLabels };
                 }
             });
             if (hovToy) {
@@ -9826,15 +14041,15 @@
         let cumulHudAlpha = 0;
         let lastCumulToy = null;
         function drawCumulativeStatsHud() {
-            if (currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2) {
+            if (currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL) {
                 cumulHudAlpha = 0;
                 return;
             }
             let hovToy = null;
             toneDrops.forEach(drop => {
                 if (drop.isHovered && drop.toy) hovToy = drop.toy;
-                if (drop.isHovered && drop.activityLabels && (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2)) {
-                    hovToy = { name: drop.activityName, labels: drop.activityLabels };
+                if (drop.isHovered && drop.activityLabels && (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL)) {
+                    hovToy = { name: drop.activityNameEn ? `${drop.activityName} / ${drop.activityNameEn}` : drop.activityName, labels: drop.activityLabels };
                 }
             });
             if (hovToy) {
@@ -9984,7 +14199,7 @@
         }
 
         function updateToneDropProximity() {
-            if ((currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.ADULT && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2) || !toneDrops.length) {
+            if ((currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.ADULT && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL) || !toneDrops.length) {
                 return;
             }
 
@@ -10024,6 +14239,57 @@
                         startChordPreview(drop);
                     } else if (!drop.isHovered && wasHovered && chordPreviewDrop === drop) {
                         stopChordPreview();
+                    }
+                }
+
+                // TRAVEL: swap drum/bass patterns for page2 last 2 bars on hover
+                if (currentScene === SCENE.TRAVEL && drop.travelAltKick) {
+                    const stepsPerBar = baseRhythmInfo.beatsPerBar * STEPS_PER_BEAT;
+                    const spp = scoreHudState.stepsPerPage || (baseRhythmInfo.beatsPerBar * baseRhythmInfo.bars * STEPS_PER_BEAT);
+                    const absStart = spp + (spp - stepsPerBar * 2); // page2 offset + last-2-bars offset
+                    const altLen = stepsPerBar * 2;
+
+                    if (drop.isHovered && !wasHovered) {
+                        // Save originals, apply alt patterns
+                        drop._origKick = baseRhythmInfo.kickPattern ? baseRhythmInfo.kickPattern.slice(absStart, absStart + altLen) : null;
+                        drop._origHat = inheritedHatPattern ? inheritedHatPattern.slice(absStart, absStart + altLen) : null;
+                        drop._origSnare = inheritedSnarePattern ? inheritedSnarePattern.slice(absStart, absStart + altLen) : null;
+                        drop._origBassPattern = inheritedBassPattern ? inheritedBassPattern.slice(absStart, absStart + altLen) : null;
+                        drop._origBassNotes = inheritedBassNotes ? inheritedBassNotes.slice(absStart, absStart + altLen) : null;
+                        drop._origBassAttacks = inheritedBassAttacks ? inheritedBassAttacks.slice(absStart, absStart + altLen) : null;
+                        drop._origBassDurations = inheritedBassDurations ? inheritedBassDurations.slice(absStart, absStart + altLen) : null;
+
+                        for (let s = 0; s < altLen; s++) {
+                            const idx = absStart + s;
+                            if (baseRhythmInfo.kickPattern && drop.travelAltKick) baseRhythmInfo.kickPattern[idx] = drop.travelAltKick[s];
+                            if (inheritedHatPattern && drop.travelAltHat) inheritedHatPattern[idx] = drop.travelAltHat[s];
+                            if (inheritedSnarePattern && drop.travelAltSnare) inheritedSnarePattern[idx] = drop.travelAltSnare[s];
+                            if (inheritedBassPattern && drop.travelAltBassPattern) inheritedBassPattern[idx] = drop.travelAltBassPattern[s];
+                            if (inheritedBassNotes && drop.travelAltBassNotes) inheritedBassNotes[idx] = drop.travelAltBassNotes[s];
+                            if (inheritedBassAttacks && drop.travelAltBassAttacks) inheritedBassAttacks[idx] = drop.travelAltBassAttacks[s];
+                            if (inheritedBassDurations && drop.travelAltBassDurations) inheritedBassDurations[idx] = drop.travelAltBassDurations[s];
+                        }
+                    } else if (!drop.isHovered && wasHovered) {
+                        // Restore originals
+                        if (drop._origKick || drop._origHat || drop._origSnare || drop._origBassPattern) {
+                            for (let s = 0; s < altLen; s++) {
+                                const idx = absStart + s;
+                                if (baseRhythmInfo.kickPattern && drop._origKick) baseRhythmInfo.kickPattern[idx] = drop._origKick[s];
+                                if (inheritedHatPattern && drop._origHat) inheritedHatPattern[idx] = drop._origHat[s];
+                                if (inheritedSnarePattern && drop._origSnare) inheritedSnarePattern[idx] = drop._origSnare[s];
+                                if (inheritedBassPattern && drop._origBassPattern) inheritedBassPattern[idx] = drop._origBassPattern[s];
+                                if (inheritedBassNotes && drop._origBassNotes) inheritedBassNotes[idx] = drop._origBassNotes[s];
+                                if (inheritedBassAttacks && drop._origBassAttacks) inheritedBassAttacks[idx] = drop._origBassAttacks[s];
+                                if (inheritedBassDurations && drop._origBassDurations) inheritedBassDurations[idx] = drop._origBassDurations[s];
+                            }
+                            drop._origKick = null;
+                            drop._origHat = null;
+                            drop._origSnare = null;
+                            drop._origBassPattern = null;
+                            drop._origBassNotes = null;
+                            drop._origBassAttacks = null;
+                            drop._origBassDurations = null;
+                        }
                     }
                 }
             });
@@ -10142,6 +14408,8 @@
                 if (d.guitarEffects) d.guitarEffects.forEach(e => e.dispose());
                 if (d.keyboardSynth) d.keyboardSynth.dispose();
                 if (d.keyboardEffects) d.keyboardEffects.forEach(e => e.dispose());
+                if (d.keys2Synth) d.keys2Synth.dispose();
+                if (d.keys2Effects) d.keys2Effects.forEach(e => e.dispose());
             });
         }
 
@@ -10505,6 +14773,16 @@
                 return "1n";
             };
 
+            // Prevent note overlap: clip durations so no note extends past the next note's start
+            events.sort((a, b) => a.step - b.step);
+            for (let i = 0; i < events.length - 1; i++) {
+                const endStep = events[i].step + events[i].len;
+                if (endStep > events[i + 1].step) {
+                    events[i].len = events[i + 1].step - events[i].step;
+                    if (events[i].len < 1) events[i].len = 1;
+                }
+            }
+
             events.forEach(ev => {
                 attacks[ev.step] = true;
                 notes[ev.step] = ev.note;
@@ -10669,6 +14947,16 @@
                 return "1n";
             };
 
+            // Prevent note overlap: clip durations so no note extends past the next note's start
+            events.sort((a, b) => a.step - b.step);
+            for (let i = 0; i < events.length - 1; i++) {
+                const endStep = events[i].step + events[i].len;
+                if (endStep > events[i + 1].step) {
+                    events[i].len = events[i + 1].step - events[i].step;
+                    if (events[i].len < 1) events[i].len = 1;
+                }
+            }
+
             events.forEach(ev => {
                 attacks[ev.step] = true;
                 notes[ev.step] = ev.note;
@@ -10735,8 +15023,11 @@
             "piano-gentle":   { wave: "sine",     attack: 0.005, decay: 0.8,  sustain: 0.1,  release: 0.6 },
             "organ-funky":    { wave: "square",   attack: 0.001, decay: 0.1,  sustain: 0.0,  release: 0.05, filterType: "bandpass", filterFreq: 1800 },
             "piano-chord":    { wave: "triangle", attack: 0.01,  decay: 1.0,  sustain: 0.35, release: 1.0,  vibratoFreq: 1.5, vibratoDepth: 0.06 },
-            "piano-arpeggio": { wave: "sine",     attack: 0.003, decay: 0.5,  sustain: 0.05, release: 0.4 },
-            "organ-power":    { wave: "sawtooth", attack: 0.005, decay: 0.3,  sustain: 0.5,  release: 0.4 }
+            "piano-arpeggio": { wave: "sine",     attack: 0.003, decay: 0.25, sustain: 0.0,  release: 0.2 },
+            "organ-power":    { wave: "sawtooth", attack: 0.005, decay: 0.3,  sustain: 0.5,  release: 0.4 },
+            "piano-sparse":   { wave: "triangle", attack: 0.02,  decay: 1.2,  sustain: 0.08, release: 0.8 },
+            "syncopated":     { wave: "sine",     attack: 0.008, decay: 0.35, sustain: 0.15, release: 0.3 },
+            "staccato-bounce":{ wave: "triangle", attack: 0.003, decay: 0.2,  sustain: 0.0,  release: 0.15 }
         };
 
         // University-specific timbres: diverse beyond keyboard (xylophone, flute, bells, etc.)
@@ -10859,30 +15150,69 @@
                     }
 
                 } else if (style === "piano-chord") {
-                    // Full bar sustained chord (wide voicing)
+                    // Sustained chords with occasional short stabs mixed in
                     if (variant === 0) {
-                        add(b, chordWide, barSteps);
+                        if (bar % 3 === 2) {
+                            // Every 3rd bar: ファーーファファファーー pattern
+                            add(b, chordWide, S * 2);                              // ファーー
+                            add(b + S * 2, chord4, 3);                             // ファ
+                            add(b + S * 2 + 3, [R + "4", F + "4"], 3);             // ファ
+                            if (baseInfo.beatsPerBar >= 4) add(b + S * 3 + 2, chordWide, S); // ファーー
+                        } else {
+                            add(b, chordWide, barSteps);                            // ファーーーー
+                        }
                     } else {
-                        add(b, chordWide, Math.floor(barSteps * 0.6));
-                        if (baseInfo.beatsPerBar >= 3) {
-                            add(b + 2 * S, chord4, Math.floor(barSteps * 0.4));
+                        if (bar % 2 === 1) {
+                            // Every other bar: short stabs before sustained
+                            add(b, chord4, 3);                                      // ファ
+                            add(b + 3, [R + "4", F + "4"], 3);                      // ファ
+                            if (baseInfo.beatsPerBar >= 3) add(b + S + 2, chordWide, barSteps - S - 2); // ファーーー
+                        } else {
+                            add(b, chordWide, Math.floor(barSteps * 0.6));
+                            if (baseInfo.beatsPerBar >= 3) {
+                                add(b + 2 * S, chord4, Math.floor(barSteps * 0.4));
+                            }
+                        }
+                    }
+
+                } else if (style === "piano-sparse") {
+                    // Sparse, monotone single notes — slightly melancholic, understated
+                    if (variant === 0) {
+                        add(b, [R + "4"], 4);                                           // beat 1: root only
+                        if (baseInfo.beatsPerBar >= 3 && bar % 2 === 0) {
+                            add(b + 2 * S, [T + "4"], 3);                              // every other bar: minor third
+                        }
+                        if (baseInfo.beatsPerBar >= 4 && bar % 2 === 1) {
+                            add(b + 3 * S, [F + "3"], 4);                              // alternating bars: low fifth
+                        }
+                    } else {
+                        add(b, [R + "3"], 4);                                           // beat 1: low root
+                        if (baseInfo.beatsPerBar >= 2 && bar % 3 === 0) {
+                            add(b + S + 2, [T + "4"], 3);                              // sparse third
+                        }
+                        if (baseInfo.beatsPerBar >= 4) {
+                            add(b + 3 * S, [R + "4"], 3);                              // beat 4: octave root
                         }
                     }
 
                 } else if (style === "piano-arpeggio") {
-                    // 8th-note broken chords cycling through voicings
+                    // Staccato arpeggio — single-step taps through chord tones
                     if (variant === 0) {
-                        add(b, chord4, 2);
-                        if (baseInfo.beatsPerBar >= 2) add(b + S, [T + "4", F + "4"], 2);
-                        if (baseInfo.beatsPerBar >= 3) add(b + 2 * S, [R + "4", F + "4", R + "5"], 2);
-                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S, chordWide, 2);
+                        add(b, [R + "4"], 1);                                           // beat 1: root
+                        if (baseInfo.beatsPerBar >= 2) add(b + S, [T + "4"], 1);       // beat 2: third
+                        if (baseInfo.beatsPerBar >= 3) add(b + 2 * S, [R + "5"], 1);   // beat 3: octave root
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S, [F + "4"], 1);   // beat 4: fifth
+                        if (baseInfo.beatsPerBar >= 4 && bar % 2 === 1) {
+                            add(b + 3 * S + 2, [T + "4"], 1);                          // every other bar: passing note
+                        }
                     } else {
-                        for (let beat = 0; beat < baseInfo.beatsPerBar; beat++) {
-                            const ch = beat % 2 === 0 ? chord4 : [R + "4", F + "4"];
-                            add(b + beat * S, ch, 2);
-                            if (Math.random() > 0.4) {
-                                add(b + beat * S + 2, [T + "4", F + "4"], 2);
-                            }
+                        // Variant 1: descending contour
+                        add(b, [R + "5"], 1);                                           // beat 1: high root
+                        if (baseInfo.beatsPerBar >= 2) add(b + S, [F + "4"], 1);       // beat 2: fifth
+                        if (baseInfo.beatsPerBar >= 3) add(b + 2 * S, [T + "4"], 1);   // beat 3: third
+                        if (baseInfo.beatsPerBar >= 4) add(b + 3 * S, [R + "4"], 1);   // beat 4: root
+                        if (baseInfo.beatsPerBar >= 4 && bar % 2 === 0) {
+                            add(b + 3 * S + 2, [F + "4"], 1);                          // pickup into next bar
                         }
                     }
 
@@ -11081,6 +15411,16 @@
                 if (len <= 8) return "2n";
                 return "1n";
             };
+
+            // Prevent note overlap: clip durations so no note extends past the next note's start
+            events.sort((a, b) => a.step - b.step);
+            for (let i = 0; i < events.length - 1; i++) {
+                const endStep = events[i].step + events[i].len;
+                if (endStep > events[i + 1].step) {
+                    events[i].len = events[i + 1].step - events[i].step;
+                    if (events[i].len < 1) events[i].len = 1;
+                }
+            }
 
             events.forEach(ev => {
                 attacks[ev.step] = true;
@@ -11664,7 +16004,7 @@
             };
 
             const tick = () => {
-                if (!baseGroove || minigameMuteGroove) return;
+                if (!baseGroove || minigameMuteGroove || travelStill.active) return;
                 const now = performance.now();
                 while (baseGroove.nextTick <= now + 4) {
                     const step = baseGroove.step;
@@ -11672,7 +16012,7 @@
                         baseGroove.kickSynth.triggerAttackRelease("C1", "8n");
                     }
                     if (
-                        (currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) &&
+                        (currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL) &&
                         carryHatSynth &&
                         carryHatFilter &&
                         inheritedHatPattern &&
@@ -11682,7 +16022,7 @@
                         carryHatSynth.triggerAttackRelease("32n");
                     }
                     if (
-                        (currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) &&
+                        (currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL) &&
                         carrySnareSynth &&
                         carrySnareFilter &&
                         inheritedSnarePattern &&
@@ -11696,7 +16036,7 @@
                         }
                     }
                     if (
-                        (currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) &&
+                        (currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL) &&
                         carryCymbalSynth &&
                         inheritedCymbalPattern &&
                         inheritedCymbalPattern[step]
@@ -11706,7 +16046,7 @@
                     // Carry chord playback removed from ADULT (bass + guitar only)
                     // Carry bass playback (ADULT+: play inherited bass line)
                     if (
-                        (currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) &&
+                        (currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL) &&
                         carryBassSynth &&
                         inheritedBassAttacks &&
                         inheritedBassAttacks[step]
@@ -11719,7 +16059,7 @@
                     }
                     // Carry keyboard playback (UNIVERSITY+: play inherited keyboard line)
                     if (
-                        (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) &&
+                        (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL) &&
                         carryKeyboardSynth &&
                         inheritedKeyboardAttacks &&
                         inheritedKeyboardAttacks[step]
@@ -11727,6 +16067,7 @@
                         const kNote = inheritedKeyboardNotes ? inheritedKeyboardNotes[step] : null;
                         const kDur = inheritedKeyboardDurations ? inheritedKeyboardDurations[step] : "8n";
                         if (kNote) {
+                            try { carryKeyboardSynth.releaseAll(); } catch (e) {}
                             try { carryKeyboardSynth.triggerAttackRelease(kNote, kDur); } catch (e) { /* ignore */ }
                         }
                     }
@@ -11740,6 +16081,7 @@
                         const k2Note = inheritedKeys2Notes ? inheritedKeys2Notes[step] : null;
                         const k2Dur = inheritedKeys2Durations ? inheritedKeys2Durations[step] : "8n";
                         if (k2Note) {
+                            try { carryKeys2Synth.releaseAll(); } catch (e) {}
                             try { carryKeys2Synth.triggerAttackRelease(k2Note, k2Dur); } catch (e) { /* ignore */ }
                         }
                     }
@@ -11754,10 +16096,11 @@
                     }
 
                     toneDrops.forEach(drop => {
-                        if (!drop.pattern || !drop.pattern[step]) return;
+                        const hasNote = (drop.pattern && drop.pattern[step]) || (drop.keys2Pattern && drop.keys2Pattern[step]);
+                        if (!hasNote) return;
                         if (drop.proximityVol <= -68) return;
                         const accent = drop.velocityPattern ? (drop.velocityPattern[step] || 0.72) : 0.9;
-                        const baseVol = Math.min(-12, drop.proximityVol - 18) + (accent - 0.8) * 9;
+                        const baseVol = Math.min(-12, drop.proximityVol - 12) + (accent - 0.8) * 9;
                         if (drop.instrument === "chord") {
                             // While hovered, chord preview synth is authoritative (bar-head aligned).
                             if (drop.isHovered && chordPreviewDrop === drop) return;
@@ -11770,16 +16113,35 @@
                             return;
                         }
                         if (drop.instrument === "keyboard") {
-                            if (drop.keyboardAttacks && drop.keyboardAttacks[step] && drop.keyboardSynth) {
-                                const kNote = drop.keyboardNotes[step];
-                                const kDur = drop.keyboardDurations[step];
-                                if (kNote) {
-                                    drop.keyboardSynth.volume.value = baseVol + 8;
-                                    try { drop.keyboardSynth.triggerAttackRelease(kNote, kDur); } catch(e) {}
+                            // If drop has Keys2, only play Keys2 (Keys is handled by carry layer)
+                            if (drop.keys2Synth) {
+                                if (drop.keys2Pattern && drop.keys2Pattern[step] &&
+                                    drop.keys2Attacks && drop.keys2Attacks[step]) {
+                                    const k2Note = drop.keys2Notes[step];
+                                    const k2Dur = drop.keys2Durations[step];
+                                    if (k2Note) {
+                                        drop.keys2Synth.volume.value = baseVol + 8;
+                                        try { drop.keys2Synth.releaseAll(); } catch(e) {}
+                                        try { drop.keys2Synth.triggerAttackRelease(k2Note, k2Dur); } catch(e) {}
+                                    }
                                 }
-                            }
-                            if (drop.isHovered && drop.keyboardAttacks && drop.keyboardAttacks[step]) {
-                                drop.ripples.push({ t: 0, accent });
+                                if (drop.isHovered && drop.keys2Attacks && drop.keys2Attacks[step]) {
+                                    drop.ripples.push({ t: 0, accent });
+                                }
+                            } else {
+                                // Standard keyboard drop (no Keys2): play Keys directly
+                                if (drop.keyboardAttacks && drop.keyboardAttacks[step] && drop.keyboardSynth) {
+                                    const kNote = drop.keyboardNotes[step];
+                                    const kDur = drop.keyboardDurations[step];
+                                    if (kNote) {
+                                        drop.keyboardSynth.volume.value = baseVol + 8;
+                                        try { drop.keyboardSynth.releaseAll(); } catch(e) {}
+                                        try { drop.keyboardSynth.triggerAttackRelease(kNote, kDur); } catch(e) {}
+                                    }
+                                }
+                                if (drop.isHovered && drop.keyboardAttacks && drop.keyboardAttacks[step]) {
+                                    drop.ripples.push({ t: 0, accent });
+                                }
                             }
                             return;
                         }
@@ -12112,33 +16474,242 @@
 
                 drawToyStatsHud();
                 drawCumulativeStatsHud();
-            } else if (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY) {
-                updateToneDropProximity();
+            } else if (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.TRAVEL) {
+                // Skip audio and movement if confirmation dialog or travel still is active
+                if (!adultConfirmation.active && !travelStill.active) {
+                    updateToneDropProximity();
+                }
                 updateScoreHudPreviewRow();
 
                 if (baby) {
-                    if (!isMinigameActive) {
+                    if (!isMinigameActive && !adultConfirmation.active && !travelStill.active) {
                         baby.update(orbWorldX);
                     }
-                    updateCamera();
+                    if (!travelStill.active) updateCamera();
                 }
 
-                ctx.save();
-                ctx.translate(-cameraX, 0);
-                if (currentScene === SCENE.UNIVERSITY) {
-                    drawUniversityBackground();
-                } else if (currentScene === SCENE.ADULT) {
-                    drawAdultBackground();
-                } else if (currentScene === SCENE.CHILD2) {
-                    drawSchoolBackground();
-                } else if (currentScene === SCENE.CHILD1) {
-                    drawChildBackground();
+                // Global visuals update
+                envEffects.update(baseRhythmBpm);
+
+                if (currentScene === SCENE.TRAVEL && !travelStill.active) {
+                    const groundY = height * 0.55;
+
+                    // A. Sky, Sun & Background
+                    drawTravelSky(ctx, groundY);
+                    drawTravelSun(ctx, groundY);
+                    drawTravelBackMountains(ctx, groundY);
+
+                    // B. Landscape (left/right separated)
+                    drawTravelSeaArea(ctx, groundY);
+                    drawTravelLeftLandscape(ctx, groundY);
+                    drawTravelRightLandscape(ctx, groundY);
+                    drawTravelAutumnTrees(ctx, groundY, false);
+
+                    // C. Track & Infrastructure
+                    drawTravelTrack(ctx, groundY);
+                    drawTravelOverhead(ctx, groundY);
+                    drawTravelCentralStation(ctx, groundY, false);
+
+                    // D. Train
+                    if (baby) baby.draw(ctx, groundY);
+
+                    // E. Tone Drops
+                    ctx.save();
+                    ctx.translate(-cameraX, 0);
+                    drawToneDrops();
+                    ctx.restore();
+
+                    // F. Foreground layers
+                    drawTravelAutumnTrees(ctx, groundY, true);
+                    drawTravelCentralStation(ctx, groundY, true);
+                } else if (travelStill.active) {
+                    // Still is rendering — skip all background drawing
                 } else {
-                    drawCrawlBackground();
+                    // EXISTING NON-TRAVEL RENDERING
+                    ctx.save();
+                    ctx.translate(-cameraX, 0);
+                    if (currentScene === SCENE.UNIVERSITY) {
+                        drawUniversityBackground();
+                    } else if (currentScene === SCENE.ADULT) {
+                        drawAdultBackground();
+                    } else if (currentScene === SCENE.CHILD2) {
+                        drawSchoolBackground();
+                    } else if (currentScene === SCENE.CHILD1) {
+                        drawChildBackground();
+                    } else {
+                        drawCrawlBackground();
+                    }
+                    
+                    envEffects.draw(ctx, cameraX);
+                    drawToneDrops();
+                    if (baby) baby.draw(ctx);
+                    ctx.restore();
                 }
-                drawToneDrops();
-                if (baby) baby.draw(ctx);
-                ctx.restore();
+
+                // === Adult Confirmation UI Overlay ===
+                if (adultConfirmation.active) {
+                    adultConfirmation.fade += (1 - adultConfirmation.fade) * 0.12;
+                    const f = adultConfirmation.fade;
+                    const t = Date.now() * 0.001; // for gentle animations
+
+                    const drop = adultConfirmation.drop;
+                    const toneName = drop.activityName || drop.facilityName || "tone";
+                    const activity = ADULT_ACTIVITIES.find(a => a.name === toneName || a.id === drop.activityId);
+                    const toneNameEn = activity ? activity.nameEn : (drop.activityNameEn || drop.facilityName || "tone");
+                    const toneColor = drop.dropColor || (activity ? activity.color : palette.btnColor);
+
+                    // Soft frosted overlay matching the world palette
+                    ctx.fillStyle = `rgba(245, 243, 238, ${0.55 * f})`;
+                    ctx.fillRect(0, 0, width, height);
+
+                    const bx = baby.x - cameraX, by = baby.y != null ? baby.y : height * 0.55 - 50;
+                    const centerY = by - 80;
+
+                    // Soft radial glow behind the confirmation area (tone-colored)
+                    ctx.save();
+                    ctx.globalAlpha = f * 0.25;
+                    const auraR = 160 + Math.sin(t * 1.5) * 8;
+                    const aura = ctx.createRadialGradient(bx, centerY, 0, bx, centerY, auraR);
+                    aura.addColorStop(0, toneColor);
+                    aura.addColorStop(1, "rgba(255,255,255,0)");
+                    ctx.fillStyle = aura;
+                    ctx.beginPath();
+                    ctx.arc(bx, centerY, auraR, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+
+                    // Tone name — softly rendered above character
+                    ctx.save();
+                    ctx.globalAlpha = f;
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+
+                    // Japanese name
+                    ctx.shadowColor = "rgba(255,255,255,0.9)";
+                    ctx.shadowBlur = 14;
+                    ctx.fillStyle = "rgba(60, 55, 48, 0.92)";
+                    ctx.font = "700 22px 'Zen Maru Gothic', sans-serif";
+                    ctx.fillText(`「${toneName}」`, bx, centerY - 52);
+
+                    // English subtitle
+                    ctx.shadowBlur = 10;
+                    ctx.fillStyle = "rgba(100, 95, 85, 0.7)";
+                    ctx.font = "500 13px 'Zen Maru Gothic', sans-serif";
+                    ctx.fillText(toneNameEn, bx, centerY - 30);
+
+                    // Question text
+                    ctx.shadowBlur = 8;
+                    ctx.fillStyle = "rgba(80, 75, 65, 0.85)";
+                    ctx.font = "500 15px 'Zen Maru Gothic', sans-serif";
+                    ctx.fillText("このtoneを選びますか？", bx, centerY - 4);
+                    ctx.fillStyle = "rgba(120, 115, 105, 0.6)";
+                    ctx.font = "400 11px 'Zen Maru Gothic', sans-serif";
+                    ctx.fillText("Choose this tone?", bx, centerY + 14);
+                    ctx.restore();
+
+                    // Circular buttons matching tone-drop aesthetic
+                    const btnR = 30;
+                    const btnSpacing = 44;
+                    const yesCenter = { x: bx - btnSpacing, y: centerY + 52 };
+                    const noCenter = { x: bx + btnSpacing, y: centerY + 52 };
+
+                    const drawCircleBtn = (cx, cy, r, label, isYes) => {
+                        const dx = mouseX - cx, dy = mouseY - cy;
+                        const isHover = (dx * dx + dy * dy) <= (r + 4) * (r + 4);
+                        const scale = isHover ? 1.08 + Math.sin(t * 4) * 0.02 : 1.0;
+                        const sr = r * scale;
+
+                        ctx.save();
+                        ctx.globalAlpha = f;
+
+                        // Soft shadow
+                        ctx.shadowColor = "rgba(0,0,0,0.10)";
+                        ctx.shadowBlur = 12;
+                        ctx.shadowOffsetY = 4;
+
+                        // Fill — yes uses tone color, no uses soft warm grey
+                        ctx.fillStyle = isYes ? toneColor : "hsl(30, 10%, 78%)";
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, sr, 0, Math.PI * 2);
+                        ctx.fill();
+
+                        ctx.shadowBlur = 0;
+                        ctx.shadowOffsetY = 0;
+
+                        // Top highlight (same as tone drops)
+                        const hi = ctx.createRadialGradient(cx - sr * 0.28, cy - sr * 0.32, 1, cx - sr * 0.16, cy - sr * 0.18, sr * 0.85);
+                        hi.addColorStop(0, "rgba(255,255,255,0.35)");
+                        hi.addColorStop(1, "rgba(255,255,255,0)");
+                        ctx.fillStyle = hi;
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, sr - 1, 0, Math.PI * 2);
+                        ctx.fill();
+
+                        // White border (matching tone drops)
+                        ctx.strokeStyle = isHover ? "rgba(255,255,255,1)" : "rgba(255,255,255,0.88)";
+                        ctx.lineWidth = isHover ? 3.5 : 3;
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, sr, 0, Math.PI * 2);
+                        ctx.stroke();
+
+                        // Label
+                        ctx.fillStyle = "rgba(255,255,255,0.95)";
+                        ctx.font = "700 14px 'Zen Maru Gothic', sans-serif";
+                        ctx.textAlign = "center";
+                        ctx.textBaseline = "middle";
+                        ctx.fillText(label, cx, cy + 1);
+                        ctx.restore();
+
+                        // Return square hit-rect that encloses the circle
+                        return { x: cx - r - 4, y: cy - r - 4, w: (r + 4) * 2, h: (r + 4) * 2 };
+                    };
+
+                    adultConfirmation.yesRect = drawCircleBtn(yesCenter.x, yesCenter.y, btnR, "はい", true);
+                    adultConfirmation.noRect = drawCircleBtn(noCenter.x, noCenter.y, btnR, "いいえ", false);
+                }
+
+                // === Travel Still Overlay ===
+                if (travelStill.active) {
+                    travelStill.progress = Math.min(1, (Date.now() - travelStill.startTime) / travelStill.duration);
+                    if (travelStill.type === "sea") {
+                        drawSeaStill(ctx, travelStill.progress);
+                    } else if (travelStill.type === "mountain") {
+                        drawMountainStill(ctx, travelStill.progress);
+                    }
+                    // After fully drawn + 2s hold, fade out → next phase
+                    if (travelStill.progress >= 1 && !travelStill.endScheduled) {
+                        travelStill.endScheduled = true;
+                        setTimeout(() => {
+                            // Fade out audio over 1.4s alongside visual fade
+                            if (travelStillAudio) {
+                                const audio = travelStillAudio;
+                                const fadeStart = audio.volume;
+                                const fadeSteps = 28;
+                                const fadeInterval = 1400 / fadeSteps;
+                                let step = 0;
+                                const audioFade = setInterval(() => {
+                                    step++;
+                                    audio.volume = Math.max(0, fadeStart * (1 - step / fadeSteps));
+                                    if (step >= fadeSteps) {
+                                        clearInterval(audioFade);
+                                        audio.pause();
+                                        audio.src = '';
+                                    }
+                                }, fadeInterval);
+                                travelStillAudio = null;
+                            }
+                            fadeScreenTo(1, 1400);
+                            setTimeout(() => {
+                                travelStill.active = false;
+                                // Restore score HUD
+                                const scoreHud = document.getElementById('score-hud');
+                                if (scoreHud) scoreHud.style.display = '';
+                                // TODO: 次のフェーズへ遷移（未定）
+                                fadeScreenTo(0, 1300);
+                            }, 1400);
+                        }, 2000);
+                    }
+                }
 
                 drawToyStatsHud();
                 drawCumulativeStatsHud();
@@ -12388,7 +16959,7 @@
         }
 
         function updateScoreToggleUi() {
-            const available = (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) && !!baseRhythmInfo;
+            const available = (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL) && !!baseRhythmInfo;
             scoreToggleBtn.classList.remove('visible');
             setScoreHudVisible(available);
             // Settings button: visible only during gameplay scenes
@@ -12427,12 +16998,13 @@
             const isPartTime = currentScene === SCENE.PART_TIME;
             const isJobHunt = currentScene === SCENE.JOB_HUNT;
             const isJobHunt2 = currentScene === SCENE.JOB_HUNT2;
-            const isPostAdult = isUniversity || isPartTime || isJobHunt || isJobHunt2;
+            const isTravel = currentScene === SCENE.TRAVEL;
+            const isPostAdult = isUniversity || isPartTime || isJobHunt || isJobHunt2 || isTravel;
             const rows = [];
             let chordRow = null;
 
-            // Pagination support for JOB_HUNT2
-            const usePagination = isJobHunt2 && scoreHudState.pageCount > 1;
+            // Pagination support for JOB_HUNT2 and TRAVEL
+            const usePagination = (isJobHunt2 || isTravel) && scoreHudState.pageCount > 1;
             const displayPage = scoreHudState.currentPage;
             const pageOffset = usePagination ? displayPage * scoreHudState.stepsPerPage : 0;
             const displaySteps = usePagination ? scoreHudState.stepsPerPage : null; // null = show all
@@ -12441,65 +17013,56 @@
                 return arr.slice(pageOffset, pageOffset + scoreHudState.stepsPerPage);
             };
 
-            // Chord row for CHILD1 (when hovering a chord drop) or CHILD2 (always visible)
-            if (isChild && previewDropIndex !== null && toneDrops[previewDropIndex] && toneDrops[previewDropIndex].instrument === "chord") {
-                const preview = toneDrops[previewDropIndex];
-                chordRow = {
-                    chords: preview.chordProgression.chords,
-                    side: preview.chordSide
-                };
-            }
-
-            // Bass/Keyboard preview row (CHILD2/ADULT/UNIVERSITY/PART_TIME/JOB_HUNT hover)
-            if ((isChild2 || isAdult || isPostAdult) && previewDropIndex !== null && toneDrops[previewDropIndex] && (toneDrops[previewDropIndex].instrument === "bass" || toneDrops[previewDropIndex].instrument === "keyboard")) {
-                const preview = toneDrops[previewDropIndex];
-                const isKeyboard = preview.instrument === "keyboard";
-                rows.push({
-                    label: isKeyboard ? 'Keys' : 'Bass',
-                    pattern: slicePage(preview.pattern),
-                    styleClass: isKeyboard ? 'bass' : 'bass',
-                    sustainType: slicePage(isKeyboard ? (preview.keyboardSustainType || null) : (preview.bassSustainType || null))
-                });
-            }
-
+            // --- PREVIEW ROW LOGIC (Hovering a Tone Drop) ---
             if (previewDropIndex !== null && toneDrops[previewDropIndex]) {
                 const preview = toneDrops[previewDropIndex];
                 const isCymbal = preview.instrument === "cymbal";
                 const isSnare = preview.instrument === "snare";
                 const isChord = preview.instrument === "chord";
-                const isBass = preview.instrument === "bass";
-                const isKeyboard = preview.instrument === "keyboard";
+                const isBass = preview.instrument === "bass" || preview.instrument === "keyboard";
                 const isModifier = preview.instrument === "modifier";
-                if (!isChord && !isBass && !isKeyboard && !isModifier) {
+
+                if (isBass) {
+                    if (isTravel && preview.keys2Pattern) {
+                        // TRAVEL: only show Keys2 preview (Keys is already inherited)
+                        rows.push({
+                            label: 'Keys2',
+                            pattern: slicePage(preview.keys2Pattern),
+                            styleClass: 'bass',
+                            sustainType: slicePage(preview.keys2SustainType || null)
+                        });
+                    } else {
+                        rows.push({
+                            label: preview.instrument === "keyboard" ? 'Keys' : (preview.activityName || 'Bass'),
+                            pattern: slicePage(preview.pattern),
+                            styleClass: 'bass',
+                            sustainType: slicePage(preview.keyboardSustainType || preview.bassSustainType || null)
+                        });
+                    }
+                } else if (isChord && isChild && preview.chordProgression) {
+                    chordRow = {
+                        side: preview.chordSide,
+                        chords: preview.chordProgression.chords
+                    };
+                } else if (!isChord && !isModifier) {
                     const instrLabel = isCymbal ? 'Cymbal' : (isSnare ? 'Snare' : 'Hat');
                     const instrStyle = isCymbal ? (preview.hudStyleClass || 'cymbal') :
                         (isSnare ? (preview.hudStyleClass || 'snare') : (previewDropIndex >= 2 ? 'hat-dense' : 'hat'));
                     rows.push({
-                        label: `${instrLabel} ${previewDropIndex + 1}`,
+                        label: preview.toy?.name || `${instrLabel} ${previewDropIndex + 1}`,
                         pattern: slicePage(preview.pattern),
                         styleClass: instrStyle
                     });
                 }
             }
-            // Keys2 row (PART_TIME/JOB_HUNT/JOB_HUNT2)
+
+            // --- INHERITED ROWS LOGIC (The sounds the user already has) ---
             if ((isPartTime || isJobHunt || isJobHunt2) && inheritedKeys2Pattern) {
-                rows.push({
-                    label: 'Keys2',
-                    pattern: slicePage(inheritedKeys2Pattern),
-                    styleClass: 'bass',
-                    sustainType: slicePage(inheritedKeys2SustainType || null)
-                });
+                rows.push({ label: 'Keys2', pattern: slicePage(inheritedKeys2Pattern), styleClass: 'bass', sustainType: slicePage(inheritedKeys2SustainType || null) });
             }
-            // Always show inherited keyboard row for post-adult scenes
-            if ((isUniversity || isPartTime || isJobHunt || isJobHunt2) && inheritedKeyboardPattern) {
-                rows.push({
-                    label: 'Keys',
-                    pattern: slicePage(inheritedKeyboardPattern),
-                    styleClass: 'bass',
-                    sustainType: slicePage(inheritedKeyboardSustainType || null)
-                });
+            if ((isUniversity || isPartTime || isJobHunt || isJobHunt2 || isTravel) && inheritedKeyboardPattern) {
+                rows.push({ label: 'Keys', pattern: slicePage(inheritedKeyboardPattern), styleClass: 'bass', sustainType: slicePage(inheritedKeyboardSustainType || null) });
             }
-            // Always show inherited bass row
             if ((isAdult || isPostAdult) && inheritedBassPattern) {
                 rows.push({
                     label: 'Bass',
@@ -12509,35 +17072,19 @@
                 });
             }
             if ((isChild || isChild2 || isAdult || isPostAdult) && inheritedCymbalPattern) {
-                rows.push({
-                    label: 'Cymbal',
-                    pattern: slicePage(inheritedCymbalPattern),
-                    styleClass: inheritedCymbalStyleClass || 'cymbal'
-                });
+                rows.push({ label: 'Cymbal', pattern: slicePage(inheritedCymbalPattern), styleClass: inheritedCymbalStyleClass || 'cymbal' });
             }
             if ((currentScene === SCENE.TODDLE1 || isChild || isChild2 || isAdult || isPostAdult) && inheritedSnarePattern) {
-                rows.push({
-                    label: 'Snare',
-                    pattern: slicePage(inheritedSnarePattern),
-                    styleClass: inheritedSnareStyleClass || 'snare'
-                });
+                rows.push({ label: 'Snare', pattern: slicePage(inheritedSnarePattern), styleClass: inheritedSnareStyleClass || 'snare' });
             }
             if (currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || isChild || isChild2 || isAdult || isPostAdult) {
                 const carryPattern = inheritedHatPattern || baseRhythmInfo.baseHatPattern;
                 if (carryPattern) {
-                    rows.push({
-                        label: 'Hat',
-                        pattern: slicePage(carryPattern),
-                        styleClass: inheritedHatStyleClass || 'hat'
-                    });
+                    rows.push({ label: 'Hat', pattern: slicePage(carryPattern), styleClass: inheritedHatStyleClass || 'hat' });
                 }
             }
             // Keep kick as the bottom-most permanent row.
-            rows.push({
-                label: 'Kick',
-                pattern: slicePage(baseRhythmInfo.kickPattern),
-                styleClass: 'kick'
-            });
+            rows.push({ label: 'Kick', pattern: slicePage(baseRhythmInfo.kickPattern), styleClass: 'kick' });
 
             scoreTracks.innerHTML = '';
             scoreHudState.rows = [];
@@ -12653,8 +17200,8 @@
 
             if (drumBlock) scoreTracks.appendChild(drumBlock);
 
-            // Apply bar highlights spanning all rows (JOB_HUNT2 modifier tones)
-            if (isJobHunt2 && scoreHudState.rows.length > 0) {
+            // Apply bar highlights spanning all rows (JOB_HUNT2 modifier tones / TRAVEL page2 bars)
+            if ((isJobHunt2 || isTravel) && scoreHudState.rows.length > 0) {
                 const barSteps = STEPS_PER_BEAT * baseRhythmInfo.beatsPerBar;
                 const totalRows = scoreHudState.rows.length;
                 const applyColumnBorder = (barIdx, color, style) => {
@@ -12679,7 +17226,7 @@
                         applyColumnBorder(hl.barIndex, hl.color, 'solid');
                     });
                 }
-                // Hover preview: show solid border for hovered modifier's target bar
+                // Hover preview: show solid border for hovered modifier's target bar (JOB_HUNT2)
                 if (previewDropIndex !== null && toneDrops[previewDropIndex] &&
                     toneDrops[previewDropIndex].instrument === "modifier" &&
                     !toneDrops[previewDropIndex].consumed &&
@@ -12687,9 +17234,29 @@
                     const hvDrop = toneDrops[previewDropIndex];
                     applyColumnBorder(hvDrop.targetBarOnPage2, hvDrop.dropColor, 'solid');
                 }
+                // TRAVEL: always show border on page2 last 2 bars (the varied section)
+                if (isTravel && displayPage === 1) {
+                    // Find the closest hovered drop for its color, otherwise use a default
+                    let travelColor = "rgba(255,255,255,0.5)";
+                    toneDrops.forEach(d => {
+                        if (d.travelPage2Bars && d.isHovered) travelColor = d.dropColor;
+                    });
+                    const lastBar0 = baseRhythmInfo.bars - 2;
+                    const lastBar1 = baseRhythmInfo.bars - 1;
+                    applyColumnBorder(lastBar0, travelColor, 'solid');
+                    applyColumnBorder(lastBar1, travelColor, 'solid');
+                }
+                // Hover preview: highlight page2 varied bars for TRAVEL keyboard tones
+                if (isTravel && previewDropIndex !== null && toneDrops[previewDropIndex] &&
+                    toneDrops[previewDropIndex].travelPage2Bars && displayPage === 1) {
+                    const hvDrop = toneDrops[previewDropIndex];
+                    hvDrop.travelPage2Bars.forEach(barIdx => {
+                        applyColumnBorder(barIdx, hvDrop.dropColor, 'solid');
+                    });
+                }
             }
 
-            // Pagination dots for JOB_HUNT2
+            // Pagination dots for JOB_HUNT2 / TRAVEL
             if (usePagination) {
                 const pagDiv = document.createElement('div');
                 pagDiv.className = 'score-pagination';
@@ -12728,8 +17295,8 @@
             if (!baseRhythmInfo) return;
             scoreMeta.textContent = `${baseRhythmInfo.beatsPerBar}/4 x ${baseRhythmInfo.bars}  |  ${Math.round(baseRhythmInfo.bpm)} BPM`;
             scoreHudState.previewDropIndex = null;
-            // Reset pagination for non-JOB_HUNT2 scenes
-            if (currentScene !== SCENE.JOB_HUNT2) {
+            // Reset pagination for scenes without pagination
+            if (currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL) {
                 scoreHudState.pageCount = 1;
                 scoreHudState.currentPage = 0;
                 scoreHudState.stepsPerPage = 0;
