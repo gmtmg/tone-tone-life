@@ -101,6 +101,57 @@
         };
         let travelStillAudio = null;
 
+        // ======== Life Label bilingual name mapping ========
+        const LABEL_NAMES = {
+            social:      { ja: "社交性",   en: "Social" },
+            expressive:  { ja: "表現力",   en: "Expressive" },
+            optimistic:  { ja: "楽観性",   en: "Optimistic" },
+            adventurous: { ja: "冒険心",   en: "Adventurous" },
+            curious:     { ja: "好奇心",   en: "Curious" },
+            creative:    { ja: "創造性",   en: "Creative" },
+            focused:     { ja: "集中力",   en: "Focused" },
+            patient:     { ja: "忍耐力",   en: "Patient" },
+            resilient:   { ja: "回復力",   en: "Resilient" },
+            active:      { ja: "活動的",   en: "Active" },
+            calm:        { ja: "穏やか",   en: "Calm" },
+            cautious:    { ja: "慎重",     en: "Cautious" },
+            study:       { ja: "学習",     en: "Study" },
+            organized:   { ja: "整理力",   en: "Organized" },
+            empathetic:  { ja: "共感力",   en: "Empathetic" },
+            lucky:       { ja: "運",       en: "Lucky" },
+        };
+        function labelDisplay(key) {
+            const n = LABEL_NAMES[key];
+            return n ? `${n.ja} / ${n.en}` : key;
+        }
+
+        // ENTERTAINMENT (スロットマシン) variables
+        const SLOT_SYMBOLS = [
+          { icon: "7",  color: "#FF2222", label: "lucky" },
+          { icon: "\uD83D\uDD14", color: "#FFD700", label: "adventurous" },
+          { icon: "\uD83C\uDF52", color: "#FF4466", label: "optimistic" },
+          { icon: "BAR", color: "#FFFFFF", label: "active" },
+          { icon: "\uD83C\uDF40", color: "#44FF88", label: "lucky" },
+          { icon: "\u2B50", color: "#FFAA00", label: "resilient" },
+        ];
+
+        let slotMachine = {
+          active: false,
+          phase: "idle",
+          reels: [
+            { symbols: [], offset: 0, speed: 0, stopped: false, finalIndex: 0, targetOffset: -1, startOffset: 0, flashTimer: 0 },
+            { symbols: [], offset: 0, speed: 0, stopped: false, finalIndex: 0, targetOffset: -1, startOffset: 0, flashTimer: 0 },
+            { symbols: [], offset: 0, speed: 0, stopped: false, finalIndex: 0, targetOffset: -1, startOffset: 0, flashTimer: 0 },
+          ],
+          stopButtons: [],
+          startTime: 0,
+          resultTimer: 0,
+          resultTier: null,
+          particles: [],
+          round: 1,
+          totalLabels: {},
+        };
+
         // PART_TIME & JOB_HUNT (見下ろし型2D) variables
         let worldHeight = 0;
         let isTopDownScene = false;
@@ -352,7 +403,7 @@
         const toySystem = window.TTLToyData || { LIFE_LABELS: [], TOY_LIBRARY: [], drawToy: () => {} };
 
         // シーン管理
-        const SCENE = { TITLE: 0, CHOICE: 1, TRANSITION: 2, CRAWL: 3, CRAWL2: 4, TODDLE1: 5, CHILD1: 6, CHILD2: 7, LESSON: 8, ADULT: 9, UNIVERSITY: 10, PART_TIME: 11, JOB_HUNT: 12, JOB_HUNT2: 13, TRAVEL: 14 };
+        const SCENE = { TITLE: 0, CHOICE: 1, TRANSITION: 2, CRAWL: 3, CRAWL2: 4, TODDLE1: 5, CHILD1: 6, CHILD2: 7, LESSON: 8, ADULT: 9, UNIVERSITY: 10, PART_TIME: 11, JOB_HUNT: 12, JOB_HUNT2: 13, TRAVEL: 14, ENTERTAINMENT: 15, THIRTIES: 16 };
         let currentScene = SCENE.TITLE;
         const RHYTHM_BARS = 4;
         const STEPS_PER_BEAT = 4;
@@ -627,6 +678,7 @@
         }
 
         async function pickToneDropAt(screenX, screenY) {
+            if (slotMachine.active) { handleSlotStopClick(screenX, screenY); return; }
             if (currentScene < SCENE.CRAWL || !toneDrops.length) return;
             if (travelStill.active) return;
             await ensureAudioReady();
@@ -642,6 +694,7 @@
                     else if (currentScene === SCENE.PART_TIME) handlePartTimeChoice(chosen);
                     else if (currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) handleJobHuntChoice(chosen);
                     else if (currentScene === SCENE.TRAVEL) handleTravelChoice(chosen);
+                    else if (currentScene === SCENE.THIRTIES) handle30sChoice(chosen);
                     return;
                 }
                 if (adultConfirmation.noRect && rx >= adultConfirmation.noRect.x && rx <= adultConfirmation.noRect.x + adultConfirmation.noRect.w && ry >= adultConfirmation.noRect.y && ry <= adultConfirmation.noRect.y + adultConfirmation.noRect.h) {
@@ -664,7 +717,7 @@
                 handleChildChoice(picked);
             } else if (currentScene === SCENE.CHILD2) {
                 handleChild2Choice(picked);
-            } else if (currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL) {
+            } else if (currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.THIRTIES) {
                 // Enter confirmation mode for later stages
                 adultConfirmation.active = true;
                 adultConfirmation.drop = picked;
@@ -4191,6 +4244,612 @@
             ctx.fillRect(0, wallHeight, worldWidth, 30);
         }
 
+        // ======== THIRTIES BACKGROUND (家の中の間取り) ========
+        function drawThirtiesBackground(ctx) {
+            const wallHeight = height * ROOM_WALL_RATIO;
+            const activities = getThirtiesActivities(thirtiesHasMarriage);
+            const t = Date.now() * 0.001;
+
+            // Base wall gradient (warm interior)
+            const wallG = ctx.createLinearGradient(0, 0, 0, wallHeight);
+            wallG.addColorStop(0, "#f8f6f2");
+            wallG.addColorStop(1, "#f0ece4");
+            ctx.fillStyle = wallG;
+            ctx.fillRect(0, 0, worldWidth, wallHeight);
+
+            // Base floor
+            ctx.fillStyle = floorColor;
+            ctx.fillRect(0, wallHeight, worldWidth, height - wallHeight);
+
+            // Crown molding
+            ctx.fillStyle = "rgba(220, 215, 205, 0.5)";
+            ctx.fillRect(0, 0, worldWidth, 6);
+            ctx.fillStyle = "rgba(200, 195, 185, 0.35)";
+            ctx.fillRect(0, 6, worldWidth, 3);
+
+            // Baseboard
+            ctx.fillStyle = "rgba(190, 180, 165, 0.55)";
+            ctx.fillRect(0, wallHeight - 10, worldWidth, 10);
+            ctx.fillStyle = "rgba(170, 160, 145, 0.3)";
+            ctx.fillRect(0, wallHeight - 12, worldWidth, 3);
+
+            // Draw each room
+            for (let ri = 0; ri < activities.length; ri++) {
+                const act = activities[ri];
+                const rx1 = worldWidth * act.worldFraction[0];
+                const rx2 = worldWidth * act.worldFraction[1];
+                const rw = rx2 - rx1;
+                const rcx = rx1 + rw * 0.5;
+
+                // Room-specific decorations
+                if (act.id === "genkan") {
+                    drawGenkanRoom(ctx, rx1, rw, wallHeight);
+                } else if (act.id === "kitchen") {
+                    drawKitchenRoom(ctx, rx1, rw, wallHeight);
+                } else if (act.id === "living") {
+                    drawLivingRoom(ctx, rx1, rw, wallHeight);
+                } else if (act.id === "marriage") {
+                    drawLivingRoom(ctx, rx1, rw, wallHeight);
+                    drawMarriageEffects(ctx, rx1, rw, wallHeight, t);
+                } else if (act.id === "bath") {
+                    drawBathRoom(ctx, rx1, rw, wallHeight);
+                } else if (act.id === "bedroom") {
+                    drawBedroomRoom(ctx, rx1, rw, wallHeight);
+                }
+
+                // Divider walls between rooms (door frame style)
+                if (ri < activities.length - 1) {
+                    const dx = rx2 + (worldWidth * activities[ri + 1].worldFraction[0] - rx2) * 0.5;
+                    const dw = 18;
+                    // Wall pillar
+                    ctx.fillStyle = "rgba(200, 190, 175, 0.7)";
+                    ctx.fillRect(dx - dw / 2, 0, dw, wallHeight);
+                    // Door frame arch
+                    ctx.fillStyle = "rgba(180, 170, 150, 0.6)";
+                    ctx.fillRect(dx - dw / 2 - 4, 0, dw + 8, 8);
+                    ctx.fillRect(dx - dw / 2 - 4, wallHeight - 8, dw + 8, 8);
+                    // Door opening (gap in the middle)
+                    const doorH = wallHeight * 0.65;
+                    const doorY = wallHeight - doorH;
+                    ctx.fillStyle = wallG;
+                    ctx.fillRect(dx - dw / 2 + 2, doorY, dw - 4, doorH - 10);
+                    // Door frame trim
+                    ctx.strokeStyle = "rgba(160, 150, 135, 0.5)";
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(dx - dw / 2 + 1, doorY, dw - 2, doorH - 10);
+                }
+            }
+
+            // Wood plank floor
+            const plankW = 90;
+            ctx.strokeStyle = "rgba(80, 60, 40, 0.08)";
+            ctx.lineWidth = 1;
+            for (let x = 0; x < worldWidth; x += plankW) {
+                ctx.beginPath();
+                ctx.moveTo(x, wallHeight); ctx.lineTo(x, height);
+                ctx.stroke();
+            }
+            for (let y = wallHeight; y < height; y += 28) {
+                const offset = ((y - wallHeight) / 28) % 2 === 0 ? 0 : plankW / 2;
+                ctx.beginPath();
+                ctx.moveTo(offset, y); ctx.lineTo(worldWidth, y);
+                ctx.stroke();
+            }
+        }
+
+        function drawGenkanRoom(ctx, rx, rw, wallH) {
+            // Tile floor (checker pattern)
+            const tileSize = 24;
+            const floorTop = wallH;
+            for (let ty = floorTop; ty < height; ty += tileSize) {
+                for (let tx = rx; tx < rx + rw; tx += tileSize) {
+                    const isLight = ((Math.floor((tx - rx) / tileSize) + Math.floor((ty - floorTop) / tileSize)) % 2 === 0);
+                    ctx.fillStyle = isLight ? "rgba(220, 215, 205, 0.6)" : "rgba(190, 185, 175, 0.5)";
+                    ctx.fillRect(tx, ty, tileSize, tileSize);
+                }
+            }
+
+            // Front door (right side of genkan)
+            const doorW = rw * 0.22;
+            const doorH = wallH * 0.72;
+            const doorX = rx + rw * 0.72;
+            const doorY = wallH - doorH;
+            ctx.fillStyle = "hsl(25, 35%, 42%)";
+            ctx.beginPath(); ctx.roundRect(doorX, doorY, doorW, doorH, 3); ctx.fill();
+            // Door panels
+            ctx.strokeStyle = "rgba(100, 70, 45, 0.4)";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(doorX + 6, doorY + 8, doorW - 12, doorH * 0.35);
+            ctx.strokeRect(doorX + 6, doorY + doorH * 0.45, doorW - 12, doorH * 0.45);
+            // Doorknob
+            ctx.fillStyle = "rgba(200, 180, 120, 0.8)";
+            ctx.beginPath(); ctx.arc(doorX + doorW - 14, doorY + doorH * 0.5, 5, 0, Math.PI * 2); ctx.fill();
+
+            // Shoe cabinet (left side)
+            const cabW = rw * 0.28;
+            const cabH = wallH * 0.32;
+            const cabX = rx + rw * 0.08;
+            const cabY = wallH - cabH;
+            ctx.fillStyle = "hsl(25, 30%, 48%)";
+            ctx.beginPath(); ctx.roundRect(cabX, cabY, cabW, cabH, 3); ctx.fill();
+            // Cabinet drawers
+            ctx.strokeStyle = "rgba(80, 55, 35, 0.3)";
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(cabX + 4, cabY + 4, cabW - 8, cabH * 0.45);
+            ctx.strokeRect(cabX + 4, cabY + cabH * 0.52, cabW - 8, cabH * 0.42);
+            // Drawer knobs
+            ctx.fillStyle = "rgba(180, 160, 110, 0.7)";
+            ctx.beginPath(); ctx.arc(cabX + cabW / 2, cabY + cabH * 0.25, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(cabX + cabW / 2, cabY + cabH * 0.73, 3, 0, Math.PI * 2); ctx.fill();
+
+            // Umbrella stand
+            const umbX = rx + rw * 0.44;
+            const umbY = wallH - wallH * 0.22;
+            ctx.fillStyle = "rgba(120, 110, 100, 0.6)";
+            ctx.beginPath();
+            ctx.moveTo(umbX, wallH); ctx.lineTo(umbX - 10, umbY + 10);
+            ctx.lineTo(umbX + 22, umbY + 10); ctx.lineTo(umbX + 12, wallH);
+            ctx.closePath(); ctx.fill();
+            // Umbrellas sticking out
+            ctx.strokeStyle = "hsl(210, 50%, 55%)";
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(umbX + 4, umbY + 10); ctx.lineTo(umbX, umbY - 15); ctx.stroke();
+            ctx.strokeStyle = "hsl(0, 50%, 55%)";
+            ctx.beginPath(); ctx.moveTo(umbX + 8, umbY + 10); ctx.lineTo(umbX + 12, umbY - 12); ctx.stroke();
+
+            // Small frosted window
+            const winW = rw * 0.18;
+            const winH = wallH * 0.25;
+            const winX = rx + rw * 0.46;
+            const winY = wallH * 0.15;
+            ctx.fillStyle = "rgba(220, 235, 245, 0.6)";
+            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 2); ctx.fill();
+            ctx.strokeStyle = "rgba(160, 150, 135, 0.6)";
+            ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 2); ctx.stroke();
+            // Frosted effect (horizontal lines)
+            ctx.strokeStyle = "rgba(200, 215, 225, 0.4)";
+            ctx.lineWidth = 1;
+            for (let ly = winY + 6; ly < winY + winH - 4; ly += 5) {
+                ctx.beginPath();
+                ctx.moveTo(winX + 4, ly); ctx.lineTo(winX + winW - 4, ly);
+                ctx.stroke();
+            }
+        }
+
+        function drawKitchenRoom(ctx, rx, rw, wallH) {
+            // Tile wall (white/light grid)
+            const tileS = 18;
+            const tileH = wallH * 0.45;
+            const tileY = wallH - tileH;
+            for (let ty = tileY; ty < wallH; ty += tileS) {
+                for (let tx = rx; tx < rx + rw; tx += tileS) {
+                    ctx.fillStyle = "rgba(240, 245, 248, 0.7)";
+                    ctx.fillRect(tx, ty, tileS - 1, tileS - 1);
+                }
+            }
+
+            // L-shape counter (bottom-left along wall)
+            const counterH = wallH * 0.25;
+            const counterY = wallH - counterH;
+            const counterW = rw * 0.55;
+            ctx.fillStyle = "hsl(30, 15%, 65%)";
+            ctx.fillRect(rx + rw * 0.05, counterY, counterW, counterH);
+            // Counter top
+            ctx.fillStyle = "rgba(230, 225, 215, 0.9)";
+            ctx.fillRect(rx + rw * 0.05, counterY, counterW, 6);
+            // Sink (oval on counter)
+            ctx.fillStyle = "rgba(200, 210, 220, 0.7)";
+            ctx.beginPath();
+            ctx.ellipse(rx + rw * 0.25, counterY + 3, 18, 8, 0, 0, Math.PI * 2);
+            ctx.fill();
+            // Faucet
+            ctx.strokeStyle = "rgba(180, 180, 185, 0.8)";
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(rx + rw * 0.25, counterY); ctx.lineTo(rx + rw * 0.25, counterY - 20);
+            ctx.quadraticCurveTo(rx + rw * 0.25 + 12, counterY - 22, rx + rw * 0.25 + 12, counterY - 10);
+            ctx.stroke();
+
+            // Refrigerator (right side, tall white box)
+            const fridgeW = rw * 0.14;
+            const fridgeH = wallH * 0.55;
+            const fridgeX = rx + rw * 0.78;
+            const fridgeY = wallH - fridgeH;
+            ctx.fillStyle = "rgba(240, 242, 245, 0.9)";
+            ctx.beginPath(); ctx.roundRect(fridgeX, fridgeY, fridgeW, fridgeH, 3); ctx.fill();
+            ctx.strokeStyle = "rgba(200, 200, 205, 0.6)";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(fridgeX, fridgeY, fridgeW, fridgeH);
+            // Fridge door line
+            ctx.beginPath();
+            ctx.moveTo(fridgeX, fridgeY + fridgeH * 0.38);
+            ctx.lineTo(fridgeX + fridgeW, fridgeY + fridgeH * 0.38);
+            ctx.stroke();
+            // Handle
+            ctx.fillStyle = "rgba(180, 180, 185, 0.7)";
+            ctx.fillRect(fridgeX + fridgeW - 8, fridgeY + fridgeH * 0.15, 3, 18);
+            ctx.fillRect(fridgeX + fridgeW - 8, fridgeY + fridgeH * 0.5, 3, 18);
+
+            // Hanging cabinets
+            const hangY = wallH * 0.08;
+            const hangH = wallH * 0.2;
+            for (let i = 0; i < 3; i++) {
+                const hx = rx + rw * 0.08 + i * (rw * 0.18);
+                ctx.fillStyle = "hsl(30, 20%, 55%)";
+                ctx.beginPath(); ctx.roundRect(hx, hangY, rw * 0.15, hangH, 3); ctx.fill();
+                ctx.strokeStyle = "rgba(100, 80, 60, 0.3)";
+                ctx.lineWidth = 1;
+                ctx.strokeRect(hx + 2, hangY + 2, rw * 0.15 - 4, hangH - 4);
+                // Knob
+                ctx.fillStyle = "rgba(180, 160, 110, 0.7)";
+                ctx.beginPath(); ctx.arc(hx + rw * 0.075, hangY + hangH - 10, 3, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // Small window
+            const winW = rw * 0.16;
+            const winH = wallH * 0.22;
+            const winX = rx + rw * 0.65;
+            const winY = wallH * 0.12;
+            const skyG = ctx.createLinearGradient(winX, winY, winX, winY + winH);
+            skyG.addColorStop(0, "#d4e8f8");
+            skyG.addColorStop(1, "#f0f6fa");
+            ctx.fillStyle = skyG;
+            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 2); ctx.fill();
+            ctx.strokeStyle = "rgba(160, 150, 135, 0.6)";
+            ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 2); ctx.stroke();
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(winX + winW / 2, winY); ctx.lineTo(winX + winW / 2, winY + winH);
+            ctx.stroke();
+        }
+
+        function drawLivingRoom(ctx, rx, rw, wallH) {
+            // Large window with curtains
+            const winW = rw * 0.35;
+            const winH = wallH * 0.52;
+            const winX = rx + rw * 0.5 - winW / 2;
+            const winY = wallH * 0.1;
+            // Window light glow
+            const wGlow = ctx.createRadialGradient(winX + winW / 2, winY + winH / 2, 10, winX + winW / 2, winY + winH / 2, winH);
+            wGlow.addColorStop(0, "rgba(255, 252, 240, 0.15)");
+            wGlow.addColorStop(1, "rgba(255, 252, 240, 0)");
+            ctx.fillStyle = wGlow;
+            ctx.beginPath(); ctx.arc(winX + winW / 2, winY + winH / 2, winH, 0, Math.PI * 2); ctx.fill();
+            // Sky
+            const skyG = ctx.createLinearGradient(winX, winY, winX, winY + winH);
+            skyG.addColorStop(0, "#d4e8f8");
+            skyG.addColorStop(0.6, "#e8f2fc");
+            skyG.addColorStop(1, "#f0f6fa");
+            ctx.fillStyle = skyG;
+            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 2); ctx.fill();
+            // Frame
+            ctx.strokeStyle = "rgba(160, 150, 135, 0.6)";
+            ctx.lineWidth = 6;
+            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 2); ctx.stroke();
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(winX + winW / 2, winY); ctx.lineTo(winX + winW / 2, winY + winH);
+            ctx.moveTo(winX, winY + winH / 2); ctx.lineTo(winX + winW, winY + winH / 2);
+            ctx.stroke();
+            // Window sill
+            ctx.fillStyle = "rgba(200, 195, 185, 0.7)";
+            ctx.beginPath(); ctx.roundRect(winX - 8, winY + winH - 2, winW + 16, 8, 2); ctx.fill();
+            // Curtains
+            const curtainColor = "rgba(200, 180, 155, 0.55)";
+            ctx.fillStyle = curtainColor;
+            ctx.beginPath();
+            ctx.moveTo(winX - 14, winY - 6);
+            ctx.quadraticCurveTo(winX - 40, winY + winH * 0.35, winX - 18, winY + winH + 4);
+            ctx.lineTo(winX + 6, winY + winH + 4);
+            ctx.quadraticCurveTo(winX - 18, winY + winH * 0.38, winX + 10, winY - 6);
+            ctx.closePath(); ctx.fill();
+            ctx.fillStyle = curtainColor;
+            ctx.beginPath();
+            ctx.moveTo(winX + winW + 14, winY - 6);
+            ctx.quadraticCurveTo(winX + winW + 40, winY + winH * 0.35, winX + winW + 18, winY + winH + 4);
+            ctx.lineTo(winX + winW - 6, winY + winH + 4);
+            ctx.quadraticCurveTo(winX + winW + 18, winY + winH * 0.38, winX + winW - 10, winY - 6);
+            ctx.closePath(); ctx.fill();
+            // Curtain rod
+            ctx.strokeStyle = "rgba(150, 140, 125, 0.55)";
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(winX - 24, winY - 8); ctx.lineTo(winX + winW + 24, winY - 8);
+            ctx.stroke();
+
+            // Pendant light
+            const lampX = rx + rw * 0.5;
+            ctx.strokeStyle = "rgba(80, 75, 70, 0.4)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(lampX, 0); ctx.lineTo(lampX, 40); ctx.stroke();
+            const shadeG = ctx.createLinearGradient(lampX - 28, 40, lampX + 28, 40);
+            shadeG.addColorStop(0, "rgba(240, 230, 210, 0.9)");
+            shadeG.addColorStop(0.5, "rgba(250, 245, 230, 0.95)");
+            shadeG.addColorStop(1, "rgba(235, 225, 205, 0.9)");
+            ctx.fillStyle = shadeG;
+            ctx.beginPath();
+            ctx.moveTo(lampX - 26, 58);
+            ctx.quadraticCurveTo(lampX - 28, 40, lampX, 37);
+            ctx.quadraticCurveTo(lampX + 28, 40, lampX + 26, 58);
+            ctx.closePath(); ctx.fill();
+            // Warm glow
+            const glow = ctx.createRadialGradient(lampX, 72, 5, lampX, 72, 130);
+            glow.addColorStop(0, "rgba(255, 245, 200, 0.22)");
+            glow.addColorStop(1, "rgba(255, 245, 200, 0)");
+            ctx.fillStyle = glow;
+            ctx.beginPath(); ctx.arc(lampX, 72, 130, 0, Math.PI * 2); ctx.fill();
+
+            // Sofa (rounded shape)
+            const sofaW = rw * 0.32;
+            const sofaH = wallH * 0.18;
+            const sofaX = rx + rw * 0.1;
+            const sofaY = wallH - sofaH - 5;
+            ctx.fillStyle = "hsl(25, 30%, 55%)";
+            ctx.beginPath(); ctx.roundRect(sofaX, sofaY, sofaW, sofaH, 12); ctx.fill();
+            // Sofa back
+            ctx.fillStyle = "hsl(25, 28%, 50%)";
+            ctx.beginPath(); ctx.roundRect(sofaX, sofaY - sofaH * 0.4, sofaW, sofaH * 0.5, 10); ctx.fill();
+            // Cushions
+            ctx.fillStyle = "hsl(30, 35%, 60%)";
+            ctx.beginPath(); ctx.roundRect(sofaX + 6, sofaY + 3, sofaW * 0.45 - 4, sofaH - 8, 6); ctx.fill();
+            ctx.beginPath(); ctx.roundRect(sofaX + sofaW * 0.48, sofaY + 3, sofaW * 0.45, sofaH - 8, 6); ctx.fill();
+
+            // TV stand + TV
+            const tvStandW = rw * 0.22;
+            const tvStandH = wallH * 0.1;
+            const tvStandX = rx + rw * 0.68;
+            const tvStandY = wallH - tvStandH;
+            ctx.fillStyle = "hsl(30, 15%, 48%)";
+            ctx.beginPath(); ctx.roundRect(tvStandX, tvStandY, tvStandW, tvStandH, 3); ctx.fill();
+            // TV
+            const tvW = tvStandW * 0.85;
+            const tvH = wallH * 0.25;
+            const tvX = tvStandX + (tvStandW - tvW) / 2;
+            const tvY = tvStandY - tvH;
+            ctx.fillStyle = "#1a1a1a";
+            ctx.beginPath(); ctx.roundRect(tvX, tvY, tvW, tvH, 3); ctx.fill();
+            // TV screen
+            ctx.fillStyle = "rgba(40, 60, 80, 0.8)";
+            ctx.fillRect(tvX + 4, tvY + 4, tvW - 8, tvH - 8);
+
+            // Rug (ellipse, warm color)
+            ctx.fillStyle = "rgba(180, 130, 90, 0.25)";
+            ctx.beginPath();
+            ctx.ellipse(rx + rw * 0.45, wallH + (height - wallH) * 0.4, rw * 0.25, (height - wallH) * 0.25, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Houseplant
+            const plantX = rx + rw * 0.88;
+            const plantY = wallH;
+            // Pot
+            ctx.fillStyle = "rgba(180, 120, 80, 0.6)";
+            ctx.beginPath();
+            ctx.moveTo(plantX - 10, plantY); ctx.lineTo(plantX - 14, plantY - 18);
+            ctx.lineTo(plantX + 14, plantY - 18); ctx.lineTo(plantX + 10, plantY);
+            ctx.closePath(); ctx.fill();
+            // Leaves
+            ctx.fillStyle = "rgba(80, 140, 60, 0.5)";
+            ctx.beginPath(); ctx.ellipse(plantX, plantY - 28, 14, 10, -0.3, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(plantX - 6, plantY - 36, 10, 8, 0.4, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(plantX + 8, plantY - 34, 11, 8, -0.5, 0, Math.PI * 2); ctx.fill();
+        }
+
+        function drawBathRoom(ctx, rx, rw, wallH) {
+            // Tile wall (light blue grid)
+            const tileS = 16;
+            for (let ty = wallH * 0.3; ty < wallH; ty += tileS) {
+                for (let tx = rx; tx < rx + rw; tx += tileS) {
+                    ctx.fillStyle = "rgba(210, 230, 240, 0.5)";
+                    ctx.fillRect(tx, ty, tileS - 1, tileS - 1);
+                }
+            }
+
+            // Bathtub (white ellipse with blue water)
+            const tubW = rw * 0.42;
+            const tubH = wallH * 0.2;
+            const tubX = rx + rw * 0.3;
+            const tubY = wallH - tubH - 5;
+            // Tub body
+            ctx.fillStyle = "rgba(245, 245, 248, 0.95)";
+            ctx.beginPath(); ctx.ellipse(tubX + tubW / 2, tubY + tubH / 2, tubW / 2, tubH / 2, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = "rgba(200, 200, 210, 0.6)";
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.ellipse(tubX + tubW / 2, tubY + tubH / 2, tubW / 2, tubH / 2, 0, 0, Math.PI * 2); ctx.stroke();
+            // Water surface
+            ctx.fillStyle = "rgba(150, 200, 230, 0.45)";
+            ctx.beginPath(); ctx.ellipse(tubX + tubW / 2, tubY + tubH / 2 + 4, tubW / 2 - 6, tubH / 2 - 6, 0, 0, Math.PI * 2); ctx.fill();
+
+            // Shower head (on wall)
+            const shX = rx + rw * 0.58;
+            const shY = wallH * 0.2;
+            ctx.strokeStyle = "rgba(180, 180, 185, 0.8)";
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(shX, shY); ctx.lineTo(shX, shY + wallH * 0.15);
+            ctx.stroke();
+            // Shower head disc
+            ctx.fillStyle = "rgba(190, 190, 195, 0.8)";
+            ctx.beginPath(); ctx.ellipse(shX, shY + wallH * 0.15 + 5, 10, 4, 0, 0, Math.PI * 2); ctx.fill();
+
+            // Mirror (wall-mounted rectangle)
+            const mirW = rw * 0.15;
+            const mirH = wallH * 0.25;
+            const mirX = rx + rw * 0.12;
+            const mirY = wallH * 0.15;
+            ctx.fillStyle = "rgba(220, 235, 245, 0.7)";
+            ctx.beginPath(); ctx.roundRect(mirX, mirY, mirW, mirH, 4); ctx.fill();
+            ctx.strokeStyle = "rgba(180, 180, 185, 0.6)";
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.roundRect(mirX, mirY, mirW, mirH, 4); ctx.stroke();
+            // Mirror reflection highlight
+            ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
+            ctx.fillRect(mirX + 4, mirY + 4, mirW * 0.3, mirH - 8);
+
+            // Steam effect (semi-transparent white circles)
+            const t = Date.now() * 0.001;
+            ctx.save();
+            ctx.globalAlpha = 0.15;
+            for (let i = 0; i < 5; i++) {
+                const sx = tubX + tubW * 0.2 + i * tubW * 0.15;
+                const sy = tubY - 10 - Math.sin(t * 0.8 + i * 1.2) * 15;
+                const sr = 8 + Math.sin(t * 0.6 + i) * 3;
+                ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+                ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2); ctx.fill();
+            }
+            ctx.restore();
+
+            // Tile floor (light blue checker)
+            const ftileS = 20;
+            for (let ty = wallH; ty < height; ty += ftileS) {
+                for (let tx = rx; tx < rx + rw; tx += ftileS) {
+                    const isLight = ((Math.floor((tx - rx) / ftileS) + Math.floor((ty - wallH) / ftileS)) % 2 === 0);
+                    ctx.fillStyle = isLight ? "rgba(210, 230, 240, 0.4)" : "rgba(190, 215, 228, 0.35)";
+                    ctx.fillRect(tx, ty, ftileS, ftileS);
+                }
+            }
+        }
+
+        function drawBedroomRoom(ctx, rx, rw, wallH) {
+            // Starry night window
+            const winW = rw * 0.25;
+            const winH = wallH * 0.35;
+            const winX = rx + rw * 0.6;
+            const winY = wallH * 0.12;
+            // Dark sky
+            const nightG = ctx.createLinearGradient(winX, winY, winX, winY + winH);
+            nightG.addColorStop(0, "#1a1a3a");
+            nightG.addColorStop(1, "#2a2a50");
+            ctx.fillStyle = nightG;
+            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 2); ctx.fill();
+            // Stars
+            const starSeed = 42;
+            for (let i = 0; i < 12; i++) {
+                const sx = winX + 4 + ((i * 37 + starSeed) % (Math.floor(winW) - 8));
+                const sy = winY + 4 + ((i * 23 + starSeed * 2) % (Math.floor(winH) - 8));
+                const t = Date.now() * 0.001;
+                const brightness = 0.5 + Math.sin(t * 1.5 + i) * 0.3;
+                ctx.fillStyle = `rgba(255, 255, 220, ${brightness})`;
+                ctx.beginPath(); ctx.arc(sx, sy, 1.5, 0, Math.PI * 2); ctx.fill();
+            }
+            // Moon
+            ctx.fillStyle = "rgba(255, 250, 220, 0.8)";
+            ctx.beginPath(); ctx.arc(winX + winW * 0.7, winY + winH * 0.25, 8, 0, Math.PI * 2); ctx.fill();
+            // Window frame
+            ctx.strokeStyle = "rgba(160, 150, 135, 0.6)";
+            ctx.lineWidth = 5;
+            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 2); ctx.stroke();
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(winX + winW / 2, winY); ctx.lineTo(winX + winW / 2, winY + winH);
+            ctx.stroke();
+
+            // Warm ambient glow (indirect lighting)
+            const glowX = rx + rw * 0.2;
+            const glow = ctx.createRadialGradient(glowX, wallH * 0.7, 5, glowX, wallH * 0.7, 100);
+            glow.addColorStop(0, "rgba(255, 230, 180, 0.12)");
+            glow.addColorStop(1, "rgba(255, 230, 180, 0)");
+            ctx.fillStyle = glow;
+            ctx.beginPath(); ctx.arc(glowX, wallH * 0.7, 100, 0, Math.PI * 2); ctx.fill();
+
+            // Bed (large rectangle with bedding)
+            const bedW = rw * 0.42;
+            const bedH = wallH * 0.22;
+            const bedX = rx + rw * 0.12;
+            const bedY = wallH - bedH - 5;
+            // Bed frame
+            ctx.fillStyle = "hsl(25, 25%, 45%)";
+            ctx.beginPath(); ctx.roundRect(bedX - 3, bedY - 3, bedW + 6, bedH + 6, 5); ctx.fill();
+            // Mattress
+            ctx.fillStyle = "rgba(245, 240, 230, 0.9)";
+            ctx.beginPath(); ctx.roundRect(bedX, bedY, bedW, bedH, 3); ctx.fill();
+            // Blanket
+            ctx.fillStyle = "hsl(220, 25%, 65%)";
+            ctx.beginPath(); ctx.roundRect(bedX + 2, bedY + bedH * 0.25, bedW - 4, bedH * 0.72, 4); ctx.fill();
+            // Pillow
+            ctx.fillStyle = "rgba(250, 248, 240, 0.95)";
+            ctx.beginPath(); ctx.ellipse(bedX + bedW * 0.2, bedY + bedH * 0.15, bedW * 0.14, bedH * 0.12, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(bedX + bedW * 0.5, bedY + bedH * 0.15, bedW * 0.14, bedH * 0.12, 0, 0, Math.PI * 2); ctx.fill();
+
+            // Headboard
+            ctx.fillStyle = "hsl(25, 22%, 40%)";
+            ctx.beginPath(); ctx.roundRect(bedX - 3, bedY - wallH * 0.12, bedW + 6, wallH * 0.1, 4); ctx.fill();
+
+            // Side table + lamp
+            const stX = rx + rw * 0.58;
+            const stW = rw * 0.1;
+            const stH = wallH * 0.12;
+            const stY = wallH - stH;
+            ctx.fillStyle = "hsl(25, 20%, 50%)";
+            ctx.beginPath(); ctx.roundRect(stX, stY, stW, stH, 2); ctx.fill();
+            // Lamp
+            ctx.fillStyle = "rgba(200, 190, 170, 0.8)";
+            ctx.fillRect(stX + stW / 2 - 2, stY - 20, 4, 20);
+            // Lampshade
+            ctx.fillStyle = "rgba(255, 240, 210, 0.8)";
+            ctx.beginPath();
+            ctx.moveTo(stX + stW / 2 - 12, stY - 20);
+            ctx.lineTo(stX + stW / 2 - 8, stY - 35);
+            ctx.lineTo(stX + stW / 2 + 8, stY - 35);
+            ctx.lineTo(stX + stW / 2 + 12, stY - 20);
+            ctx.closePath(); ctx.fill();
+            // Lamp glow
+            const lampGlow = ctx.createRadialGradient(stX + stW / 2, stY - 25, 3, stX + stW / 2, stY - 25, 40);
+            lampGlow.addColorStop(0, "rgba(255, 240, 200, 0.2)");
+            lampGlow.addColorStop(1, "rgba(255, 240, 200, 0)");
+            ctx.fillStyle = lampGlow;
+            ctx.beginPath(); ctx.arc(stX + stW / 2, stY - 25, 40, 0, Math.PI * 2); ctx.fill();
+
+            // Closet (tall box, right side)
+            const clW = rw * 0.16;
+            const clH = wallH * 0.58;
+            const clX = rx + rw * 0.8;
+            const clY = wallH - clH;
+            ctx.fillStyle = "hsl(30, 18%, 52%)";
+            ctx.beginPath(); ctx.roundRect(clX, clY, clW, clH, 3); ctx.fill();
+            // Closet doors
+            ctx.strokeStyle = "rgba(90, 70, 50, 0.3)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(clX + clW / 2, clY + 3); ctx.lineTo(clX + clW / 2, clY + clH - 3);
+            ctx.stroke();
+            // Door knobs
+            ctx.fillStyle = "rgba(180, 160, 110, 0.7)";
+            ctx.beginPath(); ctx.arc(clX + clW / 2 - 6, clY + clH * 0.5, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(clX + clW / 2 + 6, clY + clH * 0.5, 3, 0, Math.PI * 2); ctx.fill();
+        }
+
+        function drawMarriageEffects(ctx, rx, rw, wallH, t) {
+            // Floating heart particles
+            ctx.save();
+            ctx.globalAlpha = 0.35;
+            for (let i = 0; i < 8; i++) {
+                const hx = rx + rw * 0.15 + (i * rw * 0.1);
+                const hy = wallH * 0.2 + Math.sin(t * 0.7 + i * 0.8) * 25;
+                const hs = 6 + Math.sin(t * 0.5 + i * 1.1) * 2;
+                ctx.fillStyle = `hsla(340, 60%, 65%, ${0.4 + Math.sin(t + i) * 0.2})`;
+                // Draw heart shape
+                ctx.beginPath();
+                ctx.moveTo(hx, hy + hs * 0.3);
+                ctx.bezierCurveTo(hx, hy, hx - hs, hy, hx - hs, hy + hs * 0.3);
+                ctx.bezierCurveTo(hx - hs, hy + hs * 0.6, hx, hy + hs, hx, hy + hs * 1.1);
+                ctx.bezierCurveTo(hx, hy + hs, hx + hs, hy + hs * 0.6, hx + hs, hy + hs * 0.3);
+                ctx.bezierCurveTo(hx + hs, hy, hx, hy, hx, hy + hs * 0.3);
+                ctx.fill();
+            }
+            ctx.restore();
+
+            // Warm golden glow
+            const gx = rx + rw * 0.5;
+            const gy = wallH * 0.5;
+            const warmGlow = ctx.createRadialGradient(gx, gy, 10, gx, gy, rw * 0.4);
+            warmGlow.addColorStop(0, "rgba(255, 220, 180, 0.1)");
+            warmGlow.addColorStop(1, "rgba(255, 220, 180, 0)");
+            ctx.fillStyle = warmGlow;
+            ctx.beginPath(); ctx.arc(gx, gy, rw * 0.4, 0, Math.PI * 2); ctx.fill();
+        }
+
         // Child outdoor background
         let childBgClouds = null;
         let childBgTrees = null;
@@ -5583,8 +6242,54 @@
               labels: { adventurous: 3, curious: 2, optimistic: 1 } },
             { id: "entertainment", name: "娯楽", nameEn: "Entertainment", keyboardStyle: "pachinko-bells",
               color: "hsl(350, 75%, 55%)", worldFraction: [0.80, 0.94],
-              labels: { social: 3, expressive: 2, optimistic: 1 } }
+              labels: { adventurous: 3, optimistic: 2, active: 1 } }
         ];
+
+        // ======== THIRTIES PHASE (30代フェーズ — 家の中の間取り) ========
+        const THIRTIES_ACTIVITIES = [
+            { id: "genkan", name: "玄関", nameEn: "Entrance", keyboardStyle: "piano-gentle",
+              color: "hsl(30, 40%, 60%)", worldFraction: [0.03, 0.15],
+              labels: { social: 3, cautious: 2, patient: 1 } },
+            { id: "kitchen", name: "キッチン", nameEn: "Kitchen", keyboardStyle: "organ-funky",
+              color: "hsl(45, 55%, 62%)", worldFraction: [0.19, 0.33],
+              labels: { creative: 3, patient: 2, focused: 1 } },
+            { id: "living", name: "リビング", nameEn: "Living Room", keyboardStyle: "piano-chord",
+              color: "hsl(25, 45%, 58%)", worldFraction: [0.38, 0.54],
+              labels: { social: 3, expressive: 2, optimistic: 1 } },
+            { id: "bath", name: "お風呂", nameEn: "Bath", keyboardStyle: "piano-sparse",
+              color: "hsl(200, 50%, 65%)", worldFraction: [0.58, 0.72],
+              labels: { calm: 3, patient: 2, resilient: 1 } },
+            { id: "bedroom", name: "寝室", nameEn: "Bedroom", keyboardStyle: "piano-gentle",
+              color: "hsl(260, 35%, 60%)", worldFraction: [0.78, 0.92],
+              labels: { calm: 3, focused: 2, resilient: 1 } },
+        ];
+
+        let thirtiesHasMarriage = false;
+
+        function checkMarriageCondition() {
+            const labelSums = {};
+            selectedToys.forEach(t => {
+                if (t.labels) Object.entries(t.labels).forEach(([k, v]) => {
+                    labelSums[k] = (labelSums[k] || 0) + v;
+                });
+            });
+            return (labelSums.social || 0) >= 8 && (labelSums.expressive || 0) >= 5;
+        }
+
+        function getThirtiesActivities(hasMarriage) {
+            if (!hasMarriage) return THIRTIES_ACTIVITIES;
+            // With marriage: redistribute 6 rooms evenly
+            return [
+                { ...THIRTIES_ACTIVITIES[0], worldFraction: [0.02, 0.12] },  // genkan
+                { ...THIRTIES_ACTIVITIES[1], worldFraction: [0.15, 0.27] },  // kitchen
+                { ...THIRTIES_ACTIVITIES[2], worldFraction: [0.30, 0.42] },  // living
+                { id: "marriage", name: "結婚", nameEn: "Marriage", keyboardStyle: "piano-chord",
+                  color: "hsl(340, 60%, 65%)", worldFraction: [0.45, 0.57],
+                  labels: { social: 5, expressive: 4, optimistic: 3 } },
+                { ...THIRTIES_ACTIVITIES[3], worldFraction: [0.60, 0.72] },  // bath
+                { ...THIRTIES_ACTIVITIES[4], worldFraction: [0.78, 0.92] },  // bedroom
+            ];
+        }
 
         let adultBuildingSeeds = [];
 
@@ -6538,15 +7243,15 @@
             ripple.style.left = (sx - 40) + 'px';
             ripple.style.top = (sy - 40) + 'px';
             document.body.appendChild(ripple);
-            setTimeout(() => ripple.remove(), 2000);
-            // Remove the picked drop so it can't be picked again
-            const idx = toneDrops.indexOf(clickedDrop);
-            if (idx >= 0) {
-                if (clickedDrop.keyboardSynth) clickedDrop.keyboardSynth.dispose();
-                if (clickedDrop.keyboardEffects) clickedDrop.keyboardEffects.forEach(e => e.dispose());
-                toneDrops.splice(idx, 1);
-            }
-            buildScoreHud();
+            // Dispose all drops and transition to THIRTIES
+            disposeToneDrops();
+            toneDrops = [];
+            fadeScreenTo(1, 1400);
+            setTimeout(() => {
+                ripple.remove();
+                startThirtiesPhase();
+                fadeScreenTo(0, 1300);
+            }, 1400);
         }
 
         // ======== ADULT → UNIVERSITY transition ========
@@ -6555,7 +7260,8 @@
             if (clickedDrop.activityId !== "university" &&
                 clickedDrop.activityId !== "parttime" &&
                 clickedDrop.activityId !== "jobhunt" &&
-                clickedDrop.activityId !== "travel") return;
+                clickedDrop.activityId !== "travel" &&
+                clickedDrop.activityId !== "entertainment") return;
             if (adultTransitionLock) return;
             playTitleToneConfirmSound();
             addVolumeTrack('keyboard');
@@ -6615,6 +7321,14 @@
             } else if (clickedDrop.activityId === "jobhunt") {
                 setTimeout(() => {
                     startJobHuntPhase();
+                    fadeScreenTo(0, 1300);
+                    ripple.remove();
+                    adultTransitionLock = false;
+                }, 1400);
+            } else if (clickedDrop.activityId === "entertainment") {
+                setTimeout(() => {
+                    currentScene = SCENE.ENTERTAINMENT;
+                    startEntertainmentPhase();
                     fadeScreenTo(0, 1300);
                     ripple.remove();
                     adultTransitionLock = false;
@@ -8731,6 +9445,1001 @@
             }
         }
 
+        // ======== ENTERTAINMENT PHASE (スロットマシン) ========
+        function startEntertainmentPhase() {
+            slotMachine.active = true;
+            slotMachine.phase = "spinning";
+            slotMachine.startTime = Date.now();
+            slotMachine.resultTimer = 0;
+            slotMachine.resultTier = null;
+            slotMachine.particles = [];
+            slotMachine.stopButtons = [];
+            slotMachine.round = 1;
+            slotMachine.totalLabels = {};
+
+            initSlotReels();
+
+            // Init carry layers so all inherited sounds play during slot
+            initCarryHatLayer();
+            initCarrySnareLayer();
+            initCarryCymbalLayer();
+            initCarryBassLayer();
+            initCarryKeyboardLayer();
+            startBaseGroove();
+
+            playSlotStartChime();
+        }
+
+        function initSlotReels() {
+            const speeds = [2.0, 2.4, 2.8];
+            for (let r = 0; r < 3; r++) {
+                const syms = [];
+                for (let i = 0; i < 20; i++) {
+                    syms.push(SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)]);
+                }
+                slotMachine.reels[r] = {
+                    symbols: syms,
+                    offset: 0,
+                    speed: speeds[r],
+                    stopped: false,
+                    finalIndex: 0,
+                    targetOffset: -1,
+                    startOffset: 0,
+                    flashTimer: 0,
+                };
+            }
+        }
+
+        function playSlotStartChime() {
+            try {
+                const synth = new Tone.Synth({ oscillator: { type: "square" }, envelope: { attack: 0.01, decay: 0.15, sustain: 0, release: 0.1 }, volume: -18 }).toDestination();
+                const notes = ["C5", "E5", "G5", "C6"];
+                let t = Tone.now();
+                notes.forEach((n, i) => { synth.triggerAttackRelease(n, "16n", t + i * 0.1); });
+                setTimeout(() => synth.dispose(), 2000);
+            } catch (e) { /* ignore */ }
+        }
+
+        function stopChime() {
+            try {
+                // Metallic "gakon" clank — low hit + high ring
+                const hit = new Tone.Synth({ oscillator: { type: "square" }, envelope: { attack: 0.001, decay: 0.08, sustain: 0, release: 0.05 }, volume: -8 }).toDestination();
+                hit.triggerAttackRelease("G3", "32n");
+                const ring = new Tone.Synth({ oscillator: { type: "triangle" }, envelope: { attack: 0.001, decay: 0.15, sustain: 0, release: 0.1 }, volume: -12 }).toDestination();
+                ring.triggerAttackRelease("E5", "16n", Tone.now() + 0.02);
+                setTimeout(() => { hit.dispose(); ring.dispose(); }, 1000);
+            } catch (e) { /* ignore */ }
+        }
+
+        function winFanfare(tier) {
+            try {
+                const synth = new Tone.Synth({ oscillator: { type: "square" }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 }, volume: -14 }).toDestination();
+                let notes = [];
+                if (tier === "jackpot") notes = ["C5", "E5", "G5", "C6"];
+                else if (tier === "big") notes = ["C5", "E5", "G5"];
+                else if (tier === "small") notes = ["C5", "E5"];
+                else notes = ["E4", "C4"];
+                let t = Tone.now();
+                notes.forEach((n, i) => { synth.triggerAttackRelease(n, "8n", t + i * 0.15); });
+                setTimeout(() => synth.dispose(), 3000);
+            } catch (e) { /* ignore */ }
+        }
+
+        function slotRoundRect(ctx, x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+            ctx.lineTo(x + r, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.closePath();
+        }
+
+        function drawGolden7(ctx, cx, cy, size) {
+            ctx.save();
+            const s = size;
+            const t = Date.now() * 0.003;
+
+            // === Background golden aura (radiating glow) ===
+            const auraSize = s * (1.1 + Math.sin(t * 2) * 0.08);
+            const aura = ctx.createRadialGradient(cx, cy, s * 0.15, cx, cy, auraSize);
+            aura.addColorStop(0, "rgba(255,215,0,0.35)");
+            aura.addColorStop(0.4, "rgba(255,180,0,0.15)");
+            aura.addColorStop(0.7, "rgba(255,150,0,0.06)");
+            aura.addColorStop(1, "rgba(255,215,0,0)");
+            ctx.fillStyle = aura;
+            ctx.beginPath();
+            ctx.arc(cx, cy, auraSize, 0, Math.PI * 2);
+            ctx.fill();
+
+            // === Rotating golden ring ===
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(t * 0.8);
+            for (let i = 0; i < 8; i++) {
+                const angle = (i / 8) * Math.PI * 2;
+                const rx = Math.cos(angle) * s * 0.62;
+                const ry = Math.sin(angle) * s * 0.62;
+                const dotAlpha = 0.25 + Math.sin(t * 5 + i * 1.2) * 0.2;
+                ctx.globalAlpha = dotAlpha;
+                ctx.fillStyle = "#FFD700";
+                ctx.shadowColor = "#FFD700";
+                ctx.shadowBlur = 6;
+                ctx.beginPath();
+                ctx.arc(rx, ry, s * 0.035, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.restore();
+
+            // === 7 shape path ===
+            function make7Path() {
+                ctx.beginPath();
+                const lw = s * 0.22;
+                ctx.moveTo(cx - s * 0.38, cy - s * 0.45);
+                ctx.lineTo(cx + s * 0.42, cy - s * 0.45);
+                ctx.lineTo(cx + s * 0.42, cy - s * 0.28);
+                ctx.lineTo(cx + s * 0.02 + lw * 0.5, cy + s * 0.48);
+                ctx.lineTo(cx + s * 0.02 - lw * 0.5, cy + s * 0.48);
+                ctx.lineTo(cx + s * 0.42 - lw, cy - s * 0.28);
+                ctx.lineTo(cx - s * 0.38 + lw * 0.3, cy - s * 0.28);
+                ctx.closePath();
+            }
+
+            // Gold outline (thick, behind main shape)
+            ctx.save();
+            ctx.shadowColor = "#FFD700";
+            ctx.shadowBlur = s * 0.4;
+            make7Path();
+            ctx.strokeStyle = "#FFD700";
+            ctx.lineWidth = s * 0.08;
+            ctx.lineJoin = "round";
+            ctx.stroke();
+            ctx.restore();
+
+            // Main body: red gradient
+            ctx.save();
+            ctx.shadowColor = "#FF2200";
+            ctx.shadowBlur = s * 0.3;
+            make7Path();
+            const bodyGrd = ctx.createLinearGradient(cx - s * 0.4, cy - s * 0.5, cx + s * 0.3, cy + s * 0.5);
+            bodyGrd.addColorStop(0, "#FF4444");
+            bodyGrd.addColorStop(0.25, "#EE1122");
+            bodyGrd.addColorStop(0.5, "#FF3333");
+            bodyGrd.addColorStop(0.75, "#CC0011");
+            bodyGrd.addColorStop(1, "#DD2222");
+            ctx.fillStyle = bodyGrd;
+            ctx.fill();
+            ctx.restore();
+
+            // Gold edge trim
+            ctx.save();
+            make7Path();
+            ctx.strokeStyle = "#FFD700";
+            ctx.lineWidth = 2;
+            ctx.lineJoin = "round";
+            ctx.shadowColor = "#FFD700";
+            ctx.shadowBlur = 8;
+            ctx.stroke();
+            ctx.restore();
+
+            // Inner shine highlight (top bar reflection)
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(cx - s * 0.30, cy - s * 0.42);
+            ctx.lineTo(cx + s * 0.34, cy - s * 0.42);
+            ctx.lineTo(cx + s * 0.34, cy - s * 0.36);
+            ctx.lineTo(cx - s * 0.30, cy - s * 0.36);
+            ctx.closePath();
+            const shineGrd = ctx.createLinearGradient(cx, cy - s * 0.45, cx, cy - s * 0.32);
+            shineGrd.addColorStop(0, "rgba(255,240,200,0.7)");
+            shineGrd.addColorStop(1, "rgba(255,200,100,0.0)");
+            ctx.fillStyle = shineGrd;
+            ctx.fill();
+            ctx.restore();
+
+            // === Sparkle stars around the 7 (golden) ===
+            const sparkles = [
+                [-0.52, -0.55], [0.55, -0.55], [0.55, -0.18],
+                [-0.15, 0.58], [0.20, 0.58], [-0.50, -0.18],
+                [0.0, -0.62], [0.50, 0.20], [-0.45, 0.30],
+            ];
+            for (let i = 0; i < sparkles.length; i++) {
+                const sp = sparkles[i];
+                const alpha = (Math.sin(t * 5 + i * 1.3) * 0.5 + 0.5);
+                if (alpha < 0.2) continue;
+                const sz = s * 0.07 * (0.5 + alpha * 0.5);
+                const px = cx + sp[0] * s, py = cy + sp[1] * s;
+
+                ctx.save();
+                ctx.globalAlpha = alpha * 0.95;
+                ctx.fillStyle = "#FFD700";
+                ctx.shadowColor = "#FFD700";
+                ctx.shadowBlur = 6;
+                // 4-point cross star
+                ctx.beginPath();
+                ctx.moveTo(px, py - sz);
+                ctx.lineTo(px + sz * 0.25, py - sz * 0.25);
+                ctx.lineTo(px + sz, py);
+                ctx.lineTo(px + sz * 0.25, py + sz * 0.25);
+                ctx.lineTo(px, py + sz);
+                ctx.lineTo(px - sz * 0.25, py + sz * 0.25);
+                ctx.lineTo(px - sz, py);
+                ctx.lineTo(px - sz * 0.25, py - sz * 0.25);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+            }
+
+            ctx.restore();
+        }
+
+        function drawSlotMachineScene(ctx) {
+            const w = width, h = height;
+            const t = Date.now() * 0.001;
+
+            // === BACKGROUND: Rich gradient with animated sparkles ===
+            const bgGrad = ctx.createLinearGradient(0, 0, 0, h);
+            bgGrad.addColorStop(0, "#1a0533");
+            bgGrad.addColorStop(0.3, "#2d1155");
+            bgGrad.addColorStop(0.6, "#1a0a3a");
+            bgGrad.addColorStop(1, "#0d0620");
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(0, 0, w, h);
+
+            // Animated light rays from center
+            ctx.save();
+            ctx.globalAlpha = 0.06;
+            const rayCount = 12;
+            for (let i = 0; i < rayCount; i++) {
+                const angle = (i / rayCount) * Math.PI * 2 + t * 0.15;
+                ctx.fillStyle = i % 2 === 0 ? "#FFD700" : "#FF44AA";
+                ctx.beginPath();
+                ctx.moveTo(w / 2, h * 0.35);
+                ctx.lineTo(w / 2 + Math.cos(angle) * w, h * 0.35 + Math.sin(angle) * w);
+                ctx.lineTo(w / 2 + Math.cos(angle + 0.12) * w, h * 0.35 + Math.sin(angle + 0.12) * w);
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.restore();
+
+            // Floating sparkle dots
+            ctx.save();
+            for (let i = 0; i < 30; i++) {
+                const sx = (Math.sin(t * 0.7 + i * 3.7) * 0.5 + 0.5) * w;
+                const sy = (Math.cos(t * 0.5 + i * 2.3) * 0.5 + 0.5) * h;
+                const sparkleAlpha = (Math.sin(t * 3 + i * 1.1) * 0.5 + 0.5) * 0.6;
+                const sparkleSize = 1.5 + Math.sin(t * 2 + i) * 1;
+                ctx.globalAlpha = sparkleAlpha;
+                ctx.fillStyle = i % 3 === 0 ? "#FFD700" : (i % 3 === 1 ? "#FF66AA" : "#88DDFF");
+                ctx.beginPath();
+                ctx.arc(sx, sy, sparkleSize, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.restore();
+
+            // === NEON FRAME with double-line glow ===
+            ctx.save();
+            ctx.shadowColor = "#FF44CC";
+            ctx.shadowBlur = 18;
+            ctx.strokeStyle = "#FF66DD";
+            ctx.lineWidth = 2;
+            slotRoundRect(ctx, 12, 12, w - 24, h - 24, 18);
+            ctx.stroke();
+            ctx.shadowColor = "#FFD700";
+            ctx.shadowBlur = 12;
+            ctx.strokeStyle = "rgba(255,215,0,0.5)";
+            ctx.lineWidth = 1;
+            slotRoundRect(ctx, 18, 18, w - 36, h - 36, 14);
+            ctx.stroke();
+            ctx.restore();
+
+            // === TITLE: Flashy marquee style ===
+            ctx.save();
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            const titleY = h * 0.07;
+            const titleSize = Math.min(34, w * 0.055);
+
+            // Title glow layers
+            ctx.shadowColor = "#FF44CC";
+            ctx.shadowBlur = 25 + Math.sin(t * 4) * 10;
+            ctx.fillStyle = "#FF88DD";
+            ctx.font = `900 ${titleSize}px 'Zen Maru Gothic', sans-serif`;
+            ctx.fillText("LUCKY SLOT", w / 2, titleY);
+            ctx.shadowColor = "#FFD700";
+            ctx.shadowBlur = 15;
+            ctx.fillStyle = "#FFD700";
+            ctx.fillText("LUCKY SLOT", w / 2, titleY);
+
+            // Subtitle
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = "rgba(255,200,255,0.6)";
+            ctx.font = `500 ${Math.min(13, w * 0.022)}px 'Zen Maru Gothic', sans-serif`;
+            ctx.fillText("- PUSH STOP TO WIN -", w / 2, titleY + titleSize * 0.7);
+            ctx.restore();
+
+            // === SLOT CABINET ===
+            const cabW = Math.min(w * 0.82, 600);
+            const cabH = h * 0.48;
+            const cabX = (w - cabW) / 2;
+            const cabY = h * 0.155;
+
+            // Cabinet outer shell — metallic gradient
+            ctx.save();
+            const shellGrad = ctx.createLinearGradient(cabX, cabY, cabX, cabY + cabH);
+            shellGrad.addColorStop(0, "#5a2d82");
+            shellGrad.addColorStop(0.15, "#3d1a5e");
+            shellGrad.addColorStop(0.5, "#2a1045");
+            shellGrad.addColorStop(0.85, "#3d1a5e");
+            shellGrad.addColorStop(1, "#5a2d82");
+            ctx.fillStyle = shellGrad;
+            ctx.shadowColor = "rgba(160, 60, 220, 0.5)";
+            ctx.shadowBlur = 30;
+            slotRoundRect(ctx, cabX - 8, cabY - 8, cabW + 16, cabH + 16, 20);
+            ctx.fill();
+            ctx.restore();
+
+            // Cabinet gold trim
+            ctx.save();
+            ctx.strokeStyle = "#FFD700";
+            ctx.lineWidth = 2.5;
+            ctx.shadowColor = "#FFD700";
+            ctx.shadowBlur = 8;
+            slotRoundRect(ctx, cabX - 8, cabY - 8, cabW + 16, cabH + 16, 20);
+            ctx.stroke();
+            ctx.restore();
+
+            // Cabinet inner face
+            const innerGrad = ctx.createLinearGradient(cabX, cabY, cabX, cabY + cabH);
+            innerGrad.addColorStop(0, "#1e0e35");
+            innerGrad.addColorStop(0.5, "#150a28");
+            innerGrad.addColorStop(1, "#1e0e35");
+            ctx.fillStyle = innerGrad;
+            slotRoundRect(ctx, cabX, cabY, cabW, cabH, 14);
+            ctx.fill();
+
+            // Decorative corner gems
+            const gemPositions = [
+                [cabX - 4, cabY - 4], [cabX + cabW + 4, cabY - 4],
+                [cabX - 4, cabY + cabH + 4], [cabX + cabW + 4, cabY + cabH + 4]
+            ];
+            gemPositions.forEach(([gx, gy]) => {
+                ctx.save();
+                ctx.shadowColor = "#FFD700";
+                ctx.shadowBlur = 10 + Math.sin(t * 3) * 4;
+                ctx.fillStyle = "#FFD700";
+                ctx.beginPath();
+                ctx.arc(gx, gy, 5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = "#FFEE88";
+                ctx.beginPath();
+                ctx.arc(gx, gy, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            });
+
+            // === PAYLINE indicator: center arrows ===
+            const reelGap = Math.min(12, cabW * 0.02);
+            const reelInnerPad = Math.min(16, cabW * 0.03);
+            const totalReelArea = cabW - reelInnerPad * 2;
+            const reelW = (totalReelArea - reelGap * 2) / 3;
+            const reelH = cabH - 30;
+            const reelY = cabY + 15;
+            const symbolH = reelH / 3;
+
+            // Left arrow
+            ctx.save();
+            ctx.fillStyle = "#FF4488";
+            ctx.shadowColor = "#FF4488";
+            ctx.shadowBlur = 8;
+            const arrowY = reelY + symbolH + symbolH / 2;
+            const arrowSize = 10;
+            ctx.beginPath();
+            ctx.moveTo(cabX - 2, arrowY);
+            ctx.lineTo(cabX + arrowSize + 4, arrowY - arrowSize);
+            ctx.lineTo(cabX + arrowSize + 4, arrowY + arrowSize);
+            ctx.closePath();
+            ctx.fill();
+            // Right arrow
+            ctx.beginPath();
+            ctx.moveTo(cabX + cabW + 2, arrowY);
+            ctx.lineTo(cabX + cabW - arrowSize - 4, arrowY - arrowSize);
+            ctx.lineTo(cabX + cabW - arrowSize - 4, arrowY + arrowSize);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+
+            slotMachine.stopButtons = [];
+
+            for (let r = 0; r < 3; r++) {
+                const reel = slotMachine.reels[r];
+                const reelX = cabX + reelInnerPad + r * (reelW + reelGap);
+
+                // Reel window — deep black with subtle inner border
+                ctx.save();
+                ctx.fillStyle = "#08050F";
+                slotRoundRect(ctx, reelX, reelY, reelW, reelH, 8);
+                ctx.fill();
+                // Inner border glow
+                ctx.strokeStyle = "rgba(160,100,220,0.3)";
+                ctx.lineWidth = 1;
+                slotRoundRect(ctx, reelX, reelY, reelW, reelH, 8);
+                ctx.stroke();
+                ctx.restore();
+
+                // === STOP flash overlay (ピコン!) ===
+                if (reel.flashTimer > 0) {
+                    const elapsed = Date.now() - reel.flashTimer;
+                    if (elapsed < 400) {
+                        const flashAlpha = (1 - elapsed / 400) * 0.7;
+                        ctx.save();
+                        // White flash over entire reel
+                        ctx.globalAlpha = flashAlpha;
+                        ctx.fillStyle = "#FFFFFF";
+                        slotRoundRect(ctx, reelX, reelY, reelW, reelH, 8);
+                        ctx.fill();
+                        // Neon border flash
+                        ctx.globalAlpha = flashAlpha * 1.3;
+                        ctx.shadowColor = "#88EEFF";
+                        ctx.shadowBlur = 25 * (1 - elapsed / 400);
+                        ctx.strokeStyle = "#88EEFF";
+                        ctx.lineWidth = 3;
+                        slotRoundRect(ctx, reelX - 2, reelY - 2, reelW + 4, reelH + 4, 10);
+                        ctx.stroke();
+                        ctx.restore();
+                    }
+                }
+
+                // Reel separator chrome strip between reels
+                if (r < 2) {
+                    const sepX = reelX + reelW + reelGap / 2;
+                    const stripGrad = ctx.createLinearGradient(sepX - 2, reelY, sepX + 2, reelY);
+                    stripGrad.addColorStop(0, "rgba(100,60,160,0.0)");
+                    stripGrad.addColorStop(0.5, "rgba(180,140,255,0.25)");
+                    stripGrad.addColorStop(1, "rgba(100,60,160,0.0)");
+                    ctx.fillStyle = stripGrad;
+                    ctx.fillRect(sepX - 2, reelY + 4, 4, reelH - 8);
+                }
+
+                // === Draw symbols ===
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(reelX, reelY, reelW, reelH);
+                ctx.clip();
+
+                const totalSymbols = reel.symbols.length;
+                if (totalSymbols > 0) {
+                    const startIdx = Math.floor(reel.offset) % totalSymbols;
+
+                    for (let row = -1; row <= 3; row++) {
+                        const idx = ((startIdx + row) % totalSymbols + totalSymbols) % totalSymbols;
+                        const sym = reel.symbols[idx];
+                        const sy = reelY + row * symbolH - (reel.offset % 1) * symbolH;
+
+                        if (sy + symbolH < reelY || sy > reelY + reelH) continue;
+
+                        // Is this the center (payline) row?
+                        const isCenterRow = (row === 1 && reel.stopped);
+
+                        ctx.textAlign = "center";
+                        ctx.textBaseline = "middle";
+                        const fontSize = Math.min(symbolH * 0.5, reelW * 0.4);
+                        ctx.font = `bold ${fontSize}px 'Zen Maru Gothic', sans-serif`;
+
+                        // Glow effect for spinning or center-row stopped
+                        if (!reel.stopped) {
+                            ctx.globalAlpha = 0.85;
+                        } else if (isCenterRow) {
+                            ctx.globalAlpha = 1;
+                        } else {
+                            ctx.globalAlpha = 0.5;
+                        }
+
+                        if (sym.icon === "7") {
+                            // Custom golden 7 drawing
+                            const sevenSize = fontSize * 1.1;
+                            drawGolden7(ctx, reelX + reelW / 2, sy + symbolH / 2, sevenSize);
+                        } else {
+                            ctx.shadowColor = sym.color;
+                            ctx.shadowBlur = isCenterRow ? 16 : (!reel.stopped ? 8 : 0);
+                            ctx.fillStyle = sym.color;
+                            ctx.fillText(sym.icon, reelX + reelW / 2, sy + symbolH / 2);
+                            ctx.shadowBlur = 0;
+                        }
+                        ctx.globalAlpha = 1;
+                    }
+                }
+                ctx.restore();
+
+                // === Center row highlight (payline) ===
+                const hlY = reelY + symbolH;
+                if (reel.stopped) {
+                    ctx.save();
+                    ctx.strokeStyle = "#FFD700";
+                    ctx.lineWidth = 2.5;
+                    ctx.shadowColor = "#FFD700";
+                    ctx.shadowBlur = 12;
+                    slotRoundRect(ctx, reelX + 1, hlY - 1, reelW - 2, symbolH + 2, 4);
+                    ctx.stroke();
+                    ctx.restore();
+                } else {
+                    ctx.save();
+                    ctx.strokeStyle = `rgba(255,100,200,${0.25 + Math.sin(t * 6) * 0.15})`;
+                    ctx.lineWidth = 1.5;
+                    ctx.strokeRect(reelX + 2, hlY, reelW - 4, symbolH);
+                    ctx.restore();
+                }
+
+                // Row separator lines (subtle)
+                ctx.save();
+                ctx.strokeStyle = "rgba(140,80,220,0.12)";
+                ctx.lineWidth = 0.5;
+                for (let ln = 1; ln < 3; ln++) {
+                    const ly = reelY + ln * symbolH;
+                    if (ln === 1) continue; // skip — payline already drawn
+                    ctx.beginPath();
+                    ctx.moveTo(reelX + 4, ly);
+                    ctx.lineTo(reelX + reelW - 4, ly);
+                    ctx.stroke();
+                }
+                ctx.restore();
+
+                // === STOP BUTTON ===
+                const btnRadius = Math.min(30, reelW * 0.32);
+                const btnX = reelX + reelW / 2;
+                const btnY = cabY + cabH + 24 + btnRadius;
+
+                ctx.save();
+                if (!reel.stopped) {
+                    // Active: pulsing neon red/pink
+                    const pulse = 0.8 + Math.sin(t * 5 + r * 2) * 0.2;
+
+                    // Outer glow ring
+                    ctx.shadowColor = "#FF2266";
+                    ctx.shadowBlur = 18 * pulse;
+                    ctx.strokeStyle = `rgba(255,68,120,${0.4 * pulse})`;
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(btnX, btnY, btnRadius + 5, 0, Math.PI * 2);
+                    ctx.stroke();
+
+                    // Button body gradient
+                    const btnGrad = ctx.createRadialGradient(btnX, btnY - 4, 0, btnX, btnY, btnRadius);
+                    btnGrad.addColorStop(0, "#FF5577");
+                    btnGrad.addColorStop(0.6, "#CC1144");
+                    btnGrad.addColorStop(1, "#881133");
+                    ctx.fillStyle = btnGrad;
+                    ctx.shadowBlur = 14 * pulse;
+                    ctx.beginPath();
+                    ctx.arc(btnX, btnY, btnRadius, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Top highlight (3D feel)
+                    ctx.shadowBlur = 0;
+                    const hiG = ctx.createRadialGradient(btnX - 4, btnY - 8, 1, btnX, btnY, btnRadius);
+                    hiG.addColorStop(0, "rgba(255,255,255,0.35)");
+                    hiG.addColorStop(0.5, "rgba(255,255,255,0.08)");
+                    hiG.addColorStop(1, "rgba(255,255,255,0)");
+                    ctx.fillStyle = hiG;
+                    ctx.beginPath();
+                    ctx.arc(btnX, btnY, btnRadius - 1, 0, Math.PI * 2);
+                    ctx.fill();
+                } else {
+                    // Inactive: dark muted
+                    ctx.fillStyle = "rgba(60,40,70,0.6)";
+                    ctx.beginPath();
+                    ctx.arc(btnX, btnY, btnRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+
+                // Button border
+                ctx.strokeStyle = reel.stopped ? "rgba(80,60,100,0.4)" : "#FF88AA";
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(btnX, btnY, btnRadius, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // Button label
+                ctx.save();
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillStyle = reel.stopped ? "rgba(120,100,140,0.5)" : "#FFFFFF";
+                ctx.font = `900 ${Math.min(15, btnRadius * 0.52)}px 'Zen Maru Gothic', sans-serif`;
+                if (!reel.stopped) { ctx.shadowColor = "#FFF"; ctx.shadowBlur = 4; }
+                ctx.fillText("STOP", btnX, btnY);
+                ctx.restore();
+
+                // Record hit rect (slightly larger for easier tapping)
+                slotMachine.stopButtons.push({
+                    x: btnX - btnRadius - 8,
+                    y: btnY - btnRadius - 8,
+                    w: (btnRadius + 8) * 2,
+                    h: (btnRadius + 8) * 2,
+                    reelIndex: r,
+                });
+            }
+
+            // === CREDIT / INFO BAR at bottom ===
+            const barY = cabY + cabH + 24 + Math.min(30, cabW * 0.1) * 2 + 20;
+            ctx.save();
+            ctx.fillStyle = "rgba(20,10,35,0.7)";
+            slotRoundRect(ctx, cabX, barY, cabW, 28, 8);
+            ctx.fill();
+            ctx.strokeStyle = "rgba(160,100,220,0.3)";
+            ctx.lineWidth = 1;
+            slotRoundRect(ctx, cabX, barY, cabW, 28, 8);
+            ctx.stroke();
+
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = "rgba(200,180,240,0.6)";
+            ctx.font = `500 ${Math.min(11, w * 0.02)}px 'Zen Maru Gothic', sans-serif`;
+            const stoppedCount = slotMachine.reels.filter(r => r.stopped).length;
+            const roundText = `ROUND ${slotMachine.round} / 3`;
+            const reelText = stoppedCount === 3 ? "ALL STOPPED" : `REELS: ${stoppedCount} / 3`;
+            ctx.fillText(`${roundText}    ${reelText}`, w / 2, barY + 14);
+            ctx.restore();
+
+            // === RESULT DISPLAY ===
+            if (slotMachine.phase === "result") {
+                const tier = slotMachine.resultTier;
+                ctx.save();
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                const resultY = barY + 50;
+
+                if (tier === "jackpot") {
+                    // Flashing gold overlay
+                    const flash = Math.sin(t * 8) * 0.12 + 0.12;
+                    ctx.fillStyle = `rgba(255,215,0,${flash})`;
+                    ctx.fillRect(0, 0, w, h);
+
+                    ctx.shadowColor = "#FFD700";
+                    ctx.shadowBlur = 35 + Math.sin(t * 6) * 15;
+                    ctx.fillStyle = "#FFD700";
+                    ctx.font = `900 ${Math.min(50, w * 0.09)}px 'Zen Maru Gothic', sans-serif`;
+                    ctx.fillText("JACKPOT!!!", w / 2, resultY);
+                    ctx.shadowBlur = 0;
+                    ctx.fillStyle = "rgba(255,238,180,0.8)";
+                    ctx.font = `600 ${Math.min(16, w * 0.028)}px 'Zen Maru Gothic', sans-serif`;
+                    ctx.fillText("ALL LABELS +3!", w / 2, resultY + 30);
+                } else if (tier === "big") {
+                    ctx.shadowColor = "#FF8800";
+                    ctx.shadowBlur = 22;
+                    ctx.fillStyle = "#FFAA22";
+                    ctx.font = `900 ${Math.min(42, w * 0.075)}px 'Zen Maru Gothic', sans-serif`;
+                    ctx.fillText("BIG WIN!", w / 2, resultY);
+                } else if (tier === "small") {
+                    ctx.shadowColor = "#66BBFF";
+                    ctx.shadowBlur = 16;
+                    ctx.fillStyle = "#88DDFF";
+                    ctx.font = `900 ${Math.min(36, w * 0.065)}px 'Zen Maru Gothic', sans-serif`;
+                    ctx.fillText("WIN!", w / 2, resultY);
+                } else {
+                    ctx.fillStyle = "rgba(180,160,210,0.7)";
+                    ctx.font = `700 ${Math.min(30, w * 0.05)}px 'Zen Maru Gothic', sans-serif`;
+                    ctx.fillText("NEXT TIME...", w / 2, resultY);
+                }
+                ctx.restore();
+
+                drawSlotParticles(ctx);
+            }
+        }
+
+        function drawSlotParticles(ctx) {
+            const particles = slotMachine.particles;
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.15;
+                p.life -= 1;
+                if (p.life <= 0) { particles.splice(i, 1); continue; }
+
+                const alpha = Math.min(1, p.life / 30);
+                ctx.save();
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = p.color;
+                ctx.shadowColor = p.color;
+                ctx.shadowBlur = 6;
+                ctx.translate(p.x, p.y);
+                ctx.rotate(p.life * 0.1);
+                // Star shape
+                ctx.beginPath();
+                const s = p.size;
+                for (let j = 0; j < 5; j++) {
+                    const angle = (j * 4 * Math.PI) / 5 - Math.PI / 2;
+                    const method = j === 0 ? 'moveTo' : 'lineTo';
+                    ctx[method](Math.cos(angle) * s, Math.sin(angle) * s);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        function spawnSlotParticles(count) {
+            const colors = ["#FFD700", "#FF2266", "#FFFFFF", "#FF88CC", "#88DDFF", "#FFEE44", "#AA66FF"];
+            for (let i = 0; i < count; i++) {
+                slotMachine.particles.push({
+                    x: width / 2 + (Math.random() - 0.5) * width * 0.6,
+                    y: height * 0.35 + (Math.random() - 0.5) * height * 0.2,
+                    vx: (Math.random() - 0.5) * 8,
+                    vy: -Math.random() * 6 - 2,
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    size: 3 + Math.random() * 5,
+                    life: 60 + Math.random() * 60,
+                });
+            }
+        }
+
+        function updateSlotMachineReels() {
+            if (!slotMachine.active) return;
+
+            if (slotMachine.phase === "spinning" || slotMachine.phase === "stopping") {
+                let allStopped = true;
+                for (let r = 0; r < 3; r++) {
+                    const reel = slotMachine.reels[r];
+                    if (reel.stopped) continue;
+                    allStopped = false;
+
+                    if (reel.targetOffset >= 0) {
+                        // Animate toward exact targetOffset with ease-out
+                        const totalDist = reel.targetOffset - reel.startOffset;
+                        const traveled = reel.offset - reel.startOffset;
+                        const progress = Math.min(1, traveled / totalDist);
+
+                        let currentSpeed;
+                        if (progress < 0.55) {
+                            currentSpeed = reel.speed;
+                        } else {
+                            const dp = (progress - 0.55) / 0.45;
+                            currentSpeed = reel.speed * (1 - dp * dp * 0.92);
+                            currentSpeed = Math.max(currentSpeed, 0.08);
+                        }
+
+                        reel.offset += currentSpeed * 0.06;
+
+                        if (reel.offset >= reel.targetOffset) {
+                            // Snap exactly to target
+                            const totalSymbols = reel.symbols.length;
+                            reel.offset = reel.targetOffset % totalSymbols;
+                            reel.finalIndex = (Math.round(reel.offset) + 1) % totalSymbols;
+                            reel.stopped = true;
+                            reel.speed = 0;
+                            stopChime();
+                            continue;
+                        }
+                    } else {
+                        reel.offset += reel.speed * 0.06;
+                        if (reel.symbols.length > 0) {
+                            reel.offset = reel.offset % reel.symbols.length;
+                        }
+                    }
+                }
+
+                if (allStopped && slotMachine.phase === "stopping") {
+                    evaluateSlotResult();
+                    slotMachine.phase = "result";
+                    slotMachine.resultTimer = Date.now();
+                }
+            }
+
+            if (slotMachine.phase === "result") {
+                if (Date.now() - slotMachine.resultTimer > 3000) {
+                    advanceSlotRound();
+                }
+            }
+        }
+
+        function handleSlotStopClick(screenX, screenY) {
+            if (slotMachine.phase !== "spinning" && slotMachine.phase !== "stopping") return;
+
+            for (const btn of slotMachine.stopButtons) {
+                if (screenX >= btn.x && screenX <= btn.x + btn.w &&
+                    screenY >= btn.y && screenY <= btn.y + btn.h) {
+                    const reel = slotMachine.reels[btn.reelIndex];
+                    if (!reel.stopped && reel.targetOffset < 0) {
+                        const totalSymbols = reel.symbols.length;
+                        // The visual center symbol: round the offset to nearest int for the row that
+                        // is currently closest to the highlight box center
+                        const snapOffset = Math.round(reel.offset);
+                        // Center row idx = snapOffset + 1
+                        const centerIdx = (snapOffset + 1) % totalSymbols;
+                        // Compute the exact offset that shows centerIdx in center (integer, frac=0)
+                        const landOffset = centerIdx - 1;
+                        // Target = landOffset + enough full revolutions to be > current offset + 1 revolution
+                        let target = landOffset;
+                        while (target < reel.offset + totalSymbols) {
+                            target += totalSymbols;
+                        }
+                        reel.targetOffset = target;
+                        reel.startOffset = reel.offset;
+                        reel.flashTimer = Date.now();
+                        slotMachine.phase = "stopping";
+                        stopChime();
+                    }
+                    return;
+                }
+            }
+        }
+
+        function evaluateSlotResult() {
+            const centers = [];
+            for (let r = 0; r < 3; r++) {
+                const reel = slotMachine.reels[r];
+                centers.push(reel.symbols[reel.finalIndex]);
+            }
+
+            const icons = centers.map(c => c.icon);
+            let tier, labels;
+
+            if (icons[0] === icons[1] && icons[1] === icons[2]) {
+                tier = "jackpot";
+                labels = { adventurous: 3, lucky: 3, optimistic: 3, active: 3 };
+                spawnSlotParticles(100);
+            } else if (icons[0] === icons[1] || icons[1] === icons[2] || icons[0] === icons[2]) {
+                tier = "big";
+                const matchedIcon = icons[0] === icons[1] ? icons[0] : (icons[1] === icons[2] ? icons[1] : icons[0]);
+                const matchedSym = centers.find(c => c.icon === matchedIcon);
+                labels = { [matchedSym.label]: 3, adventurous: 1, optimistic: 1 };
+                spawnSlotParticles(30);
+            } else if (icons.includes("BAR")) {
+                tier = "small";
+                labels = { adventurous: 1, optimistic: 1 };
+            } else {
+                tier = "miss";
+                labels = { resilient: 1 };
+            }
+
+            slotMachine.resultTier = tier;
+            winFanfare(tier);
+
+            // Accumulate labels across rounds
+            for (const [key, val] of Object.entries(labels)) {
+                slotMachine.totalLabels[key] = (slotMachine.totalLabels[key] || 0) + val;
+            }
+        }
+
+        function advanceSlotRound() {
+            if (slotMachine.round < 3) {
+                // Next round
+                slotMachine.round++;
+                slotMachine.phase = "spinning";
+                slotMachine.resultTimer = 0;
+                slotMachine.resultTier = null;
+                initSlotReels();
+                playSlotStartChime();
+            } else {
+                // All 3 rounds done — push accumulated labels and exit
+                selectedToys.push({
+                    id: "entertainment_slot",
+                    name: "Slot Machine",
+                    labels: { ...slotMachine.totalLabels },
+                });
+                endEntertainmentPhase();
+            }
+        }
+
+        function endEntertainmentPhase() {
+            if (!slotMachine.active) return;
+            slotMachine.active = false;
+            slotMachine.phase = "idle";
+
+            fadeScreenTo(0.95, 500);
+            setTimeout(() => {
+                currentScene = SCENE.TRAVEL;
+                startTravelPhase();
+                fadeScreenTo(0, 400);
+            }, 550);
+        }
+
+        // ======== THIRTIES PHASE START ========
+        function startThirtiesPhase() {
+            currentScene = SCENE.THIRTIES;
+            worldWidth = Math.max(width * 3.2, 2800);
+            baby = new Child(babyColorScheme);
+            baby.x = worldWidth * 0.5;
+
+            thirtiesHasMarriage = checkMarriageCondition();
+            initThirtiesDrops(thirtiesHasMarriage);
+            initCarryHatLayer();
+            initCarrySnareLayer();
+            initCarryCymbalLayer();
+            initCarryBassLayer();
+            initCarryKeyboardLayer();
+            startBaseGroove();
+            buildScoreHud();
+            updateScoreToggleUi();
+            orbWorldX = baby.x;
+            orbWorldY = height * ROOM_WALL_RATIO + TONE_FLOOR_OFFSET;
+            orbParticles = [];
+        }
+
+        let thirtiesChoiceTransitioning = false;
+
+        function initThirtiesDrops(hasMarriage) {
+            disposeToneDrops();
+            toneDrops = [];
+            if (!baseRhythmInfo || !inheritedChordProgression) return;
+
+            const floorY = height * ROOM_WALL_RATIO + TONE_FLOOR_OFFSET;
+            const activities = getThirtiesActivities(hasMarriage);
+
+            for (let i = 0; i < activities.length; i++) {
+                const act = activities[i];
+                const variant = randInt(0, 1);
+                const kbBundle = buildKeyboardLine(baseRhythmInfo, act.keyboardStyle, inheritedChordProgression, variant);
+                const kb = createKeyboardSynth(act.keyboardStyle);
+
+                const minX = worldWidth * act.worldFraction[0];
+                const maxX = worldWidth * act.worldFraction[1];
+                const cx = minX + (maxX - minX) * 0.5;
+
+                toneDrops.push({
+                    x: cx,
+                    y: floorY + (i % 2 === 0 ? -8 : 8),
+                    pattern: kbBundle.pattern,
+                    velocityPattern: null,
+                    proximityVol: -100,
+                    isHovered: false,
+                    overlapAlpha: 0,
+                    instrument: "keyboard",
+                    keyboardSynth: kb.synth,
+                    keyboardEffects: kb.effects,
+                    keyboardNotes: kbBundle.notes,
+                    keyboardAttacks: kbBundle.attacks,
+                    keyboardDurations: kbBundle.durations,
+                    keyboardSustainType: kbBundle.sustainType,
+                    activityId: act.id,
+                    activityName: act.name,
+                    activityNameEn: act.nameEn,
+                    dropColor: act.color,
+                    activityLabels: act.labels,
+                    ripples: []
+                });
+            }
+        }
+
+        // ======== THIRTIES TONE SELECTION ========
+        function handle30sChoice(clickedDrop) {
+            if (!clickedDrop.activityLabels) return;
+            if (thirtiesChoiceTransitioning) return;
+            thirtiesChoiceTransitioning = true;
+            playTitleToneConfirmSound();
+
+            selectedToys.push({
+                id: clickedDrop.activityId,
+                name: clickedDrop.activityName,
+                labels: clickedDrop.activityLabels
+            });
+
+            disposeToneDrops();
+            toneDrops = [];
+
+            const sx = clickedDrop.x - cameraX;
+            const sy = clickedDrop.y;
+            const ripple = document.createElement('div');
+            ripple.className = 'ripple ripple-anim';
+            ripple.style.position = 'fixed';
+            ripple.style.left = (sx - 40) + 'px';
+            ripple.style.top = (sy - 40) + 'px';
+            document.body.appendChild(ripple);
+
+            fadeScreenTo(1, 1400);
+            setTimeout(() => {
+                ripple.remove();
+                thirtiesChoiceTransitioning = false;
+                // TODO: 次のフェーズへ遷移（未定）
+                fadeScreenTo(0, 1300);
+            }, 1400);
+        }
+
         // ======== TRAVEL PHASE (旅フェーズ) ========
         function startTravelPhase() {
             currentScene = SCENE.TRAVEL;
@@ -8797,7 +10506,8 @@
                 parttime: "organ-funky",
                 jobhunt: "piano-sparse",
                 travel: "piano-chord",
-                entertainment: "pachinko-bells"
+                entertainment: "pachinko-bells",
+                thirties: "piano-gentle"
             };
             const style = styleMap[inheritedKeyboardSoundConfig] || "piano-gentle";
             const kb = createKeyboardSynth(style);
@@ -10320,6 +12030,7 @@
                 isTopDownScene = false;
                 topDownCameraX = 0;
                 topDownCameraY = 0;
+                startThirtiesPhase();
                 fadeScreenTo(0, 1000);
             }, 1200);
         }
@@ -11795,21 +13506,19 @@
                 // Re-render score HUD
                 renderScoreRows(null);
 
-                // Check if all modifier tones consumed → advance phase
-                const allConsumed = toneDrops.filter(d => d.instrument === "modifier").every(d => d.consumed);
-                if (allConsumed) {
+                // One modifier tone selected → advance to THIRTIES phase
+                setTimeout(() => {
+                    disposeToneDrops();
+                    toneDrops = [];
+                    jobHuntViewMode = "topdown";
+                    if (baby) baby.isTopDown = true;
+                    fadeScreenTo(1, 1200);
                     setTimeout(() => {
-                        disposeToneDrops();
-                        toneDrops = [];
-                        jobHuntViewMode = "topdown";
-                        if (baby) baby.isTopDown = true;
-                        fadeScreenTo(1, 1200);
-                        setTimeout(() => {
-                            isTopDownScene = false;
-                            fadeScreenTo(0, 1000);
-                        }, 1200);
-                    }, 2000);
-                }
+                        isTopDownScene = false;
+                        startThirtiesPhase();
+                        fadeScreenTo(0, 1000);
+                    }, 1200);
+                }, 1500);
                 return;
             }
 
@@ -11821,6 +13530,7 @@
             fadeScreenTo(1, 1200);
             setTimeout(() => {
                 isTopDownScene = false;
+                startThirtiesPhase();
                 fadeScreenTo(0, 1000);
             }, 1200);
         }
@@ -13969,7 +15679,7 @@
         let hoveredToyHudAlpha = 0;
         let lastHoveredToy = null;
         function drawToyStatsHud() {
-            if (currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL) {
+            if (currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.ADULT && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL && currentScene !== SCENE.THIRTIES) {
                 hoveredToyHudAlpha = 0;
                 return;
             }
@@ -13977,7 +15687,7 @@
             let hovToy = null;
             toneDrops.forEach(drop => {
                 if (drop.isHovered && drop.toy) hovToy = drop.toy;
-                if (drop.isHovered && drop.activityLabels && (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL)) {
+                if (drop.isHovered && drop.activityLabels && (currentScene === SCENE.CHILD1 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.THIRTIES)) {
                     hovToy = { name: drop.activityNameEn ? `${drop.activityName} / ${drop.activityNameEn}` : drop.activityName, labels: drop.activityLabels };
                 }
             });
@@ -14069,7 +15779,7 @@
                 // Label text
                 ctx.fillStyle = "rgba(255,255,255,0.9)";
                 ctx.font = "500 10px 'Zen Maru Gothic', sans-serif";
-                ctx.fillText(e.label, px + 18, cy + 1);
+                ctx.fillText(labelDisplay(e.label), px + 18, cy + 1);
                 // Value
                 ctx.textAlign = "right";
                 ctx.fillText(`+${e.value}`, px + 14 + 136, cy + 1);
@@ -14103,14 +15813,14 @@
         let cumulHudAlpha = 0;
         let lastCumulToy = null;
         function drawCumulativeStatsHud() {
-            if (currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL) {
+            if (currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.ADULT && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL && currentScene !== SCENE.THIRTIES) {
                 cumulHudAlpha = 0;
                 return;
             }
             let hovToy = null;
             toneDrops.forEach(drop => {
                 if (drop.isHovered && drop.toy) hovToy = drop.toy;
-                if (drop.isHovered && drop.activityLabels && (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL)) {
+                if (drop.isHovered && drop.activityLabels && (currentScene === SCENE.CHILD1 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.THIRTIES)) {
                     hovToy = { name: drop.activityNameEn ? `${drop.activityName} / ${drop.activityNameEn}` : drop.activityName, labels: drop.activityLabels };
                 }
             });
@@ -14122,9 +15832,10 @@
             }
             if (cumulHudAlpha < 0.01 || !lastCumulToy) return;
 
-            // Accumulate: all previously selected toys + hovered toy
+            // Accumulate: all previously selected toys + hovered toy (avoid double-counting)
             const totals = {};
-            const allToys = [...selectedToys, lastCumulToy];
+            const alreadySelected = lastCumulToy && selectedToys.some(t => t.id === lastCumulToy.id || t.name === lastCumulToy.name);
+            const allToys = alreadySelected ? selectedToys : [...selectedToys, lastCumulToy];
             allToys.forEach(t => {
                 if (!t.labels) return;
                 Object.entries(t.labels).forEach(([k, v]) => {
@@ -14178,7 +15889,7 @@
             // Selected toys count
             ctx.fillStyle = "rgba(255,255,255,0.45)";
             ctx.font = "400 10px 'Zen Maru Gothic', sans-serif";
-            ctx.fillText(`${selectedToys.length} selected + 1 preview`, px + 14, cy);
+            ctx.fillText(alreadySelected ? `${selectedToys.length} selected` : `${selectedToys.length} selected + 1 preview`, px + 14, cy);
             cy += 18;
 
             // Label bars (sorted by value)
@@ -14198,7 +15909,7 @@
                 ctx.fillStyle = "rgba(255,255,255,0.9)";
                 ctx.font = "500 10px 'Zen Maru Gothic', sans-serif";
                 ctx.textAlign = "left";
-                ctx.fillText(e.label, px + 18, cy + 1);
+                ctx.fillText(labelDisplay(e.label), px + 18, cy + 1);
                 // Value
                 ctx.textAlign = "right";
                 ctx.font = "700 11px 'Zen Maru Gothic', sans-serif";
@@ -14208,6 +15919,76 @@
             });
 
             ctx.restore();
+        }
+
+        // ======== Label Change Animation System ========
+        const labelChangeAnimations = [];
+
+        function spawnLabelAnimation(labels, isPositive) {
+            const startTime = Date.now();
+            const entries = Object.entries(labels).filter(([, v]) => v > 0);
+            entries.forEach(([key, value], i) => {
+                labelChangeAnimations.push({
+                    label: key,
+                    value: value,
+                    isPositive: isPositive,
+                    startTime: startTime,
+                    delay: i * 200,
+                    x: width * 0.5 + (Math.random() - 0.5) * 80,
+                    y: height * 0.35 + i * 32,
+                });
+            });
+        }
+
+        function drawLabelAnimations(ctx) {
+            const now = Date.now();
+            for (let i = labelChangeAnimations.length - 1; i >= 0; i--) {
+                const anim = labelChangeAnimations[i];
+                const elapsed = now - anim.startTime - anim.delay;
+                if (elapsed < 0) continue;
+                const duration = 2000;
+                if (elapsed > duration) {
+                    labelChangeAnimations.splice(i, 1);
+                    continue;
+                }
+                const t = elapsed / duration;
+                const fadeIn = Math.min(1, t * 5);
+                const fadeOut = t > 0.6 ? 1 - (t - 0.6) / 0.4 : 1;
+                const alpha = fadeIn * fadeOut;
+                const rise = t * 60;
+                const scale = 1 + Math.sin(t * Math.PI) * 0.15;
+
+                ctx.save();
+                ctx.globalAlpha = alpha;
+                const x = anim.x;
+                const y = anim.y - rise;
+
+                ctx.translate(x, y);
+                ctx.scale(scale, scale);
+
+                const sign = anim.isPositive ? "+" : "-";
+                const color = anim.isPositive ? "rgba(100, 230, 140, " : "rgba(255, 100, 100, ";
+                const glowColor = anim.isPositive ? "rgba(100, 230, 140, 0.4)" : "rgba(255, 100, 100, 0.4)";
+                const text = `${sign}${anim.value} ${labelDisplay(anim.label)}`;
+
+                // Glow
+                ctx.shadowColor = glowColor;
+                ctx.shadowBlur = 12;
+
+                // Text
+                ctx.font = "700 16px 'Zen Maru Gothic', sans-serif";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillStyle = color + "1)";
+                ctx.fillText(text, 0, 0);
+
+                // Outline
+                ctx.strokeStyle = "rgba(0,0,0,0.3)";
+                ctx.lineWidth = 2;
+                ctx.strokeText(text, 0, 0);
+
+                ctx.restore();
+            }
         }
 
         // Chord hover preview system — independent of groove loop
@@ -14679,6 +16460,10 @@
                     chordSide: fac.id,
                     facilityName: fac.name,
                     dropColor: fac.color,
+                    activityId: fac.id,
+                    activityName: fac.name,
+                    activityNameEn: fac.nameEn || "",
+                    activityLabels: fac.affinity || {},
                     ripples: []
                 });
             }
@@ -16093,7 +17878,7 @@
                         baseGroove.kickSynth.triggerAttackRelease("C1", "8n");
                     }
                     if (
-                        (currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL) &&
+                        (currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES) &&
                         carryHatSynth &&
                         carryHatFilter &&
                         inheritedHatPattern &&
@@ -16103,7 +17888,7 @@
                         carryHatSynth.triggerAttackRelease("32n");
                     }
                     if (
-                        (currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL) &&
+                        (currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES) &&
                         carrySnareSynth &&
                         carrySnareFilter &&
                         inheritedSnarePattern &&
@@ -16117,7 +17902,7 @@
                         }
                     }
                     if (
-                        (currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL) &&
+                        (currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES) &&
                         carryCymbalSynth &&
                         inheritedCymbalPattern &&
                         inheritedCymbalPattern[step]
@@ -16127,7 +17912,7 @@
                     // Carry chord playback removed from ADULT (bass + guitar only)
                     // Carry bass playback (ADULT+: play inherited bass line)
                     if (
-                        (currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL) &&
+                        (currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES) &&
                         carryBassSynth &&
                         inheritedBassAttacks &&
                         inheritedBassAttacks[step]
@@ -16140,7 +17925,7 @@
                     }
                     // Carry keyboard playback (UNIVERSITY+: play inherited keyboard line)
                     if (
-                        (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL) &&
+                        (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES) &&
                         carryKeyboardSynth &&
                         inheritedKeyboardAttacks &&
                         inheritedKeyboardAttacks[step]
@@ -16375,6 +18160,118 @@
             ctx.restore();
         }
 
+        // === Shared Confirmation Overlay ===
+        function drawConfirmationOverlay() {
+            if (!adultConfirmation.active) return;
+            adultConfirmation.fade += (1 - adultConfirmation.fade) * 0.12;
+            const f = adultConfirmation.fade;
+            const t = Date.now() * 0.001;
+
+            const drop = adultConfirmation.drop;
+            const toneName = drop.activityName || drop.facilityName || "tone";
+            const activity = ADULT_ACTIVITIES.find(a => a.name === toneName || a.id === drop.activityId) || getThirtiesActivities(thirtiesHasMarriage).find(a => a.name === toneName || a.id === drop.activityId);
+            const toneNameEn = activity ? activity.nameEn : (drop.activityNameEn || drop.facilityName || "tone");
+            const toneColor = drop.dropColor || (activity ? activity.color : palette.btnColor);
+
+            // Soft frosted overlay
+            ctx.fillStyle = `rgba(245, 243, 238, ${0.55 * f})`;
+            ctx.fillRect(0, 0, width, height);
+
+            // Always center the confirmation dialog on screen
+            const bx = width / 2;
+            const centerY = height * 0.38;
+
+            // Soft radial glow (tone-colored)
+            ctx.save();
+            ctx.globalAlpha = f * 0.25;
+            const auraR = 160 + Math.sin(t * 1.5) * 8;
+            const aura = ctx.createRadialGradient(bx, centerY, 0, bx, centerY, auraR);
+            aura.addColorStop(0, toneColor);
+            aura.addColorStop(1, "rgba(255,255,255,0)");
+            ctx.fillStyle = aura;
+            ctx.beginPath();
+            ctx.arc(bx, centerY, auraR, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+
+            // Tone name
+            ctx.save();
+            ctx.globalAlpha = f;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+
+            ctx.shadowColor = "rgba(255,255,255,0.9)";
+            ctx.shadowBlur = 14;
+            ctx.fillStyle = "rgba(60, 55, 48, 0.92)";
+            ctx.font = "700 22px 'Zen Maru Gothic', sans-serif";
+            ctx.fillText(`「${toneName}」`, bx, centerY - 52);
+
+            ctx.shadowBlur = 10;
+            ctx.fillStyle = "rgba(100, 95, 85, 0.7)";
+            ctx.font = "500 13px 'Zen Maru Gothic', sans-serif";
+            ctx.fillText(toneNameEn, bx, centerY - 30);
+
+            ctx.shadowBlur = 8;
+            ctx.fillStyle = "rgba(80, 75, 65, 0.85)";
+            ctx.font = "500 15px 'Zen Maru Gothic', sans-serif";
+            ctx.fillText("このtoneを選びますか？", bx, centerY - 4);
+            ctx.fillStyle = "rgba(120, 115, 105, 0.6)";
+            ctx.font = "400 11px 'Zen Maru Gothic', sans-serif";
+            ctx.fillText("Choose this tone?", bx, centerY + 14);
+            ctx.restore();
+
+            // Circular buttons
+            const btnR = 30;
+            const btnSpacing = 44;
+            const yesCenter = { x: bx - btnSpacing, y: centerY + 52 };
+            const noCenter = { x: bx + btnSpacing, y: centerY + 52 };
+
+            const drawCircleBtn = (cx, cy, r, label, isYes) => {
+                const dx = mouseX - cx, dy = mouseY - cy;
+                const isHover = (dx * dx + dy * dy) <= (r + 4) * (r + 4);
+                const scale = isHover ? 1.08 + Math.sin(t * 4) * 0.02 : 1.0;
+                const sr = r * scale;
+
+                ctx.save();
+                ctx.globalAlpha = f;
+                ctx.shadowColor = "rgba(0,0,0,0.10)";
+                ctx.shadowBlur = 12;
+                ctx.shadowOffsetY = 4;
+                ctx.fillStyle = isYes ? toneColor : "hsl(30, 10%, 78%)";
+                ctx.beginPath();
+                ctx.arc(cx, cy, sr, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetY = 0;
+                const hi = ctx.createRadialGradient(cx - sr * 0.28, cy - sr * 0.32, 1, cx - sr * 0.16, cy - sr * 0.18, sr * 0.85);
+                hi.addColorStop(0, "rgba(255,255,255,0.35)");
+                hi.addColorStop(1, "rgba(255,255,255,0)");
+                ctx.fillStyle = hi;
+                ctx.beginPath();
+                ctx.arc(cx, cy, sr - 1, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.strokeStyle = isHover ? "rgba(255,255,255,1)" : "rgba(255,255,255,0.88)";
+                ctx.lineWidth = isHover ? 3.5 : 3;
+                ctx.beginPath();
+                ctx.arc(cx, cy, sr, 0, Math.PI * 2);
+                ctx.stroke();
+
+                ctx.fillStyle = "rgba(255,255,255,0.95)";
+                ctx.font = "700 14px 'Zen Maru Gothic', sans-serif";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(label, cx, cy + 1);
+                ctx.restore();
+
+                return { x: cx - r - 4, y: cy - r - 4, w: (r + 4) * 2, h: (r + 4) * 2 };
+            };
+
+            adultConfirmation.yesRect = drawCircleBtn(yesCenter.x, yesCenter.y, btnR, "はい", true);
+            adultConfirmation.noRect = drawCircleBtn(noCenter.x, noCenter.y, btnR, "いいえ", false);
+        }
+
         // Render Loop
         function animate() {
             ctx.clearRect(0, 0, width, height);
@@ -16417,6 +18314,9 @@
             if (currentScene === SCENE.LESSON) {
                 // 授業フェーズ: toneなし、選択肢なし、HUDなし
                 drawLessonScene();
+            } else if (currentScene === SCENE.ENTERTAINMENT && slotMachine.active) {
+                updateSlotMachineReels();
+                drawSlotMachineScene(ctx);
             } else if (isTopDownScene) {
                 // 見下ろし型2D scenes (PART_TIME, JOB_HUNT, JOB_HUNT2)
                 updateToneDropProximity();
@@ -16553,9 +18453,13 @@
                     ctx.restore();
                 }
 
+                // === Adult Confirmation UI Overlay (top-down scenes) ===
+                drawConfirmationOverlay();
+
                 drawToyStatsHud();
                 drawCumulativeStatsHud();
-            } else if (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.TRAVEL) {
+                drawLabelAnimations(ctx);
+            } else if (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.TRAVEL || currentScene === SCENE.THIRTIES) {
                 // Skip audio and movement if confirmation dialog or travel still is active
                 if (!adultConfirmation.active && !travelStill.active) {
                     updateToneDropProximity();
@@ -16609,7 +18513,9 @@
                     // EXISTING NON-TRAVEL RENDERING
                     ctx.save();
                     ctx.translate(-cameraX, 0);
-                    if (currentScene === SCENE.UNIVERSITY) {
+                    if (currentScene === SCENE.THIRTIES) {
+                        drawThirtiesBackground(ctx);
+                    } else if (currentScene === SCENE.UNIVERSITY) {
                         drawUniversityBackground();
                     } else if (currentScene === SCENE.ADULT) {
                         drawAdultBackground();
@@ -16628,126 +18534,7 @@
                 }
 
                 // === Adult Confirmation UI Overlay ===
-                if (adultConfirmation.active) {
-                    adultConfirmation.fade += (1 - adultConfirmation.fade) * 0.12;
-                    const f = adultConfirmation.fade;
-                    const t = Date.now() * 0.001; // for gentle animations
-
-                    const drop = adultConfirmation.drop;
-                    const toneName = drop.activityName || drop.facilityName || "tone";
-                    const activity = ADULT_ACTIVITIES.find(a => a.name === toneName || a.id === drop.activityId);
-                    const toneNameEn = activity ? activity.nameEn : (drop.activityNameEn || drop.facilityName || "tone");
-                    const toneColor = drop.dropColor || (activity ? activity.color : palette.btnColor);
-
-                    // Soft frosted overlay matching the world palette
-                    ctx.fillStyle = `rgba(245, 243, 238, ${0.55 * f})`;
-                    ctx.fillRect(0, 0, width, height);
-
-                    const bx = baby.x - cameraX, by = baby.y != null ? baby.y : height * 0.55 - 50;
-                    const centerY = by - 80;
-
-                    // Soft radial glow behind the confirmation area (tone-colored)
-                    ctx.save();
-                    ctx.globalAlpha = f * 0.25;
-                    const auraR = 160 + Math.sin(t * 1.5) * 8;
-                    const aura = ctx.createRadialGradient(bx, centerY, 0, bx, centerY, auraR);
-                    aura.addColorStop(0, toneColor);
-                    aura.addColorStop(1, "rgba(255,255,255,0)");
-                    ctx.fillStyle = aura;
-                    ctx.beginPath();
-                    ctx.arc(bx, centerY, auraR, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.restore();
-
-                    // Tone name — softly rendered above character
-                    ctx.save();
-                    ctx.globalAlpha = f;
-                    ctx.textAlign = "center";
-                    ctx.textBaseline = "middle";
-
-                    // Japanese name
-                    ctx.shadowColor = "rgba(255,255,255,0.9)";
-                    ctx.shadowBlur = 14;
-                    ctx.fillStyle = "rgba(60, 55, 48, 0.92)";
-                    ctx.font = "700 22px 'Zen Maru Gothic', sans-serif";
-                    ctx.fillText(`「${toneName}」`, bx, centerY - 52);
-
-                    // English subtitle
-                    ctx.shadowBlur = 10;
-                    ctx.fillStyle = "rgba(100, 95, 85, 0.7)";
-                    ctx.font = "500 13px 'Zen Maru Gothic', sans-serif";
-                    ctx.fillText(toneNameEn, bx, centerY - 30);
-
-                    // Question text
-                    ctx.shadowBlur = 8;
-                    ctx.fillStyle = "rgba(80, 75, 65, 0.85)";
-                    ctx.font = "500 15px 'Zen Maru Gothic', sans-serif";
-                    ctx.fillText("このtoneを選びますか？", bx, centerY - 4);
-                    ctx.fillStyle = "rgba(120, 115, 105, 0.6)";
-                    ctx.font = "400 11px 'Zen Maru Gothic', sans-serif";
-                    ctx.fillText("Choose this tone?", bx, centerY + 14);
-                    ctx.restore();
-
-                    // Circular buttons matching tone-drop aesthetic
-                    const btnR = 30;
-                    const btnSpacing = 44;
-                    const yesCenter = { x: bx - btnSpacing, y: centerY + 52 };
-                    const noCenter = { x: bx + btnSpacing, y: centerY + 52 };
-
-                    const drawCircleBtn = (cx, cy, r, label, isYes) => {
-                        const dx = mouseX - cx, dy = mouseY - cy;
-                        const isHover = (dx * dx + dy * dy) <= (r + 4) * (r + 4);
-                        const scale = isHover ? 1.08 + Math.sin(t * 4) * 0.02 : 1.0;
-                        const sr = r * scale;
-
-                        ctx.save();
-                        ctx.globalAlpha = f;
-
-                        // Soft shadow
-                        ctx.shadowColor = "rgba(0,0,0,0.10)";
-                        ctx.shadowBlur = 12;
-                        ctx.shadowOffsetY = 4;
-
-                        // Fill — yes uses tone color, no uses soft warm grey
-                        ctx.fillStyle = isYes ? toneColor : "hsl(30, 10%, 78%)";
-                        ctx.beginPath();
-                        ctx.arc(cx, cy, sr, 0, Math.PI * 2);
-                        ctx.fill();
-
-                        ctx.shadowBlur = 0;
-                        ctx.shadowOffsetY = 0;
-
-                        // Top highlight (same as tone drops)
-                        const hi = ctx.createRadialGradient(cx - sr * 0.28, cy - sr * 0.32, 1, cx - sr * 0.16, cy - sr * 0.18, sr * 0.85);
-                        hi.addColorStop(0, "rgba(255,255,255,0.35)");
-                        hi.addColorStop(1, "rgba(255,255,255,0)");
-                        ctx.fillStyle = hi;
-                        ctx.beginPath();
-                        ctx.arc(cx, cy, sr - 1, 0, Math.PI * 2);
-                        ctx.fill();
-
-                        // White border (matching tone drops)
-                        ctx.strokeStyle = isHover ? "rgba(255,255,255,1)" : "rgba(255,255,255,0.88)";
-                        ctx.lineWidth = isHover ? 3.5 : 3;
-                        ctx.beginPath();
-                        ctx.arc(cx, cy, sr, 0, Math.PI * 2);
-                        ctx.stroke();
-
-                        // Label
-                        ctx.fillStyle = "rgba(255,255,255,0.95)";
-                        ctx.font = "700 14px 'Zen Maru Gothic', sans-serif";
-                        ctx.textAlign = "center";
-                        ctx.textBaseline = "middle";
-                        ctx.fillText(label, cx, cy + 1);
-                        ctx.restore();
-
-                        // Return square hit-rect that encloses the circle
-                        return { x: cx - r - 4, y: cy - r - 4, w: (r + 4) * 2, h: (r + 4) * 2 };
-                    };
-
-                    adultConfirmation.yesRect = drawCircleBtn(yesCenter.x, yesCenter.y, btnR, "はい", true);
-                    adultConfirmation.noRect = drawCircleBtn(noCenter.x, noCenter.y, btnR, "いいえ", false);
-                }
+                drawConfirmationOverlay();
 
                 // === Travel Still Overlay ===
                 if (travelStill.active) {
@@ -16785,7 +18572,7 @@
                                 // Restore score HUD
                                 const scoreHud = document.getElementById('score-hud');
                                 if (scoreHud) scoreHud.style.display = '';
-                                // TODO: 次のフェーズへ遷移（未定）
+                                startThirtiesPhase();
                                 fadeScreenTo(0, 1300);
                             }, 1400);
                         }, 2000);
@@ -16794,6 +18581,7 @@
 
                 drawToyStatsHud();
                 drawCumulativeStatsHud();
+                drawLabelAnimations(ctx);
                 drawOffscreenToneArrows();
             } else {
                 // Title/Choice Background
@@ -16805,6 +18593,12 @@
             // 2b-2d: Skip orb/particles/hover during lesson phase
             if (currentScene === SCENE.LESSON) {
                 orbEl.style.opacity = '0';
+                drawLabelAnimations(ctx);
+            } else if (currentScene === SCENE.ENTERTAINMENT && slotMachine.active) {
+                // Show orb as cursor during slot machine
+                orbEl.style.left = mouseX + 'px';
+                orbEl.style.top = mouseY + 'px';
+                orbEl.style.opacity = '1';
             } else {
                 updateAndDrawOrbParticles();
                 updateOrbScreenPosition();
@@ -17040,7 +18834,7 @@
         }
 
         function updateScoreToggleUi() {
-            const available = (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL) && !!baseRhythmInfo;
+            const available = (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.THIRTIES) && !!baseRhythmInfo;
             scoreToggleBtn.classList.remove('visible');
             setScoreHudVisible(available);
             // Settings button: visible only during gameplay scenes
@@ -18064,6 +19858,10 @@
             playTitleToneConfirmSound();
             childLifeChoice = clickedDrop.chordSide;
             inheritedChordProgression = clickedDrop.chordProgression;
+            // Push life labels to selectedToys
+            if (clickedDrop.activityLabels) {
+                selectedToys.push({ id: clickedDrop.activityId, name: clickedDrop.activityName, labels: clickedDrop.activityLabels });
+            }
             // Ripple effect
             const sx = clickedDrop.x - cameraX;
             const sy = clickedDrop.y;
@@ -18301,17 +20099,17 @@ class LibraryMinigame {
         baby.minigameResults.push({ toy: "library", result: resultLabel, timestamp: Date.now() });
 
         if (resultLabel === "勝利") {
-            selectedToys.push({
-                id: "library_victory",
-                name: "Perfect Sorting",
-                labels: { study: 3, organized: 3 }
-            });
+            const lbl = { study: 3, organized: 3 };
+            selectedToys.push({ id: "library_victory", name: "Perfect Sorting", labels: lbl });
+            spawnLabelAnimation(lbl, true);
         } else if (resultLabel === "引き分け") {
-            selectedToys.push({
-                id: "library_draw",
-                name: "Quiet Effort",
-                labels: { focused: 1, patient: 1 }
-            });
+            const lbl = { focused: 1, patient: 1 };
+            selectedToys.push({ id: "library_draw", name: "Quiet Effort", labels: lbl });
+            spawnLabelAnimation(lbl, true);
+        } else {
+            const lbl = { study: 1, organized: 1 };
+            selectedToys.push({ id: "library_fail", name: "Library Fail", labels: { study: -1, organized: -1 } });
+            spawnLabelAnimation(lbl, false);
         }
 
         activeMinigame = null;
@@ -18616,18 +20414,21 @@ class SoccerMinigame {
                     baby.affinity[stat] = Math.max(0, baby.affinity[stat] - 3);
                 }
             });
+            const lbl = { resilient: 2, active: 1 };
+            selectedToys.push({ id: "soccer_abandon", name: "Soccer Abandon", labels: { resilient: -2, active: -1 } });
+            spawnLabelAnimation(lbl, false);
+        } else if (resultLabel === "敗北") {
+            const lbl = { resilient: 1, active: 1 };
+            selectedToys.push({ id: "soccer_loss", name: "Soccer Loss", labels: { resilient: -1, active: -1 } });
+            spawnLabelAnimation(lbl, false);
         } else if (resultLabel === "勝利") {
-            selectedToys.push({
-                id: "soccer_victory",
-                name: "Soccer Victory",
-                labels: { resilient: 3, optimistic: 3 }
-            });
+            const lbl = { resilient: 3, optimistic: 3 };
+            selectedToys.push({ id: "soccer_victory", name: "Soccer Victory", labels: lbl });
+            spawnLabelAnimation(lbl, true);
         } else if (resultLabel === "引き分け") {
-            selectedToys.push({
-                id: "soccer_draw",
-                name: "Soccer Effort",
-                labels: { resilient: 1, optimistic: 1 }
-            });
+            const lbl = { resilient: 1, optimistic: 1 };
+            selectedToys.push({ id: "soccer_draw", name: "Soccer Effort", labels: lbl });
+            spawnLabelAnimation(lbl, true);
         }
 
         // 3. Clear minigame state
@@ -19043,12 +20844,19 @@ class ScienceMinigame {
         if (!baby.minigameResults) baby.minigameResults = [];
         baby.minigameResults.push({ toy: "science", result: resultLabel, timestamp: Date.now() });
         if (resultLabel === "勝利") {
-            selectedToys.push({ id: "science_victory", name: "Master Alchemist", labels: { curious: 3, creative: 3 } });
+            const lbl = { curious: 3, creative: 3 };
+            selectedToys.push({ id: "science_victory", name: "Master Alchemist", labels: lbl });
+            spawnLabelAnimation(lbl, true);
         } else if (resultLabel === "引き分け") {
-            selectedToys.push({ id: "science_draw", name: "Junior Chemist", labels: { focused: 1, cautious: 1 } });
+            const lbl = { focused: 1, cautious: 1 };
+            selectedToys.push({ id: "science_draw", name: "Junior Chemist", labels: lbl });
+            spawnLabelAnimation(lbl, true);
         } else if (resultLabel === "友達を置いて放棄") {
             const stats = ['curious', 'cautious'];
             stats.forEach(s => { if (baby.affinity && baby.affinity[s] !== undefined) baby.affinity[s] = Math.max(0, baby.affinity[s] - 2); });
+            const lbl = { curious: 2, cautious: 1 };
+            selectedToys.push({ id: "science_abandon", name: "Science Abandon", labels: { curious: -2, cautious: -1 } });
+            spawnLabelAnimation(lbl, false);
         }
         activeMinigame = null;
         isMinigameActive = false;
@@ -19277,9 +21085,18 @@ class ReadingMinigame {
         if (!baby.minigameResults) baby.minigameResults = [];
         baby.minigameResults.push({ toy: "reading", result: resultLabel, timestamp: Date.now() });
         if (resultLabel === "勝利") {
-            selectedToys.push({ id: "reading_victory", name: "Perfect Clarity", labels: { study: 3, focused: 3, patient: 2 } });
+            const lbl = { study: 3, focused: 3, patient: 2 };
+            selectedToys.push({ id: "reading_victory", name: "Perfect Clarity", labels: lbl });
+            spawnLabelAnimation(lbl, true);
         } else if (resultLabel === "友達を置いて放棄") {
             if (baby.affinity && baby.affinity.study !== undefined) baby.affinity.study = Math.max(0, baby.affinity.study - 2);
+            const lbl = { study: 2, patient: 1 };
+            selectedToys.push({ id: "reading_abandon", name: "Reading Abandon", labels: { study: -2, patient: -1 } });
+            spawnLabelAnimation(lbl, false);
+        } else {
+            const lbl = { study: 1, focused: 1 };
+            selectedToys.push({ id: "reading_fail", name: "Reading Fail", labels: { study: -1, focused: -1 } });
+            spawnLabelAnimation(lbl, false);
         }
         activeMinigame = null; isMinigameActive = false; minigameTriggerDrop = null;
         document.body.classList.remove('minigame-active'); minigameWrapper.classList.remove('visible');
@@ -19514,7 +21331,13 @@ class ChattingMinigame {
         if (!baby.minigameResults) baby.minigameResults = [];
         baby.minigameResults.push({ toy: "chatting", result: resultLabel, timestamp: Date.now() });
         if (resultLabel === "勝利") {
-            selectedToys.push({ id: "chatting_victory", name: "Deep Connection", labels: { social: 3, expressive: 3, optimistic: 2 } });
+            const lbl = { social: 3, expressive: 3, optimistic: 2 };
+            selectedToys.push({ id: "chatting_victory", name: "Deep Connection", labels: lbl });
+            spawnLabelAnimation(lbl, true);
+        } else {
+            const lbl = { social: 1, expressive: 1 };
+            selectedToys.push({ id: "chatting_fail", name: "Chatting Fail", labels: { social: -1, expressive: -1 } });
+            spawnLabelAnimation(lbl, false);
         }
         activeMinigame = null; isMinigameActive = false; minigameTriggerDrop = null;
         document.body.classList.remove('minigame-active'); minigameWrapper.classList.remove('visible');
@@ -19712,9 +21535,18 @@ class DoodleMinigame {
         if (!baby.minigameResults) baby.minigameResults = [];
         baby.minigameResults.push({ toy: "doodle", result: resultLabel, timestamp: Date.now() });
         if (resultLabel === "勝利") {
-            selectedToys.push({ id: "doodle_victory", name: "Artistic Soul", labels: { creative: 3, expressive: 3, adventurous: 2 } });
+            const lbl = { creative: 3, expressive: 3, adventurous: 2 };
+            selectedToys.push({ id: "doodle_victory", name: "Artistic Soul", labels: lbl });
+            spawnLabelAnimation(lbl, true);
         } else if (resultLabel === "友達を置いて放棄") {
             if (baby.affinity && baby.affinity.creative !== undefined) baby.affinity.creative = Math.max(0, baby.affinity.creative - 2);
+            const lbl = { creative: 2, expressive: 1 };
+            selectedToys.push({ id: "doodle_abandon", name: "Doodle Abandon", labels: { creative: -2, expressive: -1 } });
+            spawnLabelAnimation(lbl, false);
+        } else {
+            const lbl = { creative: 1, expressive: 1 };
+            selectedToys.push({ id: "doodle_fail", name: "Doodle Fail", labels: { creative: -1, expressive: -1 } });
+            spawnLabelAnimation(lbl, false);
         }
         activeMinigame = null; isMinigameActive = false; minigameTriggerDrop = null;
         document.body.classList.remove('minigame-active'); minigameWrapper.classList.remove('visible');
@@ -20010,7 +21842,13 @@ class OrganMinigame {
         if (!baby.minigameResults) baby.minigameResults = [];
         baby.minigameResults.push({ toy: "organ", result: resultLabel, timestamp: Date.now() });
         if (resultLabel === "勝利") {
-            selectedToys.push({ id: "organ_victory", name: "Perfect Recital", labels: { creative: 3, expressive: 3, focused: 2 } });
+            const lbl = { creative: 3, expressive: 3, focused: 2 };
+            selectedToys.push({ id: "organ_victory", name: "Perfect Recital", labels: lbl });
+            spawnLabelAnimation(lbl, true);
+        } else {
+            const lbl = { creative: 1, focused: 1 };
+            selectedToys.push({ id: "organ_fail", name: "Organ Fail", labels: { creative: -1, focused: -1 } });
+            spawnLabelAnimation(lbl, false);
         }
 
         document.body.classList.remove('minigame-active'); minigameWrapper.classList.remove('visible');
