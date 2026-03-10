@@ -9471,7 +9471,7 @@
         }
 
         function initSlotReels() {
-            const speeds = [3.2, 3.8, 4.4];
+            const speeds = [2.6, 3.0, 3.4];
             for (let r = 0; r < 3; r++) {
                 const syms = [];
                 for (let i = 0; i < 20; i++) {
@@ -9513,15 +9513,73 @@
 
         function winFanfare(tier) {
             try {
-                const synth = new Tone.Synth({ oscillator: { type: "square" }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 }, volume: -14 }).toDestination();
-                let notes = [];
-                if (tier === "jackpot") notes = ["C5", "E5", "G5", "C6"];
-                else if (tier === "big") notes = ["C5", "E5", "G5"];
-                else if (tier === "small") notes = ["C5", "E5"];
-                else notes = ["E4", "C4"];
-                let t = Tone.now();
-                notes.forEach((n, i) => { synth.triggerAttackRelease(n, "8n", t + i * 0.15); });
-                setTimeout(() => synth.dispose(), 3000);
+                if (tier === "miss") {
+                    // Miss: sad descending tone
+                    const synth = new Tone.Synth({ oscillator: { type: "square" }, envelope: { attack: 0.01, decay: 0.3, sustain: 0.05, release: 0.2 }, volume: -18 }).toDestination();
+                    const t = Tone.now();
+                    synth.triggerAttackRelease("E4", "8n", t);
+                    synth.triggerAttackRelease("C4", "8n", t + 0.15);
+                    setTimeout(() => synth.dispose(), 2000);
+                    return;
+                }
+                if (tier === "small") {
+                    const synth = new Tone.Synth({ oscillator: { type: "square" }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 }, volume: -14 }).toDestination();
+                    const t = Tone.now();
+                    synth.triggerAttackRelease("C5", "8n", t);
+                    synth.triggerAttackRelease("E5", "8n", t + 0.12);
+                    synth.triggerAttackRelease("G5", "16n", t + 0.24);
+                    setTimeout(() => synth.dispose(), 2000);
+                    return;
+                }
+                // Jackpot / Big: キュインキュインキュイーーーん！！！
+                const isJP = tier === "jackpot";
+                // Lead sweep synth (the main キュイーン sound)
+                const sweep = new Tone.Synth({
+                    oscillator: { type: "sawtooth" },
+                    envelope: { attack: 0.02, decay: 0.1, sustain: 0.8, release: 0.5 },
+                    volume: isJP ? -8 : -11
+                }).toDestination();
+                // Sub sweep for thickness
+                const sweep2 = new Tone.Synth({
+                    oscillator: { type: "square" },
+                    envelope: { attack: 0.02, decay: 0.1, sustain: 0.7, release: 0.4 },
+                    volume: isJP ? -12 : -15
+                }).toDestination();
+                // High shimmer
+                const shimmer = new Tone.Synth({
+                    oscillator: { type: "sine" },
+                    envelope: { attack: 0.01, decay: 0.05, sustain: 0.3, release: 0.3 },
+                    volume: isJP ? -10 : -14
+                }).toDestination();
+                const t = Tone.now();
+                const reps = isJP ? 3 : 2;
+                for (let i = 0; i < reps; i++) {
+                    const base = t + i * 0.35;
+                    // キュイン (rapid rising sweep)
+                    sweep.triggerAttackRelease("C5", "16n", base);
+                    sweep.triggerAttackRelease("G5", "16n", base + 0.06);
+                    sweep.triggerAttackRelease("C6", "16n", base + 0.12);
+                    sweep2.triggerAttackRelease("E5", "16n", base + 0.03);
+                    sweep2.triggerAttackRelease("B5", "16n", base + 0.09);
+                    shimmer.triggerAttackRelease("E6", "32n", base + 0.08);
+                    shimmer.triggerAttackRelease("G6", "32n", base + 0.14);
+                }
+                // キュイーーーーん！！！ (final long rising sweep)
+                const finalBase = t + reps * 0.35;
+                sweep.triggerAttackRelease("C5", "8n", finalBase);
+                sweep.triggerAttackRelease("E5", "8n", finalBase + 0.08);
+                sweep.triggerAttackRelease("G5", "8n", finalBase + 0.16);
+                sweep.triggerAttackRelease("C6", "4n", finalBase + 0.24);
+                sweep2.triggerAttackRelease("G5", "8n", finalBase + 0.12);
+                sweep2.triggerAttackRelease("C6", "4n", finalBase + 0.20);
+                shimmer.triggerAttackRelease("E6", "4n", finalBase + 0.20);
+                shimmer.triggerAttackRelease("G6", "4n", finalBase + 0.28);
+                if (isJP) {
+                    // Extra climax for jackpot: even higher final note
+                    shimmer.triggerAttackRelease("C7", "2n", finalBase + 0.36);
+                    sweep.triggerAttackRelease("E6", "2n", finalBase + 0.32);
+                }
+                setTimeout(() => { sweep.dispose(); sweep2.dispose(); shimmer.dispose(); }, 5000);
             } catch (e) { /* ignore */ }
         }
 
@@ -10188,10 +10246,10 @@
                     if (reel.stopped) continue;
                     allStopped = false;
 
-                    // Spin freely (instant stop handled in handleSlotStopClick)
-                    reel.offset += reel.speed * 0.10;
+                    // Spin freely downward (instant stop handled in handleSlotStopClick)
+                    reel.offset -= reel.speed * 0.10;
                     if (reel.symbols.length > 0) {
-                        reel.offset = reel.offset % reel.symbols.length;
+                        reel.offset = ((reel.offset % reel.symbols.length) + reel.symbols.length) % reel.symbols.length;
                     }
                 }
 
