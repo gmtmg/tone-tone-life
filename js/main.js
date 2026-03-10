@@ -9471,7 +9471,7 @@
         }
 
         function initSlotReels() {
-            const speeds = [6.0, 7.2, 8.4];
+            const speeds = [3.2, 3.8, 4.4];
             for (let r = 0; r < 3; r++) {
                 const syms = [];
                 for (let i = 0; i < 20; i++) {
@@ -10189,7 +10189,7 @@
                     allStopped = false;
 
                     // Spin freely (instant stop handled in handleSlotStopClick)
-                    reel.offset += reel.speed * 0.16;
+                    reel.offset += reel.speed * 0.10;
                     if (reel.symbols.length > 0) {
                         reel.offset = reel.offset % reel.symbols.length;
                     }
