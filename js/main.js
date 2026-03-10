@@ -9471,7 +9471,7 @@
         }
 
         function initSlotReels() {
-            const speeds = [2.0, 2.4, 2.8];
+            const speeds = [6.0, 7.2, 8.4];
             for (let r = 0; r < 3; r++) {
                 const syms = [];
                 for (let i = 0; i < 20; i++) {
@@ -10188,38 +10188,10 @@
                     if (reel.stopped) continue;
                     allStopped = false;
 
-                    if (reel.targetOffset >= 0) {
-                        // Animate toward exact targetOffset with ease-out
-                        const totalDist = reel.targetOffset - reel.startOffset;
-                        const traveled = reel.offset - reel.startOffset;
-                        const progress = Math.min(1, traveled / totalDist);
-
-                        let currentSpeed;
-                        if (progress < 0.55) {
-                            currentSpeed = reel.speed;
-                        } else {
-                            const dp = (progress - 0.55) / 0.45;
-                            currentSpeed = reel.speed * (1 - dp * dp * 0.92);
-                            currentSpeed = Math.max(currentSpeed, 0.08);
-                        }
-
-                        reel.offset += currentSpeed * 0.06;
-
-                        if (reel.offset >= reel.targetOffset) {
-                            // Snap exactly to target
-                            const totalSymbols = reel.symbols.length;
-                            reel.offset = reel.targetOffset % totalSymbols;
-                            reel.finalIndex = (Math.round(reel.offset) + 1) % totalSymbols;
-                            reel.stopped = true;
-                            reel.speed = 0;
-                            stopChime();
-                            continue;
-                        }
-                    } else {
-                        reel.offset += reel.speed * 0.06;
-                        if (reel.symbols.length > 0) {
-                            reel.offset = reel.offset % reel.symbols.length;
-                        }
+                    // Spin freely (instant stop handled in handleSlotStopClick)
+                    reel.offset += reel.speed * 0.16;
+                    if (reel.symbols.length > 0) {
+                        reel.offset = reel.offset % reel.symbols.length;
                     }
                 }
 
@@ -10246,20 +10218,13 @@
                     const reel = slotMachine.reels[btn.reelIndex];
                     if (!reel.stopped && reel.targetOffset < 0) {
                         const totalSymbols = reel.symbols.length;
-                        // The visual center symbol: round the offset to nearest int for the row that
-                        // is currently closest to the highlight box center
+                        // Instant stop: snap to nearest symbol immediately
                         const snapOffset = Math.round(reel.offset);
-                        // Center row idx = snapOffset + 1
-                        const centerIdx = (snapOffset + 1) % totalSymbols;
-                        // Compute the exact offset that shows centerIdx in center (integer, frac=0)
-                        const landOffset = centerIdx - 1;
-                        // Target = landOffset + enough full revolutions to be > current offset + 1 revolution
-                        let target = landOffset;
-                        while (target < reel.offset + totalSymbols) {
-                            target += totalSymbols;
-                        }
-                        reel.targetOffset = target;
-                        reel.startOffset = reel.offset;
+                        reel.offset = ((snapOffset % totalSymbols) + totalSymbols) % totalSymbols;
+                        reel.finalIndex = (Math.round(reel.offset) + 1) % totalSymbols;
+                        reel.stopped = true;
+                        reel.speed = 0;
+                        reel.targetOffset = 0;
                         reel.flashTimer = Date.now();
                         slotMachine.phase = "stopping";
                         stopChime();
