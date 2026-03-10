@@ -10281,13 +10281,13 @@
 
             if (icons[0] === icons[1] && icons[1] === icons[2]) {
                 tier = "jackpot";
-                labels = { adventurous: 3, lucky: 3, optimistic: 3, active: 3 };
+                labels = { adventurous: 2, lucky: 2, optimistic: 2, active: 2 };
                 spawnSlotParticles(100);
             } else if (icons[0] === icons[1] || icons[1] === icons[2] || icons[0] === icons[2]) {
                 tier = "big";
                 const matchedIcon = icons[0] === icons[1] ? icons[0] : (icons[1] === icons[2] ? icons[1] : icons[0]);
                 const matchedSym = centers.find(c => c.icon === matchedIcon);
-                labels = { [matchedSym.label]: 3, adventurous: 1, optimistic: 1 };
+                labels = { [matchedSym.label]: 2, adventurous: 1 };
                 spawnSlotParticles(30);
             } else if (icons.includes("BAR")) {
                 tier = "small";
@@ -10299,6 +10299,9 @@
 
             slotMachine.resultTier = tier;
             winFanfare(tier);
+
+            // Show FLASHY pachinko-style label animation
+            spawnSlotLabelAnimation(labels, tier);
 
             // Accumulate labels across rounds
             for (const [key, val] of Object.entries(labels)) {
@@ -10333,8 +10336,7 @@
 
             fadeScreenTo(0.95, 500);
             setTimeout(() => {
-                currentScene = SCENE.TRAVEL;
-                startTravelPhase();
+                startThirtiesPhase();
                 fadeScreenTo(0, 400);
             }, 550);
         }
@@ -15991,6 +15993,361 @@
             }
         }
 
+        // ======== Pachinko-style FLASHY Slot Label Animation ========
+        const slotLabelAnimations = [];
+        const slotLabelParticles = [];
+        let slotScreenShake = { intensity: 0, startTime: 0, duration: 0 };
+        let slotFlashOverlay = { alpha: 0, color: "#fff", startTime: 0, duration: 0 };
+        let slotRainbowBurst = { active: false, startTime: 0, duration: 0, x: 0, y: 0 };
+
+        function spawnSlotLabelAnimation(labels, tier) {
+            const startTime = Date.now();
+            const entries = Object.entries(labels).filter(([, v]) => v > 0);
+            const isMiss = tier === "miss";
+            const isJackpot = tier === "jackpot";
+            const isBig = tier === "big";
+
+            // Screen shake
+            if (!isMiss) {
+                slotScreenShake.intensity = isJackpot ? 18 : isBig ? 10 : 5;
+                slotScreenShake.startTime = startTime;
+                slotScreenShake.duration = isJackpot ? 1200 : isBig ? 800 : 400;
+            }
+
+            // Flash overlay
+            if (!isMiss) {
+                slotFlashOverlay.alpha = isJackpot ? 0.8 : isBig ? 0.5 : 0.25;
+                slotFlashOverlay.color = isJackpot ? "#FFD700" : isBig ? "#FF4488" : "#FFFFFF";
+                slotFlashOverlay.startTime = startTime;
+                slotFlashOverlay.duration = isJackpot ? 600 : 400;
+            }
+
+            // Rainbow burst for jackpot/big
+            if (isJackpot || isBig) {
+                slotRainbowBurst.active = true;
+                slotRainbowBurst.startTime = startTime;
+                slotRainbowBurst.duration = isJackpot ? 3000 : 2000;
+                slotRainbowBurst.x = width / 2;
+                slotRainbowBurst.y = height * 0.35;
+            }
+
+            // Explosion particles
+            const particleCount = isJackpot ? 80 : isBig ? 40 : isMiss ? 0 : 15;
+            const hues = isJackpot ? [0, 30, 60, 120, 200, 280, 330] : isBig ? [340, 20, 50] : [45, 60];
+            for (let p = 0; p < particleCount; p++) {
+                const angle = (Math.PI * 2 / particleCount) * p + (Math.random() - 0.5) * 0.5;
+                const speed = (isJackpot ? 6 : 4) + Math.random() * 4;
+                const hue = hues[Math.floor(Math.random() * hues.length)];
+                slotLabelParticles.push({
+                    x: width / 2, y: height * 0.35,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed - 2,
+                    size: 3 + Math.random() * (isJackpot ? 8 : 5),
+                    hue: hue,
+                    life: 1,
+                    decay: 0.008 + Math.random() * 0.012,
+                    type: Math.random() > 0.5 ? "star" : "circle",
+                    sparkle: Math.random(),
+                });
+            }
+
+            // Label text entries with staggered timing
+            entries.forEach(([key, value], i) => {
+                slotLabelAnimations.push({
+                    label: key,
+                    value: value,
+                    tier: tier,
+                    startTime: startTime,
+                    delay: isMiss ? 0 : i * 350,
+                    x: width / 2,
+                    y: height * 0.28 + i * 50,
+                    baseScale: isJackpot ? 2.5 : isBig ? 2.0 : isMiss ? 1.0 : 1.4,
+                    angle: 0,
+                });
+            });
+        }
+
+        function drawSlotLabelAnimations(ctx) {
+            const now = Date.now();
+
+            // 1. Screen shake
+            let shakeX = 0, shakeY = 0;
+            if (slotScreenShake.intensity > 0) {
+                const elapsed = now - slotScreenShake.startTime;
+                if (elapsed < slotScreenShake.duration) {
+                    const decay = 1 - elapsed / slotScreenShake.duration;
+                    const intensity = slotScreenShake.intensity * decay;
+                    shakeX = (Math.random() - 0.5) * intensity * 2;
+                    shakeY = (Math.random() - 0.5) * intensity * 2;
+                    ctx.save();
+                    ctx.translate(shakeX, shakeY);
+                } else {
+                    slotScreenShake.intensity = 0;
+                }
+            }
+
+            // 2. Flash overlay
+            if (slotFlashOverlay.alpha > 0) {
+                const elapsed = now - slotFlashOverlay.startTime;
+                if (elapsed < slotFlashOverlay.duration) {
+                    const t = elapsed / slotFlashOverlay.duration;
+                    const a = slotFlashOverlay.alpha * (1 - t * t);
+                    ctx.save();
+                    ctx.globalAlpha = a;
+                    ctx.fillStyle = slotFlashOverlay.color;
+                    ctx.fillRect(-20, -20, width + 40, height + 40);
+                    ctx.restore();
+                } else {
+                    slotFlashOverlay.alpha = 0;
+                }
+            }
+
+            // 3. Rainbow burst rings
+            if (slotRainbowBurst.active) {
+                const elapsed = now - slotRainbowBurst.startTime;
+                if (elapsed < slotRainbowBurst.duration) {
+                    const t = elapsed / slotRainbowBurst.duration;
+                    ctx.save();
+                    const ringCount = 5;
+                    for (let r = 0; r < ringCount; r++) {
+                        const rt = Math.max(0, t - r * 0.08);
+                        if (rt <= 0) continue;
+                        const radius = rt * Math.max(width, height) * 0.6;
+                        const alpha = Math.max(0, 1 - rt * 1.3) * 0.6;
+                        const hue = (r * 72 + elapsed * 0.3) % 360;
+                        ctx.beginPath();
+                        ctx.arc(slotRainbowBurst.x, slotRainbowBurst.y, radius, 0, Math.PI * 2);
+                        ctx.strokeStyle = `hsla(${hue}, 100%, 65%, ${alpha})`;
+                        ctx.lineWidth = 6 - r;
+                        ctx.stroke();
+                    }
+                    // Center starburst
+                    if (t < 0.5) {
+                        const burstAlpha = (1 - t * 2) * 0.7;
+                        const burstSize = 40 + t * 200;
+                        const rayCount = 12;
+                        ctx.globalAlpha = burstAlpha;
+                        for (let ray = 0; ray < rayCount; ray++) {
+                            const angle = (Math.PI * 2 / rayCount) * ray + elapsed * 0.003;
+                            const hue = (ray * 30 + elapsed * 0.5) % 360;
+                            ctx.strokeStyle = `hsl(${hue}, 100%, 70%)`;
+                            ctx.lineWidth = 3;
+                            ctx.beginPath();
+                            ctx.moveTo(
+                                slotRainbowBurst.x + Math.cos(angle) * 10,
+                                slotRainbowBurst.y + Math.sin(angle) * 10
+                            );
+                            ctx.lineTo(
+                                slotRainbowBurst.x + Math.cos(angle) * burstSize,
+                                slotRainbowBurst.y + Math.sin(angle) * burstSize
+                            );
+                            ctx.stroke();
+                        }
+                    }
+                    ctx.restore();
+                } else {
+                    slotRainbowBurst.active = false;
+                }
+            }
+
+            // 4. Explosion particles
+            for (let i = slotLabelParticles.length - 1; i >= 0; i--) {
+                const p = slotLabelParticles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.08;
+                p.vx *= 0.99;
+                p.life -= p.decay;
+                if (p.life <= 0) {
+                    slotLabelParticles.splice(i, 1);
+                    continue;
+                }
+                ctx.save();
+                ctx.globalAlpha = p.life;
+                const sparkle = 0.6 + Math.sin(now * 0.02 + p.sparkle * 100) * 0.4;
+                ctx.fillStyle = `hsl(${p.hue}, 100%, ${55 + sparkle * 25}%)`;
+                ctx.shadowColor = `hsl(${p.hue}, 100%, 70%)`;
+                ctx.shadowBlur = 8;
+                if (p.type === "star") {
+                    // Draw star shape
+                    ctx.translate(p.x, p.y);
+                    ctx.rotate(now * 0.005 + p.sparkle * 10);
+                    ctx.beginPath();
+                    for (let s = 0; s < 5; s++) {
+                        const a1 = (s * 2 * Math.PI / 5) - Math.PI / 2;
+                        const a2 = a1 + Math.PI / 5;
+                        ctx.lineTo(Math.cos(a1) * p.size, Math.sin(a1) * p.size);
+                        ctx.lineTo(Math.cos(a2) * p.size * 0.4, Math.sin(a2) * p.size * 0.4);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+
+            // 5. Label text with dramatic entrance
+            for (let i = slotLabelAnimations.length - 1; i >= 0; i--) {
+                const anim = slotLabelAnimations[i];
+                const elapsed = now - anim.startTime - anim.delay;
+                if (elapsed < 0) continue;
+                const duration = anim.tier === "jackpot" ? 3500 : anim.tier === "big" ? 2800 : anim.tier === "miss" ? 1500 : 2200;
+                if (elapsed > duration) {
+                    slotLabelAnimations.splice(i, 1);
+                    continue;
+                }
+                const t = elapsed / duration;
+                const isMiss = anim.tier === "miss";
+                const isJackpot = anim.tier === "jackpot";
+                const isBig = anim.tier === "big";
+
+                // Dramatic entrance: slam in from large, bounce, settle
+                let scale, alpha, offsetY;
+                if (t < 0.08) {
+                    // Slam in from 3x size
+                    const st = t / 0.08;
+                    scale = anim.baseScale * (3.0 - 2.0 * st);
+                    alpha = st;
+                    offsetY = 0;
+                } else if (t < 0.15) {
+                    // Bounce up
+                    const st = (t - 0.08) / 0.07;
+                    scale = anim.baseScale * (1.0 + 0.3 * Math.sin(st * Math.PI));
+                    alpha = 1;
+                    offsetY = -10 * Math.sin(st * Math.PI);
+                } else if (t < 0.22) {
+                    // Second smaller bounce
+                    const st = (t - 0.15) / 0.07;
+                    scale = anim.baseScale * (1.0 + 0.12 * Math.sin(st * Math.PI));
+                    alpha = 1;
+                    offsetY = -4 * Math.sin(st * Math.PI);
+                } else if (t < 0.65) {
+                    // Hold steady with pulsing glow
+                    scale = anim.baseScale * (1.0 + Math.sin(elapsed * 0.008) * 0.06);
+                    alpha = 1;
+                    offsetY = 0;
+                } else {
+                    // Fade out and rise
+                    const ft = (t - 0.65) / 0.35;
+                    scale = anim.baseScale * (1.0 + ft * 0.3);
+                    alpha = 1 - ft;
+                    offsetY = -ft * 50;
+                }
+
+                ctx.save();
+                ctx.globalAlpha = alpha;
+                const x = anim.x;
+                const y = anim.y + offsetY;
+                ctx.translate(x, y);
+
+                // Wobble for jackpot
+                if (isJackpot && t > 0.08 && t < 0.65) {
+                    ctx.rotate(Math.sin(elapsed * 0.012) * 0.05);
+                }
+
+                ctx.scale(scale, scale);
+
+                const sign = isMiss ? "+" : "+";
+                const text = `${sign}${anim.value} ${labelDisplay(anim.label)}`;
+
+                // Color cycling for jackpot, solid for others
+                let fillColor, glowColor;
+                if (isJackpot) {
+                    const hue = (elapsed * 0.4 + i * 60) % 360;
+                    fillColor = `hsl(${hue}, 100%, 65%)`;
+                    glowColor = `hsl(${hue}, 100%, 50%)`;
+                } else if (isBig) {
+                    fillColor = "#FF66AA";
+                    glowColor = "#FF2277";
+                } else if (isMiss) {
+                    fillColor = "rgba(180, 180, 200, 0.8)";
+                    glowColor = "rgba(100, 100, 120, 0.4)";
+                } else {
+                    fillColor = "#FFD700";
+                    glowColor = "#FF8800";
+                }
+
+                // Multi-layer glow for emphasis
+                if (!isMiss) {
+                    ctx.shadowColor = glowColor;
+                    ctx.shadowBlur = isJackpot ? 30 : isBig ? 20 : 12;
+                }
+
+                // Background banner for non-miss
+                if (!isMiss) {
+                    const metrics = (function() {
+                        ctx.font = `900 ${isJackpot ? 26 : isBig ? 22 : 18}px 'Zen Maru Gothic', sans-serif`;
+                        return ctx.measureText(text);
+                    })();
+                    const bannerW = metrics.width + 40;
+                    const bannerH = isJackpot ? 46 : isBig ? 40 : 34;
+                    const bannerGrad = ctx.createLinearGradient(-bannerW/2, 0, bannerW/2, 0);
+                    if (isJackpot) {
+                        const hue = (elapsed * 0.3) % 360;
+                        bannerGrad.addColorStop(0, `hsla(${hue}, 100%, 20%, 0.85)`);
+                        bannerGrad.addColorStop(0.5, `hsla(${(hue + 30) % 360}, 100%, 15%, 0.9)`);
+                        bannerGrad.addColorStop(1, `hsla(${(hue + 60) % 360}, 100%, 20%, 0.85)`);
+                    } else if (isBig) {
+                        bannerGrad.addColorStop(0, "rgba(80, 10, 40, 0.85)");
+                        bannerGrad.addColorStop(0.5, "rgba(60, 5, 30, 0.9)");
+                        bannerGrad.addColorStop(1, "rgba(80, 10, 40, 0.85)");
+                    } else {
+                        bannerGrad.addColorStop(0, "rgba(60, 40, 0, 0.8)");
+                        bannerGrad.addColorStop(1, "rgba(40, 25, 0, 0.85)");
+                    }
+                    ctx.fillStyle = bannerGrad;
+                    ctx.beginPath();
+                    ctx.roundRect(-bannerW/2, -bannerH/2, bannerW, bannerH, 8);
+                    ctx.fill();
+
+                    // Banner border with glow
+                    ctx.strokeStyle = isJackpot ? `hsl(${(elapsed * 0.4) % 360}, 100%, 70%)` : isBig ? "#FF66AA" : "#FFD700";
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.roundRect(-bannerW/2, -bannerH/2, bannerW, bannerH, 8);
+                    ctx.stroke();
+                }
+
+                // Main text
+                const fontSize = isJackpot ? 26 : isBig ? 22 : isMiss ? 14 : 18;
+                ctx.font = `900 ${fontSize}px 'Zen Maru Gothic', sans-serif`;
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+
+                // Text outline
+                ctx.strokeStyle = "rgba(0,0,0,0.6)";
+                ctx.lineWidth = isJackpot ? 4 : 3;
+                ctx.strokeText(text, 0, 0);
+
+                // Fill text
+                ctx.fillStyle = fillColor;
+                ctx.fillText(text, 0, 0);
+
+                // Extra shine highlight for jackpot
+                if (isJackpot && t > 0.1 && t < 0.65) {
+                    const shineX = ((elapsed * 0.15) % 300) - 150;
+                    ctx.save();
+                    ctx.globalAlpha = 0.4;
+                    ctx.beginPath();
+                    ctx.rect(shineX - 20, -20, 40, 40);
+                    ctx.clip();
+                    ctx.fillStyle = "rgba(255,255,255,0.8)";
+                    ctx.fillText(text, 0, 0);
+                    ctx.restore();
+                }
+
+                ctx.restore();
+            }
+
+            // Restore from screen shake
+            if (slotScreenShake.intensity > 0 && (now - slotScreenShake.startTime) < slotScreenShake.duration) {
+                ctx.restore();
+            }
+        }
+
         // Chord hover preview system — independent of groove loop
         let chordPreviewSynth = null;
         let chordPreviewDrop = null;
@@ -18317,6 +18674,7 @@
             } else if (currentScene === SCENE.ENTERTAINMENT && slotMachine.active) {
                 updateSlotMachineReels();
                 drawSlotMachineScene(ctx);
+                drawSlotLabelAnimations(ctx);
             } else if (isTopDownScene) {
                 // 見下ろし型2D scenes (PART_TIME, JOB_HUNT, JOB_HUNT2)
                 updateToneDropProximity();
