@@ -4291,8 +4291,6 @@
                 } else if (act.id === "marriage") {
                     drawLivingRoom(ctx, rx1, rw, wallHeight);
                     drawMarriageEffects(ctx, rx1, rw, wallHeight, t);
-                } else if (act.id === "bath") {
-                    drawBathRoom(ctx, rx1, rw, wallHeight);
                 } else if (act.id === "bedroom") {
                     drawBedroomRoom(ctx, rx1, rw, wallHeight);
                 }
@@ -4338,486 +4336,1037 @@
         }
 
         function drawGenkanRoom(ctx, rx, rw, wallH) {
-            // Tile floor (checker pattern)
-            const tileSize = 24;
+            // Tataki tile floor (elegant stone checker)
+            const tileSize = 22;
             const floorTop = wallH;
             for (let ty = floorTop; ty < height; ty += tileSize) {
                 for (let tx = rx; tx < rx + rw; tx += tileSize) {
-                    const isLight = ((Math.floor((tx - rx) / tileSize) + Math.floor((ty - floorTop) / tileSize)) % 2 === 0);
-                    ctx.fillStyle = isLight ? "rgba(220, 215, 205, 0.6)" : "rgba(190, 185, 175, 0.5)";
+                    const col = Math.floor((tx - rx) / tileSize);
+                    const row = Math.floor((ty - floorTop) / tileSize);
+                    const isLight = (col + row) % 2 === 0;
+                    ctx.fillStyle = isLight ? "#d5cfc5" : "#c2bbb0";
                     ctx.fillRect(tx, ty, tileSize, tileSize);
+                    // Grout lines
+                    ctx.strokeStyle = "rgba(160,150,135,0.25)";
+                    ctx.lineWidth = 0.5;
+                    ctx.strokeRect(tx, ty, tileSize, tileSize);
                 }
             }
 
-            // Front door (right side of genkan)
-            const doorW = rw * 0.22;
-            const doorH = wallH * 0.72;
-            const doorX = rx + rw * 0.72;
+            // Step up line (tataki → hall)
+            ctx.fillStyle = "hsl(25, 20%, 52%)";
+            ctx.fillRect(rx, wallH - 4, rw, 5);
+            ctx.fillStyle = "rgba(0,0,0,0.08)";
+            ctx.fillRect(rx, wallH + 1, rw, 3);
+
+            // Front door (right side, detailed wooden door)
+            const doorW = rw * 0.24;
+            const doorH = wallH * 0.75;
+            const doorX = rx + rw * 0.70;
             const doorY = wallH - doorH;
-            ctx.fillStyle = "hsl(25, 35%, 42%)";
-            ctx.beginPath(); ctx.roundRect(doorX, doorY, doorW, doorH, 3); ctx.fill();
-            // Door panels
-            ctx.strokeStyle = "rgba(100, 70, 45, 0.4)";
-            ctx.lineWidth = 2;
-            ctx.strokeRect(doorX + 6, doorY + 8, doorW - 12, doorH * 0.35);
-            ctx.strokeRect(doorX + 6, doorY + doorH * 0.45, doorW - 12, doorH * 0.45);
-            // Doorknob
-            ctx.fillStyle = "rgba(200, 180, 120, 0.8)";
-            ctx.beginPath(); ctx.arc(doorX + doorW - 14, doorY + doorH * 0.5, 5, 0, Math.PI * 2); ctx.fill();
-
-            // Shoe cabinet (left side)
-            const cabW = rw * 0.28;
-            const cabH = wallH * 0.32;
-            const cabX = rx + rw * 0.08;
-            const cabY = wallH - cabH;
-            ctx.fillStyle = "hsl(25, 30%, 48%)";
-            ctx.beginPath(); ctx.roundRect(cabX, cabY, cabW, cabH, 3); ctx.fill();
-            // Cabinet drawers
-            ctx.strokeStyle = "rgba(80, 55, 35, 0.3)";
+            // Door shadow
+            ctx.fillStyle = "rgba(0,0,0,0.06)";
+            ctx.fillRect(doorX + 4, doorY + 4, doorW, doorH);
+            // Door body
+            const doorG = ctx.createLinearGradient(doorX, doorY, doorX + doorW, doorY);
+            doorG.addColorStop(0, "hsl(22, 38%, 38%)");
+            doorG.addColorStop(0.5, "hsl(22, 35%, 44%)");
+            doorG.addColorStop(1, "hsl(22, 38%, 40%)");
+            ctx.fillStyle = doorG;
+            ctx.beginPath(); ctx.roundRect(doorX, doorY, doorW, doorH, 4); ctx.fill();
+            // Door panels (recessed)
+            ctx.fillStyle = "rgba(0,0,0,0.08)";
+            ctx.beginPath(); ctx.roundRect(doorX + 8, doorY + 12, doorW - 16, doorH * 0.33, 3); ctx.fill();
+            ctx.beginPath(); ctx.roundRect(doorX + 8, doorY + doorH * 0.45, doorW - 16, doorH * 0.44, 3); ctx.fill();
+            ctx.strokeStyle = "rgba(90,65,40,0.35)";
             ctx.lineWidth = 1.5;
-            ctx.strokeRect(cabX + 4, cabY + 4, cabW - 8, cabH * 0.45);
-            ctx.strokeRect(cabX + 4, cabY + cabH * 0.52, cabW - 8, cabH * 0.42);
-            // Drawer knobs
-            ctx.fillStyle = "rgba(180, 160, 110, 0.7)";
-            ctx.beginPath(); ctx.arc(cabX + cabW / 2, cabY + cabH * 0.25, 3, 0, Math.PI * 2); ctx.fill();
-            ctx.beginPath(); ctx.arc(cabX + cabW / 2, cabY + cabH * 0.73, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.roundRect(doorX + 8, doorY + 12, doorW - 16, doorH * 0.33, 3); ctx.stroke();
+            ctx.beginPath(); ctx.roundRect(doorX + 8, doorY + doorH * 0.45, doorW - 16, doorH * 0.44, 3); ctx.stroke();
+            // Doorknob (brass)
+            const knobX = doorX + doorW - 16, knobY = doorY + doorH * 0.5;
+            ctx.fillStyle = "#c8a84e";
+            ctx.beginPath(); ctx.arc(knobX, knobY, 6, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "rgba(255,240,180,0.5)";
+            ctx.beginPath(); ctx.arc(knobX - 1.5, knobY - 2, 2.5, 0, Math.PI * 2); ctx.fill();
+            // Peephole
+            ctx.fillStyle = "#2a2a2a";
+            ctx.beginPath(); ctx.arc(doorX + doorW * 0.5, doorY + doorH * 0.18, 3, 0, Math.PI * 2); ctx.fill();
 
-            // Umbrella stand
-            const umbX = rx + rw * 0.44;
-            const umbY = wallH - wallH * 0.22;
-            ctx.fillStyle = "rgba(120, 110, 100, 0.6)";
-            ctx.beginPath();
-            ctx.moveTo(umbX, wallH); ctx.lineTo(umbX - 10, umbY + 10);
-            ctx.lineTo(umbX + 22, umbY + 10); ctx.lineTo(umbX + 12, wallH);
-            ctx.closePath(); ctx.fill();
-            // Umbrellas sticking out
-            ctx.strokeStyle = "hsl(210, 50%, 55%)";
-            ctx.lineWidth = 3;
-            ctx.beginPath(); ctx.moveTo(umbX + 4, umbY + 10); ctx.lineTo(umbX, umbY - 15); ctx.stroke();
-            ctx.strokeStyle = "hsl(0, 50%, 55%)";
-            ctx.beginPath(); ctx.moveTo(umbX + 8, umbY + 10); ctx.lineTo(umbX + 12, umbY - 12); ctx.stroke();
-
-            // Small frosted window
-            const winW = rw * 0.18;
-            const winH = wallH * 0.25;
-            const winX = rx + rw * 0.46;
-            const winY = wallH * 0.15;
-            ctx.fillStyle = "rgba(220, 235, 245, 0.6)";
-            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 2); ctx.fill();
-            ctx.strokeStyle = "rgba(160, 150, 135, 0.6)";
-            ctx.lineWidth = 4;
-            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 2); ctx.stroke();
-            // Frosted effect (horizontal lines)
-            ctx.strokeStyle = "rgba(200, 215, 225, 0.4)";
-            ctx.lineWidth = 1;
-            for (let ly = winY + 6; ly < winY + winH - 4; ly += 5) {
+            // Shoe cabinet with shadow & wood grain
+            const cabW = rw * 0.30;
+            const cabH = wallH * 0.34;
+            const cabX = rx + rw * 0.06;
+            const cabY = wallH - cabH;
+            ctx.fillStyle = "rgba(0,0,0,0.05)";
+            ctx.fillRect(cabX + 3, cabY + 3, cabW, cabH);
+            const cabG = ctx.createLinearGradient(cabX, cabY, cabX, cabY + cabH);
+            cabG.addColorStop(0, "hsl(28, 32%, 52%)");
+            cabG.addColorStop(1, "hsl(28, 28%, 46%)");
+            ctx.fillStyle = cabG;
+            ctx.beginPath(); ctx.roundRect(cabX, cabY, cabW, cabH, 4); ctx.fill();
+            // Wood grain texture
+            ctx.strokeStyle = "rgba(60,40,20,0.06)";
+            ctx.lineWidth = 0.8;
+            for (let g = cabY + 5; g < cabY + cabH - 5; g += 7) {
                 ctx.beginPath();
-                ctx.moveTo(winX + 4, ly); ctx.lineTo(winX + winW - 4, ly);
+                ctx.moveTo(cabX + 3, g);
+                ctx.quadraticCurveTo(cabX + cabW * 0.5, g + (Math.sin(g * 0.1) * 2), cabX + cabW - 3, g);
                 ctx.stroke();
             }
+            // Top surface highlight
+            ctx.fillStyle = "rgba(255,245,230,0.15)";
+            ctx.fillRect(cabX + 2, cabY, cabW - 4, 4);
+            // Doors
+            ctx.strokeStyle = "rgba(70,50,30,0.25)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.roundRect(cabX + 5, cabY + 5, cabW / 2 - 8, cabH - 10, 2); ctx.stroke();
+            ctx.beginPath(); ctx.roundRect(cabX + cabW / 2 + 3, cabY + 5, cabW / 2 - 8, cabH - 10, 2); ctx.stroke();
+            // Knobs
+            ctx.fillStyle = "#b8a050";
+            ctx.beginPath(); ctx.arc(cabX + cabW / 2 - 6, cabY + cabH * 0.5, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(cabX + cabW / 2 + 6, cabY + cabH * 0.5, 3, 0, Math.PI * 2); ctx.fill();
+            // Key tray on top
+            ctx.fillStyle = "rgba(160,155,145,0.5)";
+            ctx.beginPath();
+            ctx.ellipse(cabX + cabW * 0.5, cabY - 2, cabW * 0.22, 5, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Umbrella stand (ceramic cylinder)
+            const umbX = rx + rw * 0.44;
+            const umbBot = wallH;
+            const umbH = wallH * 0.22;
+            const umbW = 24;
+            ctx.fillStyle = "rgba(0,0,0,0.04)";
+            ctx.beginPath();
+            ctx.ellipse(umbX + umbW / 2 + 2, umbBot, umbW / 2 + 1, 5, 0, 0, Math.PI * 2);
+            ctx.fill();
+            const umbG = ctx.createLinearGradient(umbX, 0, umbX + umbW, 0);
+            umbG.addColorStop(0, "hsl(210, 15%, 60%)");
+            umbG.addColorStop(0.5, "hsl(210, 12%, 72%)");
+            umbG.addColorStop(1, "hsl(210, 15%, 62%)");
+            ctx.fillStyle = umbG;
+            ctx.fillRect(umbX, umbBot - umbH, umbW, umbH);
+            ctx.beginPath();
+            ctx.ellipse(umbX + umbW / 2, umbBot - umbH, umbW / 2, 4, 0, 0, Math.PI * 2);
+            ctx.fill();
+            // Umbrellas
+            ctx.lineWidth = 3; ctx.lineCap = "round";
+            ctx.strokeStyle = "hsl(210, 55%, 52%)";
+            ctx.beginPath(); ctx.moveTo(umbX + 7, umbBot - umbH); ctx.lineTo(umbX + 3, umbBot - umbH - 28); ctx.stroke();
+            ctx.strokeStyle = "hsl(350, 55%, 52%)";
+            ctx.beginPath(); ctx.moveTo(umbX + 14, umbBot - umbH); ctx.lineTo(umbX + 18, umbBot - umbH - 25); ctx.stroke();
+            ctx.lineCap = "butt";
+
+            // Frosted glass window with warm light
+            const winW = rw * 0.20;
+            const winH = wallH * 0.28;
+            const winX = rx + rw * 0.44;
+            const winY = wallH * 0.13;
+            // Light coming through
+            const wGlow = ctx.createRadialGradient(winX + winW / 2, winY + winH / 2, 5, winX + winW / 2, winY + winH / 2, winH * 0.8);
+            wGlow.addColorStop(0, "rgba(255,250,235,0.12)");
+            wGlow.addColorStop(1, "rgba(255,250,235,0)");
+            ctx.fillStyle = wGlow;
+            ctx.beginPath(); ctx.arc(winX + winW / 2, winY + winH / 2, winH * 0.8, 0, Math.PI * 2); ctx.fill();
+            // Glass
+            const frostG = ctx.createLinearGradient(winX, winY, winX, winY + winH);
+            frostG.addColorStop(0, "rgba(225,240,250,0.65)");
+            frostG.addColorStop(1, "rgba(210,225,238,0.55)");
+            ctx.fillStyle = frostG;
+            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 3); ctx.fill();
+            // Frosted texture
+            ctx.strokeStyle = "rgba(200,218,230,0.35)";
+            ctx.lineWidth = 1;
+            for (let ly = winY + 5; ly < winY + winH - 4; ly += 4) {
+                ctx.beginPath();
+                ctx.moveTo(winX + 3, ly); ctx.lineTo(winX + winW - 3, ly);
+                ctx.stroke();
+            }
+            // Frame (thick wood)
+            ctx.strokeStyle = "hsl(25, 20%, 50%)";
+            ctx.lineWidth = 5;
+            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 3); ctx.stroke();
+            // Cross bar
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(winX + winW / 2, winY + 3); ctx.lineTo(winX + winW / 2, winY + winH - 3);
+            ctx.stroke();
         }
 
         function drawKitchenRoom(ctx, rx, rw, wallH) {
-            // Tile wall (white/light grid)
-            const tileS = 18;
-            const tileH = wallH * 0.45;
-            const tileY = wallH - tileH;
-            for (let ty = tileY; ty < wallH; ty += tileS) {
-                for (let tx = rx; tx < rx + rw; tx += tileS) {
-                    ctx.fillStyle = "rgba(240, 245, 248, 0.7)";
-                    ctx.fillRect(tx, ty, tileS - 1, tileS - 1);
+            // Subway tile backsplash (white with soft blue tint, offset brick pattern)
+            const tileW = 24, tileH2 = 12;
+            const splashTop = wallH * 0.28, splashBot = wallH * 0.72;
+            for (let ty = splashTop; ty < splashBot; ty += tileH2) {
+                const row = Math.floor((ty - splashTop) / tileH2);
+                const offsetX = (row % 2) * (tileW / 2);
+                for (let tx = rx; tx < rx + rw; tx += tileW) {
+                    const txx = tx + offsetX;
+                    if (txx + tileW < rx || txx > rx + rw) continue;
+                    const tg = ctx.createLinearGradient(txx, ty, txx, ty + tileH2);
+                    tg.addColorStop(0, "rgba(242, 248, 252, 0.75)");
+                    tg.addColorStop(1, "rgba(232, 240, 246, 0.7)");
+                    ctx.fillStyle = tg;
+                    ctx.beginPath(); ctx.roundRect(txx, ty, tileW - 1.5, tileH2 - 1.5, 1); ctx.fill();
+                    // Beveled highlight on top edge
+                    ctx.fillStyle = "rgba(255,255,255,0.35)";
+                    ctx.fillRect(txx + 1, ty, tileW - 3.5, 1);
                 }
             }
 
-            // L-shape counter (bottom-left along wall)
-            const counterH = wallH * 0.25;
+            // L-shape counter with marble top
+            const counterH = wallH * 0.28;
             const counterY = wallH - counterH;
-            const counterW = rw * 0.55;
-            ctx.fillStyle = "hsl(30, 15%, 65%)";
-            ctx.fillRect(rx + rw * 0.05, counterY, counterW, counterH);
-            // Counter top
-            ctx.fillStyle = "rgba(230, 225, 215, 0.9)";
-            ctx.fillRect(rx + rw * 0.05, counterY, counterW, 6);
-            // Sink (oval on counter)
-            ctx.fillStyle = "rgba(200, 210, 220, 0.7)";
-            ctx.beginPath();
-            ctx.ellipse(rx + rw * 0.25, counterY + 3, 18, 8, 0, 0, Math.PI * 2);
-            ctx.fill();
-            // Faucet
-            ctx.strokeStyle = "rgba(180, 180, 185, 0.8)";
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.moveTo(rx + rw * 0.25, counterY); ctx.lineTo(rx + rw * 0.25, counterY - 20);
-            ctx.quadraticCurveTo(rx + rw * 0.25 + 12, counterY - 22, rx + rw * 0.25 + 12, counterY - 10);
-            ctx.stroke();
+            const counterW = rw * 0.58;
+            const cX = rx + rw * 0.04;
+            // Counter body (wood grain)
+            const cbG = ctx.createLinearGradient(cX, counterY, cX, wallH);
+            cbG.addColorStop(0, "hsl(28, 28%, 52%)");
+            cbG.addColorStop(1, "hsl(28, 25%, 44%)");
+            ctx.fillStyle = cbG;
+            ctx.beginPath(); ctx.roundRect(cX, counterY, counterW, counterH, [0, 0, 4, 4]); ctx.fill();
+            // Cabinet doors
+            const cabCount = 3;
+            const cabPad = 6;
+            const cabW2 = (counterW - cabPad * (cabCount + 1)) / cabCount;
+            for (let i = 0; i < cabCount; i++) {
+                const cx = cX + cabPad + i * (cabW2 + cabPad);
+                ctx.strokeStyle = "rgba(70,50,30,0.2)";
+                ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.roundRect(cx, counterY + 8, cabW2, counterH - 16, 2); ctx.stroke();
+                ctx.fillStyle = "#b8a050";
+                ctx.beginPath(); ctx.arc(cx + cabW2 / 2, counterY + counterH / 2, 2.5, 0, Math.PI * 2); ctx.fill();
+            }
+            // Wood grain on cabinet
+            ctx.strokeStyle = "rgba(60,40,20,0.05)";
+            ctx.lineWidth = 0.7;
+            for (let g = counterY + 4; g < wallH - 4; g += 6) {
+                ctx.beginPath();
+                ctx.moveTo(cX + 2, g);
+                ctx.quadraticCurveTo(cX + counterW * 0.5, g + Math.sin(g * 0.08) * 1.5, cX + counterW - 2, g);
+                ctx.stroke();
+            }
+            // Marble countertop
+            const marbG = ctx.createLinearGradient(cX, counterY - 3, cX + counterW, counterY + 8);
+            marbG.addColorStop(0, "hsl(0, 0%, 93%)");
+            marbG.addColorStop(0.3, "hsl(0, 0%, 96%)");
+            marbG.addColorStop(0.7, "hsl(0, 0%, 91%)");
+            marbG.addColorStop(1, "hsl(0, 0%, 94%)");
+            ctx.fillStyle = marbG;
+            ctx.beginPath(); ctx.roundRect(cX - 2, counterY - 3, counterW + 4, 10, 2); ctx.fill();
+            // Marble veins
+            ctx.strokeStyle = "rgba(180,175,170,0.2)";
+            ctx.lineWidth = 0.6;
+            ctx.beginPath(); ctx.moveTo(cX + 10, counterY); ctx.quadraticCurveTo(cX + counterW * 0.3, counterY + 3, cX + counterW * 0.5, counterY - 1); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cX + counterW * 0.4, counterY + 2); ctx.quadraticCurveTo(cX + counterW * 0.7, counterY - 2, cX + counterW - 10, counterY + 1); ctx.stroke();
+            // Front edge shadow
+            ctx.fillStyle = "rgba(0,0,0,0.06)";
+            ctx.fillRect(cX - 2, counterY + 5, counterW + 4, 3);
 
-            // Refrigerator (right side, tall white box)
-            const fridgeW = rw * 0.14;
-            const fridgeH = wallH * 0.55;
+            // Stainless steel sink (recessed oval)
+            const sinkCX = cX + counterW * 0.38, sinkCY = counterY + 1;
+            ctx.fillStyle = "rgba(0,0,0,0.04)";
+            ctx.beginPath(); ctx.ellipse(sinkCX, sinkCY + 2, 22, 10, 0, 0, Math.PI * 2); ctx.fill();
+            const sinkG = ctx.createRadialGradient(sinkCX - 3, sinkCY - 2, 2, sinkCX, sinkCY, 20);
+            sinkG.addColorStop(0, "#d8dde0");
+            sinkG.addColorStop(0.6, "#c0c5c8");
+            sinkG.addColorStop(1, "#b0b5b8");
+            ctx.fillStyle = sinkG;
+            ctx.beginPath(); ctx.ellipse(sinkCX, sinkCY, 20, 8, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = "rgba(160,165,170,0.5)";
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.ellipse(sinkCX, sinkCY, 20, 8, 0, 0, Math.PI * 2); ctx.stroke();
+            // Drain
+            ctx.fillStyle = "#888";
+            ctx.beginPath(); ctx.arc(sinkCX, sinkCY + 1, 2.5, 0, Math.PI * 2); ctx.fill();
+
+            // Gooseneck faucet (chrome)
+            const faucetX = sinkCX + 14;
+            ctx.strokeStyle = "#c0c4c8";
+            ctx.lineWidth = 4;
+            ctx.lineCap = "round";
+            ctx.beginPath();
+            ctx.moveTo(faucetX, counterY);
+            ctx.lineTo(faucetX, counterY - 22);
+            ctx.quadraticCurveTo(faucetX, counterY - 32, faucetX - 14, counterY - 30);
+            ctx.stroke();
+            // Chrome highlight
+            ctx.strokeStyle = "rgba(255,255,255,0.35)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(faucetX - 1, counterY);
+            ctx.lineTo(faucetX - 1, counterY - 21);
+            ctx.stroke();
+            ctx.lineCap = "butt";
+
+            // Refrigerator (stainless steel, French door style)
+            const fridgeW = rw * 0.16;
+            const fridgeH = wallH * 0.62;
             const fridgeX = rx + rw * 0.78;
             const fridgeY = wallH - fridgeH;
-            ctx.fillStyle = "rgba(240, 242, 245, 0.9)";
-            ctx.beginPath(); ctx.roundRect(fridgeX, fridgeY, fridgeW, fridgeH, 3); ctx.fill();
-            ctx.strokeStyle = "rgba(200, 200, 205, 0.6)";
-            ctx.lineWidth = 2;
-            ctx.strokeRect(fridgeX, fridgeY, fridgeW, fridgeH);
-            // Fridge door line
-            ctx.beginPath();
-            ctx.moveTo(fridgeX, fridgeY + fridgeH * 0.38);
-            ctx.lineTo(fridgeX + fridgeW, fridgeY + fridgeH * 0.38);
-            ctx.stroke();
-            // Handle
-            ctx.fillStyle = "rgba(180, 180, 185, 0.7)";
-            ctx.fillRect(fridgeX + fridgeW - 8, fridgeY + fridgeH * 0.15, 3, 18);
-            ctx.fillRect(fridgeX + fridgeW - 8, fridgeY + fridgeH * 0.5, 3, 18);
+            // Shadow
+            ctx.fillStyle = "rgba(0,0,0,0.05)";
+            ctx.fillRect(fridgeX + 3, fridgeY + 3, fridgeW, fridgeH);
+            // Body
+            const fG = ctx.createLinearGradient(fridgeX, 0, fridgeX + fridgeW, 0);
+            fG.addColorStop(0, "#dde0e3");
+            fG.addColorStop(0.3, "#e8eaec");
+            fG.addColorStop(0.7, "#e5e7e9");
+            fG.addColorStop(1, "#d8dbde");
+            ctx.fillStyle = fG;
+            ctx.beginPath(); ctx.roundRect(fridgeX, fridgeY, fridgeW, fridgeH, 4); ctx.fill();
+            // Freezer/fridge split
+            const splitY = fridgeY + fridgeH * 0.38;
+            ctx.strokeStyle = "rgba(150,155,160,0.4)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(fridgeX + 2, splitY); ctx.lineTo(fridgeX + fridgeW - 2, splitY); ctx.stroke();
+            // French door split (top section)
+            ctx.beginPath(); ctx.moveTo(fridgeX + fridgeW / 2, fridgeY + 4); ctx.lineTo(fridgeX + fridgeW / 2, splitY - 2); ctx.stroke();
+            // Handles (sleek bars)
+            ctx.fillStyle = "#b0b4b8";
+            const handleW = 3, handleH2 = 20;
+            ctx.beginPath(); ctx.roundRect(fridgeX + fridgeW / 2 - 8, fridgeY + (splitY - fridgeY) * 0.35, handleW, handleH2, 1); ctx.fill();
+            ctx.beginPath(); ctx.roundRect(fridgeX + fridgeW / 2 + 5, fridgeY + (splitY - fridgeY) * 0.35, handleW, handleH2, 1); ctx.fill();
+            ctx.beginPath(); ctx.roundRect(fridgeX + fridgeW / 2 - 2, splitY + (fridgeH * 0.62) * 0.3, handleW, handleH2, 1); ctx.fill();
+            // Ice/water dispenser (small dark rectangle on left door)
+            ctx.fillStyle = "rgba(40,45,50,0.4)";
+            ctx.beginPath(); ctx.roundRect(fridgeX + fridgeW * 0.15, fridgeY + (splitY - fridgeY) * 0.5, fridgeW * 0.2, 10, 2); ctx.fill();
+            // Outline
+            ctx.strokeStyle = "rgba(160,165,170,0.35)";
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.roundRect(fridgeX, fridgeY, fridgeW, fridgeH, 4); ctx.stroke();
 
-            // Hanging cabinets
-            const hangY = wallH * 0.08;
+            // Hanging cabinets (with interior glow)
+            const hangY = wallH * 0.05;
             const hangH = wallH * 0.2;
             for (let i = 0; i < 3; i++) {
-                const hx = rx + rw * 0.08 + i * (rw * 0.18);
-                ctx.fillStyle = "hsl(30, 20%, 55%)";
-                ctx.beginPath(); ctx.roundRect(hx, hangY, rw * 0.15, hangH, 3); ctx.fill();
-                ctx.strokeStyle = "rgba(100, 80, 60, 0.3)";
-                ctx.lineWidth = 1;
-                ctx.strokeRect(hx + 2, hangY + 2, rw * 0.15 - 4, hangH - 4);
-                // Knob
-                ctx.fillStyle = "rgba(180, 160, 110, 0.7)";
-                ctx.beginPath(); ctx.arc(hx + rw * 0.075, hangY + hangH - 10, 3, 0, Math.PI * 2); ctx.fill();
+                const hx = rx + rw * 0.06 + i * (rw * 0.19);
+                const hw = rw * 0.16;
+                // Shadow
+                ctx.fillStyle = "rgba(0,0,0,0.04)";
+                ctx.fillRect(hx + 2, hangY + 2, hw, hangH);
+                // Cabinet body
+                const hcG = ctx.createLinearGradient(hx, hangY, hx, hangY + hangH);
+                hcG.addColorStop(0, "hsl(28, 25%, 55%)");
+                hcG.addColorStop(1, "hsl(28, 22%, 48%)");
+                ctx.fillStyle = hcG;
+                ctx.beginPath(); ctx.roundRect(hx, hangY, hw, hangH, 4); ctx.fill();
+                // Wood grain
+                ctx.strokeStyle = "rgba(60,40,20,0.06)";
+                ctx.lineWidth = 0.6;
+                for (let g = hangY + 3; g < hangY + hangH - 3; g += 5) {
+                    ctx.beginPath();
+                    ctx.moveTo(hx + 2, g); ctx.lineTo(hx + hw - 2, g + Math.sin(g * 0.1) * 1);
+                    ctx.stroke();
+                }
+                // Door inset
+                ctx.strokeStyle = "rgba(70,50,30,0.2)";
+                ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.roundRect(hx + 4, hangY + 4, hw - 8, hangH - 8, 2); ctx.stroke();
+                // Brass knob
+                ctx.fillStyle = "#c8a84e";
+                ctx.beginPath(); ctx.arc(hx + hw / 2, hangY + hangH - 10, 3, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = "rgba(255,240,180,0.4)";
+                ctx.beginPath(); ctx.arc(hx + hw / 2 - 1, hangY + hangH - 11, 1.5, 0, Math.PI * 2); ctx.fill();
+                // Bottom edge highlight
+                ctx.fillStyle = "rgba(0,0,0,0.08)";
+                ctx.fillRect(hx + 1, hangY + hangH - 1, hw - 2, 2);
             }
 
-            // Small window
-            const winW = rw * 0.16;
-            const winH = wallH * 0.22;
-            const winX = rx + rw * 0.65;
-            const winY = wallH * 0.12;
-            const skyG = ctx.createLinearGradient(winX, winY, winX, winY + winH);
-            skyG.addColorStop(0, "#d4e8f8");
-            skyG.addColorStop(1, "#f0f6fa");
-            ctx.fillStyle = skyG;
-            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 2); ctx.fill();
-            ctx.strokeStyle = "rgba(160, 150, 135, 0.6)";
-            ctx.lineWidth = 4;
-            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 2); ctx.stroke();
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(winX + winW / 2, winY); ctx.lineTo(winX + winW / 2, winY + winH);
-            ctx.stroke();
-        }
-
-        function drawLivingRoom(ctx, rx, rw, wallH) {
-            // Large window with curtains
-            const winW = rw * 0.35;
-            const winH = wallH * 0.52;
-            const winX = rx + rw * 0.5 - winW / 2;
-            const winY = wallH * 0.1;
-            // Window light glow
-            const wGlow = ctx.createRadialGradient(winX + winW / 2, winY + winH / 2, 10, winX + winW / 2, winY + winH / 2, winH);
-            wGlow.addColorStop(0, "rgba(255, 252, 240, 0.15)");
-            wGlow.addColorStop(1, "rgba(255, 252, 240, 0)");
+            // Kitchen window with herbs on sill
+            const winW = rw * 0.18;
+            const winH = wallH * 0.25;
+            const winX = rx + rw * 0.66;
+            const winY = wallH * 0.08;
+            // Light glow
+            const wGlow = ctx.createRadialGradient(winX + winW / 2, winY + winH / 2, 5, winX + winW / 2, winY + winH / 2, winH * 0.9);
+            wGlow.addColorStop(0, "rgba(255,252,240,0.1)");
+            wGlow.addColorStop(1, "rgba(255,252,240,0)");
             ctx.fillStyle = wGlow;
-            ctx.beginPath(); ctx.arc(winX + winW / 2, winY + winH / 2, winH, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(winX + winW / 2, winY + winH / 2, winH * 0.9, 0, Math.PI * 2); ctx.fill();
             // Sky
             const skyG = ctx.createLinearGradient(winX, winY, winX, winY + winH);
-            skyG.addColorStop(0, "#d4e8f8");
-            skyG.addColorStop(0.6, "#e8f2fc");
-            skyG.addColorStop(1, "#f0f6fa");
+            skyG.addColorStop(0, "#c8e2f6");
+            skyG.addColorStop(0.6, "#daeefa");
+            skyG.addColorStop(1, "#e8f4fc");
             ctx.fillStyle = skyG;
             ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 2); ctx.fill();
             // Frame
-            ctx.strokeStyle = "rgba(160, 150, 135, 0.6)";
-            ctx.lineWidth = 6;
-            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 2); ctx.stroke();
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.moveTo(winX + winW / 2, winY); ctx.lineTo(winX + winW / 2, winY + winH);
-            ctx.moveTo(winX, winY + winH / 2); ctx.lineTo(winX + winW, winY + winH / 2);
-            ctx.stroke();
-            // Window sill
-            ctx.fillStyle = "rgba(200, 195, 185, 0.7)";
-            ctx.beginPath(); ctx.roundRect(winX - 8, winY + winH - 2, winW + 16, 8, 2); ctx.fill();
-            // Curtains
-            const curtainColor = "rgba(200, 180, 155, 0.55)";
-            ctx.fillStyle = curtainColor;
-            ctx.beginPath();
-            ctx.moveTo(winX - 14, winY - 6);
-            ctx.quadraticCurveTo(winX - 40, winY + winH * 0.35, winX - 18, winY + winH + 4);
-            ctx.lineTo(winX + 6, winY + winH + 4);
-            ctx.quadraticCurveTo(winX - 18, winY + winH * 0.38, winX + 10, winY - 6);
-            ctx.closePath(); ctx.fill();
-            ctx.fillStyle = curtainColor;
-            ctx.beginPath();
-            ctx.moveTo(winX + winW + 14, winY - 6);
-            ctx.quadraticCurveTo(winX + winW + 40, winY + winH * 0.35, winX + winW + 18, winY + winH + 4);
-            ctx.lineTo(winX + winW - 6, winY + winH + 4);
-            ctx.quadraticCurveTo(winX + winW + 18, winY + winH * 0.38, winX + winW - 10, winY - 6);
-            ctx.closePath(); ctx.fill();
-            // Curtain rod
-            ctx.strokeStyle = "rgba(150, 140, 125, 0.55)";
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.moveTo(winX - 24, winY - 8); ctx.lineTo(winX + winW + 24, winY - 8);
-            ctx.stroke();
-
-            // Pendant light
-            const lampX = rx + rw * 0.5;
-            ctx.strokeStyle = "rgba(80, 75, 70, 0.4)";
-            ctx.lineWidth = 1.5;
-            ctx.beginPath(); ctx.moveTo(lampX, 0); ctx.lineTo(lampX, 40); ctx.stroke();
-            const shadeG = ctx.createLinearGradient(lampX - 28, 40, lampX + 28, 40);
-            shadeG.addColorStop(0, "rgba(240, 230, 210, 0.9)");
-            shadeG.addColorStop(0.5, "rgba(250, 245, 230, 0.95)");
-            shadeG.addColorStop(1, "rgba(235, 225, 205, 0.9)");
-            ctx.fillStyle = shadeG;
-            ctx.beginPath();
-            ctx.moveTo(lampX - 26, 58);
-            ctx.quadraticCurveTo(lampX - 28, 40, lampX, 37);
-            ctx.quadraticCurveTo(lampX + 28, 40, lampX + 26, 58);
-            ctx.closePath(); ctx.fill();
-            // Warm glow
-            const glow = ctx.createRadialGradient(lampX, 72, 5, lampX, 72, 130);
-            glow.addColorStop(0, "rgba(255, 245, 200, 0.22)");
-            glow.addColorStop(1, "rgba(255, 245, 200, 0)");
-            ctx.fillStyle = glow;
-            ctx.beginPath(); ctx.arc(lampX, 72, 130, 0, Math.PI * 2); ctx.fill();
-
-            // Sofa (rounded shape)
-            const sofaW = rw * 0.32;
-            const sofaH = wallH * 0.18;
-            const sofaX = rx + rw * 0.1;
-            const sofaY = wallH - sofaH - 5;
-            ctx.fillStyle = "hsl(25, 30%, 55%)";
-            ctx.beginPath(); ctx.roundRect(sofaX, sofaY, sofaW, sofaH, 12); ctx.fill();
-            // Sofa back
-            ctx.fillStyle = "hsl(25, 28%, 50%)";
-            ctx.beginPath(); ctx.roundRect(sofaX, sofaY - sofaH * 0.4, sofaW, sofaH * 0.5, 10); ctx.fill();
-            // Cushions
-            ctx.fillStyle = "hsl(30, 35%, 60%)";
-            ctx.beginPath(); ctx.roundRect(sofaX + 6, sofaY + 3, sofaW * 0.45 - 4, sofaH - 8, 6); ctx.fill();
-            ctx.beginPath(); ctx.roundRect(sofaX + sofaW * 0.48, sofaY + 3, sofaW * 0.45, sofaH - 8, 6); ctx.fill();
-
-            // TV stand + TV
-            const tvStandW = rw * 0.22;
-            const tvStandH = wallH * 0.1;
-            const tvStandX = rx + rw * 0.68;
-            const tvStandY = wallH - tvStandH;
-            ctx.fillStyle = "hsl(30, 15%, 48%)";
-            ctx.beginPath(); ctx.roundRect(tvStandX, tvStandY, tvStandW, tvStandH, 3); ctx.fill();
-            // TV
-            const tvW = tvStandW * 0.85;
-            const tvH = wallH * 0.25;
-            const tvX = tvStandX + (tvStandW - tvW) / 2;
-            const tvY = tvStandY - tvH;
-            ctx.fillStyle = "#1a1a1a";
-            ctx.beginPath(); ctx.roundRect(tvX, tvY, tvW, tvH, 3); ctx.fill();
-            // TV screen
-            ctx.fillStyle = "rgba(40, 60, 80, 0.8)";
-            ctx.fillRect(tvX + 4, tvY + 4, tvW - 8, tvH - 8);
-
-            // Rug (ellipse, warm color)
-            ctx.fillStyle = "rgba(180, 130, 90, 0.25)";
-            ctx.beginPath();
-            ctx.ellipse(rx + rw * 0.45, wallH + (height - wallH) * 0.4, rw * 0.25, (height - wallH) * 0.25, 0, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Houseplant
-            const plantX = rx + rw * 0.88;
-            const plantY = wallH;
-            // Pot
-            ctx.fillStyle = "rgba(180, 120, 80, 0.6)";
-            ctx.beginPath();
-            ctx.moveTo(plantX - 10, plantY); ctx.lineTo(plantX - 14, plantY - 18);
-            ctx.lineTo(plantX + 14, plantY - 18); ctx.lineTo(plantX + 10, plantY);
-            ctx.closePath(); ctx.fill();
-            // Leaves
-            ctx.fillStyle = "rgba(80, 140, 60, 0.5)";
-            ctx.beginPath(); ctx.ellipse(plantX, plantY - 28, 14, 10, -0.3, 0, Math.PI * 2); ctx.fill();
-            ctx.beginPath(); ctx.ellipse(plantX - 6, plantY - 36, 10, 8, 0.4, 0, Math.PI * 2); ctx.fill();
-            ctx.beginPath(); ctx.ellipse(plantX + 8, plantY - 34, 11, 8, -0.5, 0, Math.PI * 2); ctx.fill();
-        }
-
-        function drawBathRoom(ctx, rx, rw, wallH) {
-            // Tile wall (light blue grid)
-            const tileS = 16;
-            for (let ty = wallH * 0.3; ty < wallH; ty += tileS) {
-                for (let tx = rx; tx < rx + rw; tx += tileS) {
-                    ctx.fillStyle = "rgba(210, 230, 240, 0.5)";
-                    ctx.fillRect(tx, ty, tileS - 1, tileS - 1);
-                }
-            }
-
-            // Bathtub (white ellipse with blue water)
-            const tubW = rw * 0.42;
-            const tubH = wallH * 0.2;
-            const tubX = rx + rw * 0.3;
-            const tubY = wallH - tubH - 5;
-            // Tub body
-            ctx.fillStyle = "rgba(245, 245, 248, 0.95)";
-            ctx.beginPath(); ctx.ellipse(tubX + tubW / 2, tubY + tubH / 2, tubW / 2, tubH / 2, 0, 0, Math.PI * 2); ctx.fill();
-            ctx.strokeStyle = "rgba(200, 200, 210, 0.6)";
-            ctx.lineWidth = 3;
-            ctx.beginPath(); ctx.ellipse(tubX + tubW / 2, tubY + tubH / 2, tubW / 2, tubH / 2, 0, 0, Math.PI * 2); ctx.stroke();
-            // Water surface
-            ctx.fillStyle = "rgba(150, 200, 230, 0.45)";
-            ctx.beginPath(); ctx.ellipse(tubX + tubW / 2, tubY + tubH / 2 + 4, tubW / 2 - 6, tubH / 2 - 6, 0, 0, Math.PI * 2); ctx.fill();
-
-            // Shower head (on wall)
-            const shX = rx + rw * 0.58;
-            const shY = wallH * 0.2;
-            ctx.strokeStyle = "rgba(180, 180, 185, 0.8)";
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.moveTo(shX, shY); ctx.lineTo(shX, shY + wallH * 0.15);
-            ctx.stroke();
-            // Shower head disc
-            ctx.fillStyle = "rgba(190, 190, 195, 0.8)";
-            ctx.beginPath(); ctx.ellipse(shX, shY + wallH * 0.15 + 5, 10, 4, 0, 0, Math.PI * 2); ctx.fill();
-
-            // Mirror (wall-mounted rectangle)
-            const mirW = rw * 0.15;
-            const mirH = wallH * 0.25;
-            const mirX = rx + rw * 0.12;
-            const mirY = wallH * 0.15;
-            ctx.fillStyle = "rgba(220, 235, 245, 0.7)";
-            ctx.beginPath(); ctx.roundRect(mirX, mirY, mirW, mirH, 4); ctx.fill();
-            ctx.strokeStyle = "rgba(180, 180, 185, 0.6)";
-            ctx.lineWidth = 3;
-            ctx.beginPath(); ctx.roundRect(mirX, mirY, mirW, mirH, 4); ctx.stroke();
-            // Mirror reflection highlight
-            ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
-            ctx.fillRect(mirX + 4, mirY + 4, mirW * 0.3, mirH - 8);
-
-            // Steam effect (semi-transparent white circles)
-            const t = Date.now() * 0.001;
-            ctx.save();
-            ctx.globalAlpha = 0.15;
-            for (let i = 0; i < 5; i++) {
-                const sx = tubX + tubW * 0.2 + i * tubW * 0.15;
-                const sy = tubY - 10 - Math.sin(t * 0.8 + i * 1.2) * 15;
-                const sr = 8 + Math.sin(t * 0.6 + i) * 3;
-                ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
-                ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2); ctx.fill();
-            }
-            ctx.restore();
-
-            // Tile floor (light blue checker)
-            const ftileS = 20;
-            for (let ty = wallH; ty < height; ty += ftileS) {
-                for (let tx = rx; tx < rx + rw; tx += ftileS) {
-                    const isLight = ((Math.floor((tx - rx) / ftileS) + Math.floor((ty - wallH) / ftileS)) % 2 === 0);
-                    ctx.fillStyle = isLight ? "rgba(210, 230, 240, 0.4)" : "rgba(190, 215, 228, 0.35)";
-                    ctx.fillRect(tx, ty, ftileS, ftileS);
-                }
-            }
-        }
-
-        function drawBedroomRoom(ctx, rx, rw, wallH) {
-            // Starry night window
-            const winW = rw * 0.25;
-            const winH = wallH * 0.35;
-            const winX = rx + rw * 0.6;
-            const winY = wallH * 0.12;
-            // Dark sky
-            const nightG = ctx.createLinearGradient(winX, winY, winX, winY + winH);
-            nightG.addColorStop(0, "#1a1a3a");
-            nightG.addColorStop(1, "#2a2a50");
-            ctx.fillStyle = nightG;
-            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 2); ctx.fill();
-            // Stars
-            const starSeed = 42;
-            for (let i = 0; i < 12; i++) {
-                const sx = winX + 4 + ((i * 37 + starSeed) % (Math.floor(winW) - 8));
-                const sy = winY + 4 + ((i * 23 + starSeed * 2) % (Math.floor(winH) - 8));
-                const t = Date.now() * 0.001;
-                const brightness = 0.5 + Math.sin(t * 1.5 + i) * 0.3;
-                ctx.fillStyle = `rgba(255, 255, 220, ${brightness})`;
-                ctx.beginPath(); ctx.arc(sx, sy, 1.5, 0, Math.PI * 2); ctx.fill();
-            }
-            // Moon
-            ctx.fillStyle = "rgba(255, 250, 220, 0.8)";
-            ctx.beginPath(); ctx.arc(winX + winW * 0.7, winY + winH * 0.25, 8, 0, Math.PI * 2); ctx.fill();
-            // Window frame
-            ctx.strokeStyle = "rgba(160, 150, 135, 0.6)";
+            ctx.strokeStyle = "hsl(25, 20%, 50%)";
             ctx.lineWidth = 5;
             ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 2); ctx.stroke();
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.moveTo(winX + winW / 2, winY); ctx.lineTo(winX + winW / 2, winY + winH);
+            ctx.moveTo(winX + winW / 2, winY + 3); ctx.lineTo(winX + winW / 2, winY + winH - 3);
+            ctx.moveTo(winX + 3, winY + winH / 2); ctx.lineTo(winX + winW - 3, winY + winH / 2);
             ctx.stroke();
+            // Window sill
+            ctx.fillStyle = "hsl(25, 18%, 54%)";
+            ctx.beginPath(); ctx.roundRect(winX - 6, winY + winH - 2, winW + 12, 7, 2); ctx.fill();
+            ctx.fillStyle = "rgba(255,245,230,0.12)";
+            ctx.fillRect(winX - 5, winY + winH - 2, winW + 10, 2);
+            // Small herb pots on sill
+            const potColors = ["hsl(18,50%,42%)", "hsl(25,45%,50%)", "hsl(12,48%,38%)"];
+            const leafColors = ["hsl(120,40%,38%)", "hsl(140,45%,32%)", "hsl(100,50%,40%)"];
+            for (let p = 0; p < 3; p++) {
+                const px = winX + 6 + p * (winW / 3 - 2);
+                const py = winY + winH + 2;
+                ctx.fillStyle = potColors[p];
+                ctx.beginPath();
+                ctx.moveTo(px, py); ctx.lineTo(px - 1, py - 8); ctx.lineTo(px + 9, py - 8); ctx.lineTo(px + 8, py);
+                ctx.closePath(); ctx.fill();
+                ctx.fillStyle = leafColors[p];
+                ctx.beginPath(); ctx.ellipse(px + 4, py - 12, 5, 4, -0.3 + p * 0.3, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.ellipse(px + 4, py - 15, 4, 3, 0.3 - p * 0.2, 0, Math.PI * 2); ctx.fill();
+            }
 
-            // Warm ambient glow (indirect lighting)
-            const glowX = rx + rw * 0.2;
-            const glow = ctx.createRadialGradient(glowX, wallH * 0.7, 5, glowX, wallH * 0.7, 100);
-            glow.addColorStop(0, "rgba(255, 230, 180, 0.12)");
-            glow.addColorStop(1, "rgba(255, 230, 180, 0)");
+            // Cutting board & knife on counter
+            const cbX = cX + counterW * 0.6, cbY = counterY - 4;
+            ctx.fillStyle = "hsl(35, 30%, 60%)";
+            ctx.beginPath(); ctx.roundRect(cbX, cbY, 28, 5, 2); ctx.fill();
+            ctx.strokeStyle = "rgba(80,60,40,0.15)";
+            ctx.lineWidth = 0.5;
+            ctx.strokeRect(cbX, cbY, 28, 5);
+            // Knife
+            ctx.fillStyle = "#c0c4c8";
+            ctx.beginPath();
+            ctx.moveTo(cbX + 30, cbY + 2); ctx.lineTo(cbX + 48, cbY + 1); ctx.lineTo(cbX + 48, cbY + 4); ctx.lineTo(cbX + 30, cbY + 3);
+            ctx.closePath(); ctx.fill();
+            ctx.fillStyle = "hsl(25, 20%, 40%)";
+            ctx.fillRect(cbX + 26, cbY + 1, 5, 4);
+        }
+
+        function drawLivingRoom(ctx, rx, rw, wallH) {
+            // Large picture window with curtains
+            const winW = rw * 0.38;
+            const winH = wallH * 0.55;
+            const winX = rx + rw * 0.5 - winW / 2;
+            const winY = wallH * 0.08;
+            // Warm light glow through window
+            const wGlow = ctx.createRadialGradient(winX + winW / 2, winY + winH / 2, 10, winX + winW / 2, winY + winH / 2, winH * 1.2);
+            wGlow.addColorStop(0, "rgba(255,250,235,0.18)");
+            wGlow.addColorStop(1, "rgba(255,250,235,0)");
+            ctx.fillStyle = wGlow;
+            ctx.beginPath(); ctx.arc(winX + winW / 2, winY + winH / 2, winH * 1.2, 0, Math.PI * 2); ctx.fill();
+            // Sky with clouds
+            const skyG = ctx.createLinearGradient(winX, winY, winX, winY + winH);
+            skyG.addColorStop(0, "#b8d8f0");
+            skyG.addColorStop(0.4, "#d0e8fa");
+            skyG.addColorStop(0.7, "#e2f0fc");
+            skyG.addColorStop(1, "#eef6fd");
+            ctx.fillStyle = skyG;
+            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 3); ctx.fill();
+            // Soft clouds
+            ctx.fillStyle = "rgba(255,255,255,0.5)";
+            ctx.beginPath(); ctx.ellipse(winX + winW * 0.3, winY + winH * 0.2, 18, 8, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(winX + winW * 0.25, winY + winH * 0.18, 12, 7, 0.3, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(winX + winW * 0.7, winY + winH * 0.3, 14, 6, -0.2, 0, Math.PI * 2); ctx.fill();
+            // Tree silhouette outside
+            ctx.fillStyle = "rgba(90,130,70,0.25)";
+            ctx.beginPath(); ctx.ellipse(winX + winW * 0.82, winY + winH * 0.65, 20, 28, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "rgba(70,100,50,0.15)";
+            ctx.fillRect(winX + winW * 0.81, winY + winH * 0.85, 3, winH * 0.15);
+            // Frame (thick wood)
+            ctx.strokeStyle = "hsl(25, 22%, 48%)";
+            ctx.lineWidth = 7;
+            ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 3); ctx.stroke();
+            // Cross bars
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(winX + winW / 3, winY + 4); ctx.lineTo(winX + winW / 3, winY + winH - 4);
+            ctx.moveTo(winX + winW * 2 / 3, winY + 4); ctx.lineTo(winX + winW * 2 / 3, winY + winH - 4);
+            ctx.moveTo(winX + 4, winY + winH * 0.45); ctx.lineTo(winX + winW - 4, winY + winH * 0.45);
+            ctx.stroke();
+            // Window sill (thick shelf)
+            const sillG = ctx.createLinearGradient(0, winY + winH, 0, winY + winH + 10);
+            sillG.addColorStop(0, "hsl(25, 18%, 56%)");
+            sillG.addColorStop(1, "hsl(25, 16%, 50%)");
+            ctx.fillStyle = sillG;
+            ctx.beginPath(); ctx.roundRect(winX - 10, winY + winH - 2, winW + 20, 10, 2); ctx.fill();
+            ctx.fillStyle = "rgba(255,245,230,0.12)";
+            ctx.fillRect(winX - 9, winY + winH - 2, winW + 18, 2);
+
+            // Curtains with drape folds
+            const drawCurtain = (cx, direction) => {
+                const cw = 28;
+                const cTop = winY - 12;
+                const cBot = winY + winH + 6;
+                for (let f = 0; f < 3; f++) {
+                    const fx = cx + f * (cw / 3) * direction;
+                    const cG = ctx.createLinearGradient(fx, cTop, fx + cw / 3 * direction, cBot);
+                    cG.addColorStop(0, `rgba(190,170,145,${0.5 - f * 0.08})`);
+                    cG.addColorStop(0.5, `rgba(210,195,170,${0.55 - f * 0.08})`);
+                    cG.addColorStop(1, `rgba(185,165,140,${0.5 - f * 0.08})`);
+                    ctx.fillStyle = cG;
+                    ctx.beginPath();
+                    ctx.moveTo(fx, cTop);
+                    ctx.quadraticCurveTo(fx + 8 * direction, cTop + (cBot - cTop) * 0.3, fx + 4 * direction, (cTop + cBot) / 2);
+                    ctx.quadraticCurveTo(fx - 3 * direction, cBot * 0.7, fx + 6 * direction, cBot);
+                    ctx.lineTo(fx + (cw / 3) * direction, cBot);
+                    ctx.lineTo(fx + (cw / 3) * direction, cTop);
+                    ctx.closePath(); ctx.fill();
+                }
+            };
+            drawCurtain(winX - 12, -1);
+            drawCurtain(winX + winW + 12, 1);
+            // Curtain rod (brass)
+            ctx.strokeStyle = "#b8a050";
+            ctx.lineWidth = 3.5;
+            ctx.lineCap = "round";
+            ctx.beginPath(); ctx.moveTo(winX - 42, winY - 12); ctx.lineTo(winX + winW + 42, winY - 12); ctx.stroke();
+            // Rod finials
+            ctx.fillStyle = "#c8a84e";
+            ctx.beginPath(); ctx.arc(winX - 42, winY - 12, 5, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(winX + winW + 42, winY - 12, 5, 0, Math.PI * 2); ctx.fill();
+            ctx.lineCap = "butt";
+
+            // Pendant light (industrial Edison style)
+            const lampX = rx + rw * 0.5;
+            // Wire
+            ctx.strokeStyle = "rgba(60,55,50,0.5)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(lampX, 0); ctx.lineTo(lampX, 32); ctx.stroke();
+            // Socket
+            ctx.fillStyle = "#3a3a3a";
+            ctx.beginPath(); ctx.roundRect(lampX - 5, 32, 10, 8, 2); ctx.fill();
+            // Bulb (Edison warm)
+            const bulbG = ctx.createRadialGradient(lampX, 48, 2, lampX, 48, 14);
+            bulbG.addColorStop(0, "rgba(255,230,150,0.9)");
+            bulbG.addColorStop(0.5, "rgba(255,220,130,0.6)");
+            bulbG.addColorStop(1, "rgba(255,210,110,0.15)");
+            ctx.fillStyle = bulbG;
+            ctx.beginPath(); ctx.ellipse(lampX, 50, 10, 14, 0, 0, Math.PI * 2); ctx.fill();
+            // Filament
+            ctx.strokeStyle = "rgba(255,200,80,0.6)";
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            ctx.moveTo(lampX - 3, 44); ctx.lineTo(lampX, 52); ctx.lineTo(lampX + 3, 44);
+            ctx.stroke();
+            // Warm glow on room
+            const glow = ctx.createRadialGradient(lampX, 55, 8, lampX, 55, 160);
+            glow.addColorStop(0, "rgba(255,240,190,0.2)");
+            glow.addColorStop(1, "rgba(255,240,190,0)");
             ctx.fillStyle = glow;
-            ctx.beginPath(); ctx.arc(glowX, wallH * 0.7, 100, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(lampX, 55, 160, 0, Math.PI * 2); ctx.fill();
 
-            // Bed (large rectangle with bedding)
-            const bedW = rw * 0.42;
+            // Sofa (detailed upholstered)
+            const sofaW = rw * 0.35;
+            const sofaH = wallH * 0.18;
+            const sofaX = rx + rw * 0.08;
+            const sofaY = wallH - sofaH - 4;
+            // Sofa legs
+            ctx.fillStyle = "hsl(25, 22%, 38%)";
+            ctx.fillRect(sofaX + 8, sofaY + sofaH - 2, 5, 8);
+            ctx.fillRect(sofaX + sofaW - 13, sofaY + sofaH - 2, 5, 8);
+            // Back rest
+            const backG = ctx.createLinearGradient(sofaX, sofaY - sofaH * 0.45, sofaX, sofaY);
+            backG.addColorStop(0, "hsl(20, 30%, 48%)");
+            backG.addColorStop(1, "hsl(20, 28%, 54%)");
+            ctx.fillStyle = backG;
+            ctx.beginPath(); ctx.roundRect(sofaX, sofaY - sofaH * 0.42, sofaW, sofaH * 0.52, [10, 10, 0, 0]); ctx.fill();
+            // Seat
+            const seatG = ctx.createLinearGradient(sofaX, sofaY, sofaX, sofaY + sofaH);
+            seatG.addColorStop(0, "hsl(22, 32%, 56%)");
+            seatG.addColorStop(1, "hsl(22, 28%, 50%)");
+            ctx.fillStyle = seatG;
+            ctx.beginPath(); ctx.roundRect(sofaX, sofaY, sofaW, sofaH, 10); ctx.fill();
+            // Arm rests
+            ctx.fillStyle = "hsl(20, 26%, 46%)";
+            ctx.beginPath(); ctx.roundRect(sofaX - 4, sofaY - sofaH * 0.3, 10, sofaH * 1.25, 6); ctx.fill();
+            ctx.beginPath(); ctx.roundRect(sofaX + sofaW - 6, sofaY - sofaH * 0.3, 10, sofaH * 1.25, 6); ctx.fill();
+            // Seat cushions (3 sections)
+            const cushW = (sofaW - 16) / 3;
+            for (let c = 0; c < 3; c++) {
+                const cx = sofaX + 6 + c * (cushW + 1);
+                ctx.fillStyle = `hsl(24, ${34 - c}%, ${58 + (c % 2) * 2}%)`;
+                ctx.beginPath(); ctx.roundRect(cx, sofaY + 4, cushW - 1, sofaH - 10, 5); ctx.fill();
+                // Stitch line
+                ctx.strokeStyle = "rgba(100,70,45,0.15)";
+                ctx.lineWidth = 0.8;
+                ctx.beginPath(); ctx.roundRect(cx + 3, sofaY + 6, cushW - 7, sofaH - 14, 3); ctx.stroke();
+            }
+            // Throw pillow
+            ctx.fillStyle = "hsl(180, 25%, 55%)";
+            ctx.beginPath(); ctx.roundRect(sofaX + 8, sofaY - sofaH * 0.15, 18, 16, 5); ctx.fill();
+            ctx.fillStyle = "hsl(35, 45%, 62%)";
+            ctx.beginPath(); ctx.roundRect(sofaX + sofaW - 28, sofaY - sofaH * 0.12, 16, 14, 5); ctx.fill();
+
+            // Coffee table (mid-century modern)
+            const ctW = rw * 0.2;
+            const ctH = 8;
+            const ctX = sofaX + sofaW * 0.3;
+            const ctY = wallH + 8;
+            // Legs
+            ctx.strokeStyle = "hsl(25, 18%, 42%)";
+            ctx.lineWidth = 2.5;
+            ctx.beginPath(); ctx.moveTo(ctX + 4, ctY + ctH); ctx.lineTo(ctX - 2, ctY + 28); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(ctX + ctW - 4, ctY + ctH); ctx.lineTo(ctX + ctW + 2, ctY + 28); ctx.stroke();
+            // Table top
+            const ttG = ctx.createLinearGradient(ctX, ctY, ctX + ctW, ctY);
+            ttG.addColorStop(0, "hsl(28, 30%, 50%)");
+            ttG.addColorStop(0.5, "hsl(28, 28%, 55%)");
+            ttG.addColorStop(1, "hsl(28, 30%, 48%)");
+            ctx.fillStyle = ttG;
+            ctx.beginPath(); ctx.roundRect(ctX, ctY, ctW, ctH, 3); ctx.fill();
+            ctx.fillStyle = "rgba(255,245,230,0.1)";
+            ctx.fillRect(ctX + 2, ctY, ctW - 4, 2);
+
+            // TV stand + flat screen TV
+            const tvStandW = rw * 0.24;
+            const tvStandH = wallH * 0.1;
+            const tvStandX = rx + rw * 0.66;
+            const tvStandY = wallH - tvStandH;
+            // Stand legs
+            ctx.fillStyle = "hsl(25, 18%, 40%)";
+            ctx.fillRect(tvStandX + 10, tvStandY + tvStandH - 2, 4, 8);
+            ctx.fillRect(tvStandX + tvStandW - 14, tvStandY + tvStandH - 2, 4, 8);
+            // Stand body
+            const standG = ctx.createLinearGradient(tvStandX, tvStandY, tvStandX, tvStandY + tvStandH);
+            standG.addColorStop(0, "hsl(28, 22%, 52%)");
+            standG.addColorStop(1, "hsl(28, 20%, 46%)");
+            ctx.fillStyle = standG;
+            ctx.beginPath(); ctx.roundRect(tvStandX, tvStandY, tvStandW, tvStandH, 4); ctx.fill();
+            // Shelf opening
+            ctx.fillStyle = "rgba(0,0,0,0.1)";
+            ctx.beginPath(); ctx.roundRect(tvStandX + 6, tvStandY + 5, tvStandW - 12, tvStandH - 10, 2); ctx.fill();
+            // TV
+            const tvW = tvStandW * 0.9;
+            const tvH = wallH * 0.28;
+            const tvX = tvStandX + (tvStandW - tvW) / 2;
+            const tvY = tvStandY - tvH - 2;
+            // TV stand neck
+            ctx.fillStyle = "#2a2a2a";
+            ctx.fillRect(tvX + tvW / 2 - 4, tvStandY - 8, 8, 8);
+            // TV body
+            ctx.fillStyle = "#1a1a1e";
+            ctx.beginPath(); ctx.roundRect(tvX, tvY, tvW, tvH, 4); ctx.fill();
+            // Screen
+            const scrG = ctx.createLinearGradient(tvX, tvY, tvX + tvW, tvY + tvH);
+            scrG.addColorStop(0, "rgba(30,40,60,0.85)");
+            scrG.addColorStop(0.5, "rgba(35,50,70,0.8)");
+            scrG.addColorStop(1, "rgba(25,35,55,0.85)");
+            ctx.fillStyle = scrG;
+            ctx.beginPath(); ctx.roundRect(tvX + 3, tvY + 3, tvW - 6, tvH - 6, 2); ctx.fill();
+            // Screen reflection
+            ctx.fillStyle = "rgba(255,255,255,0.04)";
+            ctx.beginPath();
+            ctx.moveTo(tvX + 3, tvY + 3);
+            ctx.lineTo(tvX + tvW * 0.5, tvY + 3);
+            ctx.lineTo(tvX + 3, tvY + tvH * 0.5);
+            ctx.closePath(); ctx.fill();
+
+            // Rug (layered patterned ellipse)
+            const rugCX = rx + rw * 0.42, rugCY = wallH + (height - wallH) * 0.42;
+            const rugRX = rw * 0.28, rugRY = (height - wallH) * 0.28;
+            // Outer rug
+            ctx.fillStyle = "rgba(160,110,70,0.2)";
+            ctx.beginPath(); ctx.ellipse(rugCX, rugCY, rugRX, rugRY, 0, 0, Math.PI * 2); ctx.fill();
+            // Inner border
+            ctx.strokeStyle = "rgba(140,90,55,0.15)";
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.ellipse(rugCX, rugCY, rugRX * 0.8, rugRY * 0.8, 0, 0, Math.PI * 2); ctx.stroke();
+            // Center pattern
+            ctx.fillStyle = "rgba(180,130,85,0.12)";
+            ctx.beginPath(); ctx.ellipse(rugCX, rugCY, rugRX * 0.5, rugRY * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+
+            // Potted monstera plant
+            const plantX = rx + rw * 0.9;
+            const plantY = wallH;
+            // Pot (ceramic with gradient)
+            const potG = ctx.createLinearGradient(plantX - 14, plantY - 24, plantX + 14, plantY);
+            potG.addColorStop(0, "hsl(20, 55%, 48%)");
+            potG.addColorStop(1, "hsl(20, 50%, 40%)");
+            ctx.fillStyle = potG;
+            ctx.beginPath();
+            ctx.moveTo(plantX - 11, plantY);
+            ctx.lineTo(plantX - 15, plantY - 24);
+            ctx.quadraticCurveTo(plantX, plantY - 28, plantX + 15, plantY - 24);
+            ctx.lineTo(plantX + 11, plantY);
+            ctx.closePath(); ctx.fill();
+            // Pot rim
+            ctx.fillStyle = "hsl(20, 52%, 52%)";
+            ctx.beginPath(); ctx.roundRect(plantX - 16, plantY - 26, 32, 5, 2); ctx.fill();
+            // Soil
+            ctx.fillStyle = "hsl(25, 30%, 28%)";
+            ctx.beginPath(); ctx.ellipse(plantX, plantY - 24, 13, 4, 0, 0, Math.PI * 2); ctx.fill();
+            // Stems & leaves (monstera-style)
+            const leaves = [
+                { angle: -0.5, len: 36, size: 16 },
+                { angle: -1.2, len: 30, size: 13 },
+                { angle: 0.3, len: 34, size: 15 },
+                { angle: 0.9, len: 28, size: 12 },
+                { angle: -0.1, len: 40, size: 14 },
+            ];
+            for (const lf of leaves) {
+                const endX = plantX + Math.sin(lf.angle) * lf.len;
+                const endY = plantY - 26 - Math.cos(lf.angle) * lf.len;
+                // Stem
+                ctx.strokeStyle = "hsl(130, 35%, 35%)";
+                ctx.lineWidth = 1.8;
+                ctx.beginPath();
+                ctx.moveTo(plantX, plantY - 24);
+                ctx.quadraticCurveTo(plantX + Math.sin(lf.angle) * lf.len * 0.4, endY + 10, endX, endY);
+                ctx.stroke();
+                // Leaf
+                ctx.fillStyle = `hsl(${125 + lf.angle * 10}, ${40 + lf.size}%, ${36 + lf.size * 0.5}%)`;
+                ctx.beginPath(); ctx.ellipse(endX, endY, lf.size, lf.size * 0.65, lf.angle * 0.5, 0, Math.PI * 2); ctx.fill();
+                // Leaf vein
+                ctx.strokeStyle = "rgba(50,80,40,0.2)";
+                ctx.lineWidth = 0.5;
+                ctx.beginPath(); ctx.moveTo(endX - lf.size * 0.5, endY); ctx.lineTo(endX + lf.size * 0.5, endY); ctx.stroke();
+            }
+
+            // Bookshelf (wall-mounted, above sofa)
+            const bsX = sofaX + 10, bsY = wallH * 0.15, bsW = sofaW * 0.6, bsH = 8;
+            ctx.fillStyle = "hsl(25, 22%, 50%)";
+            ctx.beginPath(); ctx.roundRect(bsX, bsY, bsW, bsH, 2); ctx.fill();
+            // Bracket
+            ctx.fillStyle = "hsl(25, 20%, 44%)";
+            ctx.beginPath(); ctx.moveTo(bsX + 8, bsY + bsH); ctx.lineTo(bsX + 8, bsY + bsH + 10); ctx.lineTo(bsX + 2, bsY + bsH); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(bsX + bsW - 8, bsY + bsH); ctx.lineTo(bsX + bsW - 8, bsY + bsH + 10); ctx.lineTo(bsX + bsW - 2, bsY + bsH); ctx.fill();
+            // Books
+            const bookColors = ["hsl(350,40%,45%)", "hsl(210,35%,50%)", "hsl(40,50%,55%)", "hsl(160,30%,40%)", "hsl(280,30%,50%)", "hsl(20,45%,48%)"];
+            let bx = bsX + 3;
+            for (let b = 0; b < 6 && bx < bsX + bsW - 6; b++) {
+                const bw = 5 + b % 3 * 2;
+                const bh = 16 + b % 2 * 6;
+                ctx.fillStyle = bookColors[b];
+                ctx.beginPath(); ctx.roundRect(bx, bsY - bh, bw, bh, 1); ctx.fill();
+                bx += bw + 1;
+            }
+        }
+
+        function drawBedroomRoom(ctx, rx, rw, wallH) {
+            // Starry night window (arched top)
+            const winW = rw * 0.28;
+            const winH = wallH * 0.42;
+            const winX = rx + rw * 0.58;
+            const winY = wallH * 0.08;
+            // Deep night sky gradient
+            const nightG = ctx.createLinearGradient(winX, winY, winX, winY + winH);
+            nightG.addColorStop(0, "#0a0a28");
+            nightG.addColorStop(0.3, "#141438");
+            nightG.addColorStop(0.7, "#1e1e4a");
+            nightG.addColorStop(1, "#252555");
+            ctx.fillStyle = nightG;
+            ctx.beginPath();
+            ctx.moveTo(winX, winY + winH);
+            ctx.lineTo(winX, winY + winH * 0.25);
+            ctx.quadraticCurveTo(winX, winY, winX + winW / 2, winY);
+            ctx.quadraticCurveTo(winX + winW, winY, winX + winW, winY + winH * 0.25);
+            ctx.lineTo(winX + winW, winY + winH);
+            ctx.closePath(); ctx.fill();
+            // Stars (twinkling, varied sizes)
+            const starSeed = 42;
+            const t = Date.now() * 0.001;
+            for (let i = 0; i < 18; i++) {
+                const sx = winX + 5 + ((i * 37 + starSeed) % (Math.floor(winW) - 10));
+                const sy = winY + 8 + ((i * 23 + starSeed * 2) % (Math.floor(winH) - 16));
+                const brightness = 0.4 + Math.sin(t * 1.2 + i * 0.7) * 0.35;
+                const size = 0.8 + (i % 3) * 0.6;
+                ctx.fillStyle = `rgba(255, 255, 230, ${brightness})`;
+                ctx.beginPath(); ctx.arc(sx, sy, size, 0, Math.PI * 2); ctx.fill();
+                // Cross sparkle on brighter stars
+                if (size > 1.2 && brightness > 0.55) {
+                    ctx.strokeStyle = `rgba(255, 255, 240, ${brightness * 0.4})`;
+                    ctx.lineWidth = 0.5;
+                    ctx.beginPath(); ctx.moveTo(sx - 3, sy); ctx.lineTo(sx + 3, sy); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(sx, sy - 3); ctx.lineTo(sx, sy + 3); ctx.stroke();
+                }
+            }
+            // Crescent moon with earthshine
+            const moonX = winX + winW * 0.72, moonY = winY + winH * 0.22;
+            // Earthshine (faint full disc)
+            ctx.fillStyle = "rgba(200,210,230,0.08)";
+            ctx.beginPath(); ctx.arc(moonX, moonY, 10, 0, Math.PI * 2); ctx.fill();
+            // Bright crescent
+            ctx.fillStyle = "rgba(255,250,220,0.85)";
+            ctx.beginPath(); ctx.arc(moonX, moonY, 9, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = nightG;
+            ctx.beginPath(); ctx.arc(moonX + 4, moonY - 1, 8, 0, Math.PI * 2); ctx.fill();
+            // Moon glow
+            const moonGlow = ctx.createRadialGradient(moonX, moonY, 5, moonX, moonY, 25);
+            moonGlow.addColorStop(0, "rgba(255,250,220,0.08)");
+            moonGlow.addColorStop(1, "rgba(255,250,220,0)");
+            ctx.fillStyle = moonGlow;
+            ctx.beginPath(); ctx.arc(moonX, moonY, 25, 0, Math.PI * 2); ctx.fill();
+            // Window frame (thick wood, arched)
+            ctx.strokeStyle = "hsl(25, 22%, 46%)";
+            ctx.lineWidth = 6;
+            ctx.beginPath();
+            ctx.moveTo(winX, winY + winH);
+            ctx.lineTo(winX, winY + winH * 0.25);
+            ctx.quadraticCurveTo(winX, winY, winX + winW / 2, winY);
+            ctx.quadraticCurveTo(winX + winW, winY, winX + winW, winY + winH * 0.25);
+            ctx.lineTo(winX + winW, winY + winH);
+            ctx.stroke();
+            // Cross bars
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(winX + winW / 2, winY + 4); ctx.lineTo(winX + winW / 2, winY + winH);
+            ctx.moveTo(winX + 4, winY + winH * 0.5); ctx.lineTo(winX + winW - 4, winY + winH * 0.5);
+            ctx.stroke();
+            // Window sill
+            ctx.fillStyle = "hsl(25, 18%, 52%)";
+            ctx.beginPath(); ctx.roundRect(winX - 6, winY + winH - 2, winW + 12, 8, 2); ctx.fill();
+            ctx.fillStyle = "rgba(255,245,230,0.1)";
+            ctx.fillRect(winX - 5, winY + winH - 2, winW + 10, 2);
+
+            // Sheer curtains (translucent, gentle drape)
+            ctx.save();
+            ctx.globalAlpha = 0.18;
+            const sheerG = ctx.createLinearGradient(winX, winY, winX, winY + winH + 20);
+            sheerG.addColorStop(0, "rgba(240,235,225,0.8)");
+            sheerG.addColorStop(1, "rgba(230,225,215,0.4)");
+            ctx.fillStyle = sheerG;
+            // Left sheer
+            ctx.beginPath();
+            ctx.moveTo(winX - 6, winY - 4);
+            ctx.quadraticCurveTo(winX - 20, winY + winH * 0.4, winX - 10, winY + winH + 16);
+            ctx.lineTo(winX + 8, winY + winH + 16);
+            ctx.quadraticCurveTo(winX - 8, winY + winH * 0.35, winX + 10, winY - 4);
+            ctx.closePath(); ctx.fill();
+            // Right sheer
+            ctx.beginPath();
+            ctx.moveTo(winX + winW + 6, winY - 4);
+            ctx.quadraticCurveTo(winX + winW + 20, winY + winH * 0.4, winX + winW + 10, winY + winH + 16);
+            ctx.lineTo(winX + winW - 8, winY + winH + 16);
+            ctx.quadraticCurveTo(winX + winW + 8, winY + winH * 0.35, winX + winW - 10, winY - 4);
+            ctx.closePath(); ctx.fill();
+            ctx.restore();
+
+            // Warm ambient glow from lamp area
+            const glowX = rx + rw * 0.6;
+            const glow = ctx.createRadialGradient(glowX, wallH * 0.65, 8, glowX, wallH * 0.65, 130);
+            glow.addColorStop(0, "rgba(255,225,165,0.14)");
+            glow.addColorStop(1, "rgba(255,225,165,0)");
+            ctx.fillStyle = glow;
+            ctx.beginPath(); ctx.arc(glowX, wallH * 0.65, 130, 0, Math.PI * 2); ctx.fill();
+
+            // Bed (detailed with layered bedding)
+            const bedW = rw * 0.46;
             const bedH = wallH * 0.22;
-            const bedX = rx + rw * 0.12;
-            const bedY = wallH - bedH - 5;
-            // Bed frame
-            ctx.fillStyle = "hsl(25, 25%, 45%)";
-            ctx.beginPath(); ctx.roundRect(bedX - 3, bedY - 3, bedW + 6, bedH + 6, 5); ctx.fill();
+            const bedX = rx + rw * 0.08;
+            const bedY = wallH - bedH - 4;
+            // Bed legs
+            ctx.fillStyle = "hsl(25, 22%, 36%)";
+            ctx.fillRect(bedX, bedY + bedH, 5, 8);
+            ctx.fillRect(bedX + bedW - 5, bedY + bedH, 5, 8);
+            // Bed frame (warm wood)
+            const frameG = ctx.createLinearGradient(bedX, bedY, bedX + bedW, bedY);
+            frameG.addColorStop(0, "hsl(25, 28%, 42%)");
+            frameG.addColorStop(0.5, "hsl(25, 26%, 46%)");
+            frameG.addColorStop(1, "hsl(25, 28%, 40%)");
+            ctx.fillStyle = frameG;
+            ctx.beginPath(); ctx.roundRect(bedX - 4, bedY - 4, bedW + 8, bedH + 8, 5); ctx.fill();
             // Mattress
-            ctx.fillStyle = "rgba(245, 240, 230, 0.9)";
+            ctx.fillStyle = "rgba(248,244,236,0.95)";
             ctx.beginPath(); ctx.roundRect(bedX, bedY, bedW, bedH, 3); ctx.fill();
-            // Blanket
-            ctx.fillStyle = "hsl(220, 25%, 65%)";
-            ctx.beginPath(); ctx.roundRect(bedX + 2, bedY + bedH * 0.25, bedW - 4, bedH * 0.72, 4); ctx.fill();
-            // Pillow
-            ctx.fillStyle = "rgba(250, 248, 240, 0.95)";
-            ctx.beginPath(); ctx.ellipse(bedX + bedW * 0.2, bedY + bedH * 0.15, bedW * 0.14, bedH * 0.12, 0, 0, Math.PI * 2); ctx.fill();
-            ctx.beginPath(); ctx.ellipse(bedX + bedW * 0.5, bedY + bedH * 0.15, bedW * 0.14, bedH * 0.12, 0, 0, Math.PI * 2); ctx.fill();
+            // Fitted sheet texture
+            ctx.strokeStyle = "rgba(220,215,205,0.3)";
+            ctx.lineWidth = 0.5;
+            for (let sy = bedY + 4; sy < bedY + bedH - 4; sy += 8) {
+                ctx.beginPath(); ctx.moveTo(bedX + 3, sy); ctx.lineTo(bedX + bedW - 3, sy); ctx.stroke();
+            }
+            // Duvet (soft gradient with fold)
+            const duvetG = ctx.createLinearGradient(bedX, bedY, bedX, bedY + bedH);
+            duvetG.addColorStop(0, "hsl(215, 28%, 68%)");
+            duvetG.addColorStop(0.4, "hsl(218, 30%, 72%)");
+            duvetG.addColorStop(1, "hsl(215, 25%, 65%)");
+            ctx.fillStyle = duvetG;
+            ctx.beginPath(); ctx.roundRect(bedX + 2, bedY + bedH * 0.28, bedW - 4, bedH * 0.7, 5); ctx.fill();
+            // Duvet fold line
+            ctx.strokeStyle = "rgba(150,160,180,0.2)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(bedX + 6, bedY + bedH * 0.32);
+            ctx.quadraticCurveTo(bedX + bedW * 0.5, bedY + bedH * 0.28, bedX + bedW - 6, bedY + bedH * 0.34);
+            ctx.stroke();
+            // Pillows (plump, with shadow)
+            ctx.fillStyle = "rgba(0,0,0,0.03)";
+            ctx.beginPath(); ctx.ellipse(bedX + bedW * 0.22, bedY + bedH * 0.16 + 2, bedW * 0.16, bedH * 0.14, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(bedX + bedW * 0.52, bedY + bedH * 0.16 + 2, bedW * 0.16, bedH * 0.14, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "rgba(252,250,244,0.97)";
+            ctx.beginPath(); ctx.ellipse(bedX + bedW * 0.22, bedY + bedH * 0.14, bedW * 0.16, bedH * 0.13, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(bedX + bedW * 0.52, bedY + bedH * 0.14, bedW * 0.16, bedH * 0.13, 0, 0, Math.PI * 2); ctx.fill();
+            // Pillow creases
+            ctx.strokeStyle = "rgba(210,205,195,0.25)";
+            ctx.lineWidth = 0.5;
+            ctx.beginPath(); ctx.moveTo(bedX + bedW * 0.14, bedY + bedH * 0.14); ctx.lineTo(bedX + bedW * 0.3, bedY + bedH * 0.14); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(bedX + bedW * 0.44, bedY + bedH * 0.14); ctx.lineTo(bedX + bedW * 0.6, bedY + bedH * 0.14); ctx.stroke();
 
-            // Headboard
-            ctx.fillStyle = "hsl(25, 22%, 40%)";
-            ctx.beginPath(); ctx.roundRect(bedX - 3, bedY - wallH * 0.12, bedW + 6, wallH * 0.1, 4); ctx.fill();
+            // Headboard (upholstered, tufted)
+            const hbH = wallH * 0.16;
+            const hbY = bedY - hbH + 4;
+            const hbG = ctx.createLinearGradient(bedX, hbY, bedX, hbY + hbH);
+            hbG.addColorStop(0, "hsl(220, 18%, 42%)");
+            hbG.addColorStop(0.5, "hsl(220, 20%, 48%)");
+            hbG.addColorStop(1, "hsl(220, 18%, 44%)");
+            ctx.fillStyle = hbG;
+            ctx.beginPath(); ctx.roundRect(bedX - 4, hbY, bedW + 8, hbH, [6, 6, 0, 0]); ctx.fill();
+            // Tufting buttons (diamond pattern)
+            ctx.fillStyle = "rgba(0,0,0,0.12)";
+            for (let tr = 0; tr < 2; tr++) {
+                for (let tc = 0; tc < 4; tc++) {
+                    const bx = bedX + 10 + tc * (bedW / 4);
+                    const by = hbY + 8 + tr * (hbH * 0.4);
+                    ctx.beginPath(); ctx.arc(bx, by, 2, 0, Math.PI * 2); ctx.fill();
+                }
+            }
+            // Tufting lines
+            ctx.strokeStyle = "rgba(0,0,0,0.06)";
+            ctx.lineWidth = 0.5;
+            for (let tr = 0; tr < 2; tr++) {
+                for (let tc = 0; tc < 3; tc++) {
+                    const bx1 = bedX + 10 + tc * (bedW / 4);
+                    const bx2 = bedX + 10 + (tc + 1) * (bedW / 4);
+                    const by = hbY + 8 + tr * (hbH * 0.4);
+                    ctx.beginPath(); ctx.moveTo(bx1, by); ctx.lineTo(bx2, by); ctx.stroke();
+                }
+            }
 
-            // Side table + lamp
+            // Side table (mid-century modern)
             const stX = rx + rw * 0.58;
             const stW = rw * 0.1;
             const stH = wallH * 0.12;
             const stY = wallH - stH;
-            ctx.fillStyle = "hsl(25, 20%, 50%)";
-            ctx.beginPath(); ctx.roundRect(stX, stY, stW, stH, 2); ctx.fill();
-            // Lamp
-            ctx.fillStyle = "rgba(200, 190, 170, 0.8)";
-            ctx.fillRect(stX + stW / 2 - 2, stY - 20, 4, 20);
-            // Lampshade
-            ctx.fillStyle = "rgba(255, 240, 210, 0.8)";
-            ctx.beginPath();
-            ctx.moveTo(stX + stW / 2 - 12, stY - 20);
-            ctx.lineTo(stX + stW / 2 - 8, stY - 35);
-            ctx.lineTo(stX + stW / 2 + 8, stY - 35);
-            ctx.lineTo(stX + stW / 2 + 12, stY - 20);
-            ctx.closePath(); ctx.fill();
-            // Lamp glow
-            const lampGlow = ctx.createRadialGradient(stX + stW / 2, stY - 25, 3, stX + stW / 2, stY - 25, 40);
-            lampGlow.addColorStop(0, "rgba(255, 240, 200, 0.2)");
-            lampGlow.addColorStop(1, "rgba(255, 240, 200, 0)");
-            ctx.fillStyle = lampGlow;
-            ctx.beginPath(); ctx.arc(stX + stW / 2, stY - 25, 40, 0, Math.PI * 2); ctx.fill();
+            // Legs (angled, tapered)
+            ctx.strokeStyle = "hsl(25, 22%, 38%)";
+            ctx.lineWidth = 2.5;
+            ctx.beginPath(); ctx.moveTo(stX + 3, stY + stH); ctx.lineTo(stX - 2, stY + stH + 12); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(stX + stW - 3, stY + stH); ctx.lineTo(stX + stW + 2, stY + stH + 12); ctx.stroke();
+            // Table body
+            const stG = ctx.createLinearGradient(stX, stY, stX, stY + stH);
+            stG.addColorStop(0, "hsl(28, 25%, 52%)");
+            stG.addColorStop(1, "hsl(28, 22%, 46%)");
+            ctx.fillStyle = stG;
+            ctx.beginPath(); ctx.roundRect(stX, stY, stW, stH, 3); ctx.fill();
+            // Drawer
+            ctx.strokeStyle = "rgba(70,50,30,0.2)";
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.roundRect(stX + 3, stY + stH * 0.55, stW - 6, stH * 0.35, 1); ctx.stroke();
+            ctx.fillStyle = "#b8a050";
+            ctx.beginPath(); ctx.arc(stX + stW / 2, stY + stH * 0.72, 2, 0, Math.PI * 2); ctx.fill();
+            // Top highlight
+            ctx.fillStyle = "rgba(255,245,230,0.1)";
+            ctx.fillRect(stX + 1, stY, stW - 2, 2);
 
-            // Closet (tall box, right side)
-            const clW = rw * 0.16;
-            const clH = wallH * 0.58;
-            const clX = rx + rw * 0.8;
-            const clY = wallH - clH;
-            ctx.fillStyle = "hsl(30, 18%, 52%)";
-            ctx.beginPath(); ctx.roundRect(clX, clY, clW, clH, 3); ctx.fill();
-            // Closet doors
-            ctx.strokeStyle = "rgba(90, 70, 50, 0.3)";
-            ctx.lineWidth = 1.5;
+            // Table lamp (ceramic base with fabric shade)
+            const lampCX = stX + stW / 2;
+            // Ceramic base
+            const baseG = ctx.createLinearGradient(lampCX - 8, stY - 16, lampCX + 8, stY);
+            baseG.addColorStop(0, "hsl(30, 20%, 62%)");
+            baseG.addColorStop(0.5, "hsl(30, 22%, 68%)");
+            baseG.addColorStop(1, "hsl(30, 20%, 58%)");
+            ctx.fillStyle = baseG;
             ctx.beginPath();
-            ctx.moveTo(clX + clW / 2, clY + 3); ctx.lineTo(clX + clW / 2, clY + clH - 3);
+            ctx.moveTo(lampCX - 6, stY);
+            ctx.quadraticCurveTo(lampCX - 10, stY - 8, lampCX - 7, stY - 14);
+            ctx.quadraticCurveTo(lampCX, stY - 18, lampCX + 7, stY - 14);
+            ctx.quadraticCurveTo(lampCX + 10, stY - 8, lampCX + 6, stY);
+            ctx.closePath(); ctx.fill();
+            // Neck
+            ctx.fillStyle = "#c0b8a0";
+            ctx.fillRect(lampCX - 2, stY - 24, 4, 12);
+            // Shade (fabric with warm glow)
+            const shadeG = ctx.createLinearGradient(lampCX - 16, stY - 42, lampCX + 16, stY - 24);
+            shadeG.addColorStop(0, "rgba(255,245,220,0.85)");
+            shadeG.addColorStop(0.5, "rgba(255,248,230,0.92)");
+            shadeG.addColorStop(1, "rgba(250,240,215,0.85)");
+            ctx.fillStyle = shadeG;
+            ctx.beginPath();
+            ctx.moveTo(lampCX - 16, stY - 24);
+            ctx.lineTo(lampCX - 12, stY - 42);
+            ctx.lineTo(lampCX + 12, stY - 42);
+            ctx.lineTo(lampCX + 16, stY - 24);
+            ctx.closePath(); ctx.fill();
+            // Shade outline
+            ctx.strokeStyle = "rgba(200,185,160,0.4)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(lampCX - 16, stY - 24); ctx.lineTo(lampCX - 12, stY - 42);
+            ctx.lineTo(lampCX + 12, stY - 42); ctx.lineTo(lampCX + 16, stY - 24);
             ctx.stroke();
-            // Door knobs
-            ctx.fillStyle = "rgba(180, 160, 110, 0.7)";
-            ctx.beginPath(); ctx.arc(clX + clW / 2 - 6, clY + clH * 0.5, 3, 0, Math.PI * 2); ctx.fill();
-            ctx.beginPath(); ctx.arc(clX + clW / 2 + 6, clY + clH * 0.5, 3, 0, Math.PI * 2); ctx.fill();
+            // Light glow
+            const lampGlow = ctx.createRadialGradient(lampCX, stY - 30, 5, lampCX, stY - 30, 60);
+            lampGlow.addColorStop(0, "rgba(255,240,195,0.22)");
+            lampGlow.addColorStop(1, "rgba(255,240,195,0)");
+            ctx.fillStyle = lampGlow;
+            ctx.beginPath(); ctx.arc(lampCX, stY - 30, 60, 0, Math.PI * 2); ctx.fill();
+            // Light cone downward
+            ctx.fillStyle = "rgba(255,245,210,0.06)";
+            ctx.beginPath();
+            ctx.moveTo(lampCX - 16, stY - 24);
+            ctx.lineTo(lampCX - 30, stY + stH);
+            ctx.lineTo(lampCX + 30, stY + stH);
+            ctx.lineTo(lampCX + 16, stY - 24);
+            ctx.closePath(); ctx.fill();
+
+            // Wardrobe (built-in, tall, with sliding doors)
+            const clW = rw * 0.18;
+            const clH = wallH * 0.65;
+            const clX = rx + rw * 0.78;
+            const clY = wallH - clH;
+            // Shadow
+            ctx.fillStyle = "rgba(0,0,0,0.04)";
+            ctx.fillRect(clX + 3, clY + 3, clW, clH);
+            // Body
+            const clG = ctx.createLinearGradient(clX, clY, clX, clY + clH);
+            clG.addColorStop(0, "hsl(28, 22%, 54%)");
+            clG.addColorStop(1, "hsl(28, 20%, 46%)");
+            ctx.fillStyle = clG;
+            ctx.beginPath(); ctx.roundRect(clX, clY, clW, clH, 4); ctx.fill();
+            // Wood grain
+            ctx.strokeStyle = "rgba(60,40,20,0.05)";
+            ctx.lineWidth = 0.6;
+            for (let g = clY + 4; g < clY + clH - 4; g += 6) {
+                ctx.beginPath();
+                ctx.moveTo(clX + 2, g); ctx.lineTo(clX + clW - 2, g + Math.sin(g * 0.06) * 1.5);
+                ctx.stroke();
+            }
+            // Sliding door track (top)
+            ctx.fillStyle = "rgba(0,0,0,0.08)";
+            ctx.fillRect(clX + 2, clY + 2, clW - 4, 3);
+            // Two sliding door panels
+            const doorW2 = (clW - 6) / 2;
+            ctx.strokeStyle = "rgba(70,50,30,0.18)";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.roundRect(clX + 2, clY + 6, doorW2, clH - 10, 2); ctx.stroke();
+            ctx.beginPath(); ctx.roundRect(clX + 4 + doorW2, clY + 6, doorW2, clH - 10, 2); ctx.stroke();
+            // Door handles (recessed)
+            ctx.fillStyle = "rgba(0,0,0,0.1)";
+            ctx.beginPath(); ctx.roundRect(clX + doorW2 - 2, clY + clH * 0.45, 4, 18, 2); ctx.fill();
+            ctx.beginPath(); ctx.roundRect(clX + doorW2 + 4, clY + clH * 0.45, 4, 18, 2); ctx.fill();
+            // Top crown moulding
+            ctx.fillStyle = "hsl(28, 20%, 50%)";
+            ctx.beginPath(); ctx.roundRect(clX - 2, clY - 4, clW + 4, 6, 2); ctx.fill();
+
+            // Carpet/rug beside bed (warm tone)
+            ctx.fillStyle = "rgba(170,140,110,0.15)";
+            ctx.beginPath(); ctx.roundRect(bedX + bedW + 6, wallH + 4, rw * 0.12, (height - wallH) * 0.5, 4); ctx.fill();
+            ctx.strokeStyle = "rgba(160,130,100,0.1)";
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.roundRect(bedX + bedW + 8, wallH + 6, rw * 0.12 - 4, (height - wallH) * 0.5 - 4, 3); ctx.stroke();
+
+            // Wall art (small framed picture above bed)
+            const artX = bedX + bedW * 0.3, artY = hbY - wallH * 0.14;
+            const artW2 = bedW * 0.25, artH2 = wallH * 0.1;
+            // Frame
+            ctx.strokeStyle = "hsl(30, 18%, 45%)";
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.roundRect(artX, artY, artW2, artH2, 2); ctx.stroke();
+            // Abstract art inside
+            const art1G = ctx.createLinearGradient(artX, artY, artX + artW2, artY + artH2);
+            art1G.addColorStop(0, "hsl(200, 30%, 60%)");
+            art1G.addColorStop(0.5, "hsl(180, 25%, 65%)");
+            art1G.addColorStop(1, "hsl(220, 28%, 55%)");
+            ctx.fillStyle = art1G;
+            ctx.fillRect(artX + 3, artY + 3, artW2 - 6, artH2 - 6);
+            // Abstract shapes
+            ctx.fillStyle = "rgba(255,255,255,0.2)";
+            ctx.beginPath(); ctx.arc(artX + artW2 * 0.3, artY + artH2 * 0.4, 6, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "rgba(255,220,150,0.2)";
+            ctx.beginPath(); ctx.arc(artX + artW2 * 0.7, artY + artH2 * 0.6, 5, 0, Math.PI * 2); ctx.fill();
         }
 
         function drawMarriageEffects(ctx, rx, rw, wallH, t) {
@@ -6248,19 +6797,16 @@
         // ======== THIRTIES PHASE (30代フェーズ — 家の中の間取り) ========
         const THIRTIES_ACTIVITIES = [
             { id: "genkan", name: "玄関", nameEn: "Entrance", keyboardStyle: "piano-gentle",
-              color: "hsl(30, 40%, 60%)", worldFraction: [0.03, 0.15],
+              color: "hsl(30, 40%, 60%)", worldFraction: [0.03, 0.20],
               labels: { social: 3, cautious: 2, patient: 1 } },
             { id: "kitchen", name: "キッチン", nameEn: "Kitchen", keyboardStyle: "organ-funky",
-              color: "hsl(45, 55%, 62%)", worldFraction: [0.19, 0.33],
+              color: "hsl(45, 55%, 62%)", worldFraction: [0.25, 0.44],
               labels: { creative: 3, patient: 2, focused: 1 } },
             { id: "living", name: "リビング", nameEn: "Living Room", keyboardStyle: "piano-chord",
-              color: "hsl(25, 45%, 58%)", worldFraction: [0.38, 0.54],
+              color: "hsl(25, 45%, 58%)", worldFraction: [0.50, 0.70],
               labels: { social: 3, expressive: 2, optimistic: 1 } },
-            { id: "bath", name: "お風呂", nameEn: "Bath", keyboardStyle: "piano-sparse",
-              color: "hsl(200, 50%, 65%)", worldFraction: [0.58, 0.72],
-              labels: { calm: 3, patient: 2, resilient: 1 } },
             { id: "bedroom", name: "寝室", nameEn: "Bedroom", keyboardStyle: "piano-gentle",
-              color: "hsl(260, 35%, 60%)", worldFraction: [0.78, 0.92],
+              color: "hsl(260, 35%, 60%)", worldFraction: [0.76, 0.95],
               labels: { calm: 3, focused: 2, resilient: 1 } },
         ];
 
@@ -6278,16 +6824,15 @@
 
         function getThirtiesActivities(hasMarriage) {
             if (!hasMarriage) return THIRTIES_ACTIVITIES;
-            // With marriage: redistribute 6 rooms evenly
+            // With marriage: redistribute 5 rooms evenly
             return [
-                { ...THIRTIES_ACTIVITIES[0], worldFraction: [0.02, 0.12] },  // genkan
-                { ...THIRTIES_ACTIVITIES[1], worldFraction: [0.15, 0.27] },  // kitchen
-                { ...THIRTIES_ACTIVITIES[2], worldFraction: [0.30, 0.42] },  // living
+                { ...THIRTIES_ACTIVITIES[0], worldFraction: [0.02, 0.15] },  // genkan
+                { ...THIRTIES_ACTIVITIES[1], worldFraction: [0.18, 0.32] },  // kitchen
                 { id: "marriage", name: "結婚", nameEn: "Marriage", keyboardStyle: "piano-chord",
-                  color: "hsl(340, 60%, 65%)", worldFraction: [0.45, 0.57],
+                  color: "hsl(340, 60%, 65%)", worldFraction: [0.36, 0.50],
                   labels: { social: 5, expressive: 4, optimistic: 3 } },
-                { ...THIRTIES_ACTIVITIES[3], worldFraction: [0.60, 0.72] },  // bath
-                { ...THIRTIES_ACTIVITIES[4], worldFraction: [0.78, 0.92] },  // bedroom
+                { ...THIRTIES_ACTIVITIES[2], worldFraction: [0.54, 0.70] },  // living
+                { ...THIRTIES_ACTIVITIES[3], worldFraction: [0.74, 0.92] },  // bedroom
             ];
         }
 
@@ -19255,7 +19800,8 @@
             const isJobHunt = currentScene === SCENE.JOB_HUNT;
             const isJobHunt2 = currentScene === SCENE.JOB_HUNT2;
             const isTravel = currentScene === SCENE.TRAVEL;
-            const isPostAdult = isUniversity || isPartTime || isJobHunt || isJobHunt2 || isTravel;
+            const isThirties = currentScene === SCENE.THIRTIES;
+            const isPostAdult = isUniversity || isPartTime || isJobHunt || isJobHunt2 || isTravel || isThirties;
             const rows = [];
             let chordRow = null;
 
@@ -19313,10 +19859,10 @@
             }
 
             // --- INHERITED ROWS LOGIC (The sounds the user already has) ---
-            if ((isPartTime || isJobHunt || isJobHunt2) && inheritedKeys2Pattern) {
+            if ((isPartTime || isJobHunt || isJobHunt2 || isThirties) && inheritedKeys2Pattern) {
                 rows.push({ label: 'Keys2', pattern: slicePage(inheritedKeys2Pattern), styleClass: 'bass', sustainType: slicePage(inheritedKeys2SustainType || null) });
             }
-            if ((isUniversity || isPartTime || isJobHunt || isJobHunt2 || isTravel) && inheritedKeyboardPattern) {
+            if ((isUniversity || isPartTime || isJobHunt || isJobHunt2 || isTravel || isThirties) && inheritedKeyboardPattern) {
                 rows.push({ label: 'Keys', pattern: slicePage(inheritedKeyboardPattern), styleClass: 'bass', sustainType: slicePage(inheritedKeyboardSustainType || null) });
             }
             if ((isAdult || isPostAdult) && inheritedBassPattern) {
