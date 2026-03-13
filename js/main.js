@@ -100,6 +100,8 @@
             endScheduled: false
         };
         let travelStillAudio = null;
+        let thirtiesTimbreShifted = {};
+        let thirtiesGlowingRow = null;
 
         // ======== Life Label bilingual name mapping ========
         const LABEL_NAMES = {
@@ -6810,6 +6812,31 @@
               labels: { calm: 3, focused: 2, resilient: 1 } },
         ];
 
+        const THIRTIES_TIMBRE_SHIFTS = {
+            kitchen: {
+                target: "bass",
+                label: "Bass",
+                config: { osc: "sawtooth", attack: 0.005, decay: 0.12, sustain: 0.2, release: 0.15, filterBase: 200, filterOct: 3.5 }
+            },
+            kidsroom: {
+                target: "hat",
+                label: "Hat",
+                config: { noise: "white", hp: 9200, q: 1.2, decay: 0.035, release: 0.01 }
+            },
+            living: {
+                target: "keys",
+                label: "Keys",
+                config: { wave: "triangle", attack: 0.08, decay: 0.9, sustain: 0.4, release: 1.0,
+                          vibratoFreq: 2.0, vibratoDepth: 0.06 }
+            },
+            bedroom: {
+                target: "snare",
+                label: "Snare",
+                config: { noise: "pink", bp: 1200, q: 0.4, decay: 0.2, release: 0.12, body: true,
+                          bodyVol: -20 }
+            }
+        };
+
         let thirtiesHasMarriage = false;
 
         function checkMarriageCondition() {
@@ -7893,6 +7920,15 @@
                 name: clickedDrop.activityName,
                 labels: clickedDrop.activityLabels
             });
+
+            // Save the drop's Keys2 line for carry into next phases
+            if (clickedDrop.keys2Pattern) {
+                inheritedKeys2Pattern = clickedDrop.keys2Pattern.slice();
+                inheritedKeys2Notes = clickedDrop.keys2Notes ? clickedDrop.keys2Notes.slice() : null;
+                inheritedKeys2Attacks = clickedDrop.keys2Attacks ? clickedDrop.keys2Attacks.slice() : null;
+                inheritedKeys2Durations = clickedDrop.keys2Durations ? clickedDrop.keys2Durations.slice() : null;
+                inheritedKeys2SustainType = clickedDrop.keys2SustainType ? clickedDrop.keys2SustainType.slice() : null;
+            }
 
             disposeToneDrops();
             toneDrops = [];
@@ -10010,6 +10046,7 @@
             initCarryCymbalLayer();
             initCarryBassLayer();
             initCarryKeyboardLayer();
+            initCarryKeys2Layer();
             startBaseGroove();
 
             playSlotStartChime();
@@ -10915,6 +10952,8 @@
             worldWidth = Math.max(width * 3.2, 2800);
             baby = new Child(babyColorScheme);
             baby.x = worldWidth * 0.5;
+            thirtiesTimbreShifted = {};
+            thirtiesGlowingRow = null;
 
             thirtiesHasMarriage = checkMarriageCondition();
             initThirtiesDrops(thirtiesHasMarriage);
@@ -10923,6 +10962,7 @@
             initCarryCymbalLayer();
             initCarryBassLayer();
             initCarryKeyboardLayer();
+            initCarryKeys2Layer();
             startBaseGroove();
             buildScoreHud();
             updateScoreToggleUi();
@@ -10943,9 +10983,6 @@
 
             for (let i = 0; i < activities.length; i++) {
                 const act = activities[i];
-                const variant = randInt(0, 1);
-                const kbBundle = buildKeyboardLine(baseRhythmInfo, act.keyboardStyle, inheritedChordProgression, variant);
-                const kb = createKeyboardSynth(act.keyboardStyle);
 
                 const minX = worldWidth * act.worldFraction[0];
                 const maxX = worldWidth * act.worldFraction[1];
@@ -10954,18 +10991,12 @@
                 toneDrops.push({
                     x: cx,
                     y: floorY + (i % 2 === 0 ? -8 : 8),
-                    pattern: kbBundle.pattern,
+                    pattern: null,
                     velocityPattern: null,
                     proximityVol: -100,
                     isHovered: false,
                     overlapAlpha: 0,
-                    instrument: "keyboard",
-                    keyboardSynth: kb.synth,
-                    keyboardEffects: kb.effects,
-                    keyboardNotes: kbBundle.notes,
-                    keyboardAttacks: kbBundle.attacks,
-                    keyboardDurations: kbBundle.durations,
-                    keyboardSustainType: kbBundle.sustainType,
+                    instrument: "timbre",
                     activityId: act.id,
                     activityName: act.name,
                     activityNameEn: act.nameEn,
@@ -10974,6 +11005,74 @@
                     ripples: []
                 });
             }
+        }
+
+        // ======== THIRTIES TIMBRE SHIFT ========
+        function applyTimbreShift(roomId) {
+            const shift = THIRTIES_TIMBRE_SHIFTS[roomId];
+            if (!shift) return;
+            const cfg = shift.config;
+
+            if (shift.target === "bass") {
+                disposeCarryBassLayer();
+                carryBassSynth = new Tone.MonoSynth({
+                    oscillator: { type: cfg.osc },
+                    envelope: { attack: cfg.attack, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release },
+                    filterEnvelope: {
+                        attack: cfg.attack * 0.5, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release,
+                        baseFrequency: cfg.filterBase, octaves: cfg.filterOct
+                    },
+                    volume: inheritedBassVolumeDb
+                }).toDestination();
+            }
+
+            if (shift.target === "hat") {
+                disposeCarryHatLayer();
+                carryHatFilter = new Tone.Filter({
+                    type: "highpass",
+                    frequency: cfg.hp,
+                    Q: cfg.q
+                }).toDestination();
+                carryHatSynth = new Tone.NoiseSynth({
+                    noise: { type: cfg.noise },
+                    envelope: { attack: 0.001, decay: cfg.decay, sustain: 0, release: cfg.release },
+                    volume: inheritedHatVolumeDb
+                }).connect(carryHatFilter);
+            }
+
+            if (shift.target === "keys") {
+                disposeCarryKeyboardLayer();
+                const vibrato = new Tone.Vibrato(cfg.vibratoFreq, cfg.vibratoDepth).toDestination();
+                carryKeyboardSynth = new Tone.PolySynth(Tone.Synth, {
+                    oscillator: { type: cfg.wave },
+                    envelope: { attack: cfg.attack, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release },
+                    volume: -22
+                }).connect(vibrato);
+                carryKeyboardEffects = [vibrato];
+            }
+
+            if (shift.target === "snare") {
+                disposeCarrySnareLayer();
+                carrySnareFilter = new Tone.Filter({
+                    type: "bandpass",
+                    frequency: cfg.bp,
+                    Q: cfg.q
+                }).toDestination();
+                carrySnareSynth = new Tone.NoiseSynth({
+                    noise: { type: cfg.noise },
+                    envelope: { attack: 0.001, decay: cfg.decay, sustain: 0, release: cfg.release },
+                    volume: inheritedSnareVolumeDb
+                }).connect(carrySnareFilter);
+                carrySnareBody = cfg.body ? new Tone.MembraneSynth({
+                    pitchDecay: 0.025,
+                    octaves: 2.5,
+                    oscillator: { type: "triangle" },
+                    envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.06 },
+                    volume: cfg.bodyVol || inheritedSnareBodyVolumeDb
+                }).toDestination() : null;
+            }
+
+            thirtiesTimbreShifted[shift.target] = true;
         }
 
         // ======== THIRTIES TONE SELECTION ========
@@ -10989,8 +11088,7 @@
                 labels: clickedDrop.activityLabels
             });
 
-            disposeToneDrops();
-            toneDrops = [];
+            const isGenkan = clickedDrop.activityId === "genkan";
 
             const sx = clickedDrop.x - cameraX;
             const sy = clickedDrop.y;
@@ -11001,13 +11099,36 @@
             ripple.style.top = (sy - 40) + 'px';
             document.body.appendChild(ripple);
 
-            fadeScreenTo(1, 1400);
-            setTimeout(() => {
-                ripple.remove();
-                thirtiesChoiceTransitioning = false;
-                // TODO: 次のフェーズへ遷移（未定）
-                fadeScreenTo(0, 1300);
-            }, 1400);
+            if (isGenkan) {
+                // Genkan = final confirmation → dispose all, transition to next phase
+                disposeToneDrops();
+                toneDrops = [];
+                fadeScreenTo(1, 1400);
+                setTimeout(() => {
+                    ripple.remove();
+                    thirtiesChoiceTransitioning = false;
+                    // TODO: 次のフェーズへ遷移（未定）
+                    fadeScreenTo(0, 1300);
+                }, 1400);
+            } else {
+                // Room selection → apply timbre shift, remove only this drop
+                applyTimbreShift(clickedDrop.activityId);
+
+                // Remove only the clicked drop (timbre drops have no synth to dispose)
+                const idx = toneDrops.indexOf(clickedDrop);
+                if (idx !== -1) toneDrops.splice(idx, 1);
+
+                // Clear hover glow since drop is gone
+                thirtiesGlowingRow = null;
+
+                fadeScreenTo(1, 1400);
+                setTimeout(() => {
+                    ripple.remove();
+                    thirtiesChoiceTransitioning = false;
+                    fadeScreenTo(0, 1300);
+                    renderScoreRows();
+                }, 1400);
+            }
         }
 
         // ======== TRAVEL PHASE (旅フェーズ) ========
@@ -11025,6 +11146,7 @@
             initCarryCymbalLayer();
             initCarryBassLayer();
             initCarryKeyboardLayer();
+            initCarryKeys2Layer();
             startBaseGroove();
             buildScoreHud();
             updateScoreToggleUi();
@@ -14092,7 +14214,15 @@
                 return;
             }
 
-            // Condition not met (round 1) → next phase
+            // Condition not met (round 1) → preserve selected tone as Keys2, then next phase
+            if (clickedDrop.instrument === "keyboard") {
+                inheritedKeys2Pattern = clickedDrop.pattern ? clickedDrop.pattern.slice() : inheritedKeys2Pattern;
+                inheritedKeys2Notes = clickedDrop.keyboardNotes ? clickedDrop.keyboardNotes.slice() : inheritedKeys2Notes;
+                inheritedKeys2Attacks = clickedDrop.keyboardAttacks ? clickedDrop.keyboardAttacks.slice() : inheritedKeys2Attacks;
+                inheritedKeys2Durations = clickedDrop.keyboardDurations ? clickedDrop.keyboardDurations.slice() : inheritedKeys2Durations;
+                inheritedKeys2SustainType = clickedDrop.keyboardSustainType ? clickedDrop.keyboardSustainType.slice() : inheritedKeys2SustainType;
+                inheritedKeys2SoundConfig = clickedDrop.jobHuntTimbre || inheritedKeys2SoundConfig;
+            }
             disposeToneDrops();
             toneDrops = [];
             jobHuntViewMode = "topdown";
@@ -14113,6 +14243,7 @@
                 inheritedKeys2Attacks = selectedDrop.keyboardAttacks ? selectedDrop.keyboardAttacks.slice() : inheritedKeys2Attacks;
                 inheritedKeys2Durations = selectedDrop.keyboardDurations ? selectedDrop.keyboardDurations.slice() : inheritedKeys2Durations;
                 inheritedKeys2SustainType = selectedDrop.keyboardSustainType ? selectedDrop.keyboardSustainType.slice() : inheritedKeys2SustainType;
+                inheritedKeys2SoundConfig = selectedDrop.jobHuntTimbre || inheritedKeys2SoundConfig;
                 // Recreate carry Keys2 synth with JOB_HUNT timbre
                 disposeCarryKeys2Layer();
                 const kb = createJobHuntSynth(selectedDrop.jobHuntTimbre || "bright-chime");
@@ -14465,6 +14596,19 @@
         function initCarryKeys2Layer() {
             disposeCarryKeys2Layer();
             if (!inheritedKeys2Pattern || !inheritedKeys2Notes) return;
+
+            // Check if the sound config is a JOB_HUNT timbre name directly
+            const jhCfg = JOBHUNT_TIMBRES[inheritedKeys2SoundConfig];
+            if (jhCfg) {
+                // Use createJobHuntSynth for accurate JOB_HUNT timbre
+                const kb = createJobHuntSynth(inheritedKeys2SoundConfig);
+                carryKeys2Synth = kb.synth;
+                carryKeys2Effects = kb.effects;
+                if (carryKeys2Synth) carryKeys2Synth.volume.value = -22;
+                return;
+            }
+
+            // Otherwise use university facility mapping
             const styleMap = {
                 "gate": "bells", "field": "xylophone", "building": "piano-gentle",
                 "gym": "marimba", "art_hall": "glass-pad"
@@ -16209,7 +16353,7 @@
                         ctx.font = "700 22px sans-serif";
                         ctx.fillText("\u2713", 0, 32);
                     }
-                } else if (drop.instrument === "keyboard") {
+                } else if (drop.instrument === "keyboard" || drop.instrument === "timbre") {
                     ctx.font = "700 14px 'Zen Maru Gothic', sans-serif";
                     ctx.fillText(drop.activityName || "", 0, -6);
                     if (drop.activityNameEn) {
@@ -16967,7 +17111,7 @@
         }
 
         function updateToneDropProximity() {
-            if ((currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.ADULT && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL) || !toneDrops.length) {
+            if ((currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.ADULT && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL && currentScene !== SCENE.THIRTIES) || !toneDrops.length) {
                 return;
             }
 
@@ -16994,9 +17138,10 @@
 
             toneDrops.forEach(drop => {
                 const dist = Math.hypot(orbWorldX - drop.x, orbWorldY - drop.y);
-                const hoverR = (drop.instrument === "chord" || drop.instrument === "bass" || drop.instrument === "keyboard" || drop.instrument === "modifier") ? 60 : 50;
+                const hoverR = (drop.instrument === "chord" || drop.instrument === "bass" || drop.instrument === "keyboard" || drop.instrument === "modifier" || drop.instrument === "timbre") ? 60 : 50;
                 const wasHovered = drop.isHovered;
-                drop.isHovered = dist <= hoverR;
+                // Keep drop hovered while confirmation dialog is open for it
+                drop.isHovered = dist <= hoverR || (adultConfirmation.active && adultConfirmation.drop === drop);
                 drop.proximityVol = drop.isHovered ? -12 : -100;
                 const target = drop.isHovered ? 1 : 0;
                 drop.overlapAlpha += (target - drop.overlapAlpha) * 0.18;
@@ -17065,6 +17210,15 @@
             if (currentScene === SCENE.CHILD2) {
                 const hov = toneDrops.find(d => d.instrument === "bass" && d.isHovered);
                 hoveredSchoolActivity = hov ? hov.activityId : null;
+            }
+            // THIRTIES: glow the score row for the hovered room's target instrument
+            if (currentScene === SCENE.THIRTIES) {
+                const hov = toneDrops.find(d => d.instrument === "timbre" && d.isHovered && d.activityId !== "genkan");
+                const newGlow = hov && THIRTIES_TIMBRE_SHIFTS[hov.activityId] ? THIRTIES_TIMBRE_SHIFTS[hov.activityId].label : null;
+                if (newGlow !== thirtiesGlowingRow) {
+                    thirtiesGlowingRow = newGlow;
+                    renderScoreRows();
+                }
             }
         }
 
@@ -18862,9 +19016,9 @@
                             try { carryKeyboardSynth.triggerAttackRelease(kNote, kDur); } catch (e) { /* ignore */ }
                         }
                     }
-                    // Carry Keys2 playback (PART_TIME/JOB_HUNT/JOB_HUNT2)
+                    // Carry Keys2 playback (PART_TIME onwards)
                     if (
-                        (currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) &&
+                        (currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES) &&
                         carryKeys2Synth &&
                         inheritedKeys2Attacks &&
                         inheritedKeys2Attacks[step]
@@ -19805,8 +19959,8 @@
             const rows = [];
             let chordRow = null;
 
-            // Pagination support for JOB_HUNT2 and TRAVEL
-            const usePagination = (isJobHunt2 || isTravel) && scoreHudState.pageCount > 1;
+            // Pagination support for JOB_HUNT2, TRAVEL, and THIRTIES
+            const usePagination = (isJobHunt2 || isTravel || isThirties) && scoreHudState.pageCount > 1;
             const displayPage = scoreHudState.currentPage;
             const pageOffset = usePagination ? displayPage * scoreHudState.stepsPerPage : 0;
             const displaySteps = usePagination ? scoreHudState.stepsPerPage : null; // null = show all
@@ -19816,7 +19970,9 @@
             };
 
             // --- PREVIEW ROW LOGIC (Hovering a Tone Drop) ---
-            if (previewDropIndex !== null && toneDrops[previewDropIndex]) {
+            // --- PREVIEW ROW LOGIC (Hovering a Tone Drop) ---
+            // THIRTIES timbre drops have no sound — skip preview rows for them
+            if (previewDropIndex !== null && toneDrops[previewDropIndex] && toneDrops[previewDropIndex].instrument !== "timbre") {
                 const preview = toneDrops[previewDropIndex];
                 const isCymbal = preview.instrument === "cymbal";
                 const isSnare = preview.instrument === "snare";
@@ -19859,7 +20015,7 @@
             }
 
             // --- INHERITED ROWS LOGIC (The sounds the user already has) ---
-            if ((isPartTime || isJobHunt || isJobHunt2 || isThirties) && inheritedKeys2Pattern) {
+            if ((isPartTime || isJobHunt || isJobHunt2 || isTravel || isThirties) && inheritedKeys2Pattern) {
                 rows.push({ label: 'Keys2', pattern: slicePage(inheritedKeys2Pattern), styleClass: 'bass', sustainType: slicePage(inheritedKeys2SustainType || null) });
             }
             if ((isUniversity || isPartTime || isJobHunt || isJobHunt2 || isTravel || isThirties) && inheritedKeyboardPattern) {
@@ -19964,6 +20120,11 @@
                 const rowEl = document.createElement('div');
                 rowEl.className = 'score-row';
                 if (row.label.startsWith('Hat') || row.label.startsWith('Snare') || row.label.startsWith('Cymbal') || row.label.startsWith('Bass') || row.label.startsWith('Keys')) rowEl.classList.add('preview');
+
+                // THIRTIES: hover glow preview and confirmed shift glow
+                if (thirtiesGlowingRow && row.label === thirtiesGlowingRow) rowEl.classList.add('timbre-glow-preview');
+                const shiftEntry = Object.values(THIRTIES_TIMBRE_SHIFTS).find(s => s.label === row.label);
+                if (shiftEntry && thirtiesTimbreShifted[shiftEntry.target]) rowEl.classList.add('timbre-shifted');
 
                 const labelEl = document.createElement('div');
                 labelEl.className = 'score-label';
@@ -20098,7 +20259,7 @@
             scoreMeta.textContent = `${baseRhythmInfo.beatsPerBar}/4 x ${baseRhythmInfo.bars}  |  ${Math.round(baseRhythmInfo.bpm)} BPM`;
             scoreHudState.previewDropIndex = null;
             // Reset pagination for scenes without pagination
-            if (currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL) {
+            if (currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL && currentScene !== SCENE.THIRTIES) {
                 scoreHudState.pageCount = 1;
                 scoreHudState.currentPage = 0;
                 scoreHudState.stepsPerPage = 0;

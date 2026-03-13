@@ -642,8 +642,8 @@
             transition: background 0.4s, box-shadow 0.4s, transform 0.4s;
         }
         .score-dot.active {
-            background: hsl(220, 60%, 65%);
-            box-shadow: 0 0 12px hsla(220, 60%, 65%, 0.6), 0 0 4px hsla(220, 60%, 65%, 0.9);
+            background: hsl(30, 8%, 48%);
+            box-shadow: 0 0 12px hsla(30, 8%, 48%, 0.5), 0 0 4px hsla(30, 8%, 48%, 0.7);
             transform: scaleY(1.5);
         }
 
@@ -920,6 +920,20 @@
         .vol-row.muted .vol-label,
         .vol-row.muted .vol-pct {
             opacity: 0.5;
+        }
+
+        /* THIRTIES: hover preview pulse glow */
+        .score-row.timbre-glow-preview {
+            animation: timbreGlowPulse 0.8s ease-in-out infinite;
+        }
+        @keyframes timbreGlowPulse {
+            0%, 100% { background: rgba(255, 220, 100, 0.0); }
+            50% { background: rgba(255, 220, 100, 0.25); }
+        }
+        /* THIRTIES: confirmed timbre shift glow */
+        .score-row.timbre-shifted {
+            background: rgba(255, 220, 100, 0.12);
+            border-radius: 4px;
         }
 
         /* Cursor overrides for Settings area */
