@@ -87,6 +87,13 @@
         let inheritedKeyboardSoundConfig = null;
         let carryKeyboardSynth = null;
         let carryKeyboardEffects = [];
+        let leadPattern = null;
+        let leadNotes = null;
+        let leadAttacks = null;
+        let leadDurations = null;
+        let leadSustainType = null;
+        let carryLeadSynth = null;
+        let carryLeadEffects = [];
         let universityNpcs = null;
         let universityBuildingSeeds = [];
         let adultTransitionLock = false;
@@ -100,8 +107,6 @@
             endScheduled: false
         };
         let travelStillAudio = null;
-        let thirtiesTimbreShifted = {};
-        let thirtiesGlowingRow = null;
 
         // ======== Life Label bilingual name mapping ========
         const LABEL_NAMES = {
@@ -277,6 +282,7 @@
             { id: 'bass',     label: 'Bass',     color: 'rgba(82,65,148,0.96)' },
             { id: 'keyboard', label: 'Keys',     color: 'rgba(100,80,168,0.96)' },
             { id: 'keys2',    label: 'Keys2',    color: 'rgba(120,95,180,0.96)' },
+            { id: 'lead',     label: 'Lead',     color: 'rgba(200,140,60,0.96)' },
         ];
 
         let activeMinigame = null;
@@ -1717,13 +1723,14 @@
                 const dx = tx - this.x;
                 const isAdultScene = (typeof currentScene !== 'undefined' && currentScene === SCENE.ADULT);
                 const isUniversityScene = (typeof currentScene !== 'undefined' && currentScene === SCENE.UNIVERSITY);
+                const isThirtiesScene = (typeof currentScene !== 'undefined' && currentScene === SCENE.THIRTIES);
                 if (Math.abs(dx) > 10) {
                     this.direction = dx > 0 ? 1 : -1;
-                    const speedMult = isUniversityScene ? 0.18 : (isAdultScene ? 0.12 : 0.04);
-                    const maxSpd = isUniversityScene ? 10.0 : (isAdultScene ? 7.0 : 2.8);
+                    const speedMult = isUniversityScene ? 0.18 : (isAdultScene ? 0.12 : (isThirtiesScene ? 0.10 : 0.04));
+                    const maxSpd = isUniversityScene ? 10.0 : (isAdultScene ? 7.0 : (isThirtiesScene ? 6.0 : 2.8));
                     const speed = Math.min(Math.abs(dx) * speedMult, maxSpd);
                     this.x += speed * this.direction;
-                    this.walkCycle += isUniversityScene ? 0.35 : (isAdultScene ? 0.25 : 0.13);
+                    this.walkCycle += isUniversityScene ? 0.35 : (isAdultScene ? 0.25 : (isThirtiesScene ? 0.22 : 0.13));
                 } else {
                     this.walkCycle += 0.03;
                 }
@@ -4252,28 +4259,48 @@
             const activities = getThirtiesActivities(thirtiesHasMarriage);
             const t = Date.now() * 0.001;
 
+            // Outdoor area (leftmost worldFraction 0.00-0.08)
+            const outdoorEnd = worldWidth * 0.08;
+            drawThirtiesOutdoor(ctx, 0, outdoorEnd, wallHeight);
+
+            // Interior starts after outdoor
+            const interiorStart = outdoorEnd;
+
             // Base wall gradient (warm interior)
             const wallG = ctx.createLinearGradient(0, 0, 0, wallHeight);
             wallG.addColorStop(0, "#f8f6f2");
             wallG.addColorStop(1, "#f0ece4");
             ctx.fillStyle = wallG;
-            ctx.fillRect(0, 0, worldWidth, wallHeight);
+            ctx.fillRect(interiorStart, 0, worldWidth - interiorStart, wallHeight);
 
             // Base floor
             ctx.fillStyle = floorColor;
-            ctx.fillRect(0, wallHeight, worldWidth, height - wallHeight);
+            ctx.fillRect(interiorStart, wallHeight, worldWidth - interiorStart, height - wallHeight);
 
             // Crown molding
             ctx.fillStyle = "rgba(220, 215, 205, 0.5)";
-            ctx.fillRect(0, 0, worldWidth, 6);
+            ctx.fillRect(interiorStart, 0, worldWidth - interiorStart, 6);
             ctx.fillStyle = "rgba(200, 195, 185, 0.35)";
-            ctx.fillRect(0, 6, worldWidth, 3);
+            ctx.fillRect(interiorStart, 6, worldWidth - interiorStart, 3);
 
             // Baseboard
             ctx.fillStyle = "rgba(190, 180, 165, 0.55)";
-            ctx.fillRect(0, wallHeight - 10, worldWidth, 10);
+            ctx.fillRect(interiorStart, wallHeight - 10, worldWidth - interiorStart, 10);
             ctx.fillStyle = "rgba(170, 160, 145, 0.3)";
-            ctx.fillRect(0, wallHeight - 12, worldWidth, 3);
+            ctx.fillRect(interiorStart, wallHeight - 12, worldWidth - interiorStart, 3);
+
+            // Front door at boundary between outdoor and interior
+            const doorFrameX = outdoorEnd;
+            const doorFrameW = 22;
+            ctx.fillStyle = "rgba(140, 120, 90, 0.85)";
+            ctx.fillRect(doorFrameX - doorFrameW / 2, 0, doorFrameW, wallHeight);
+            ctx.fillStyle = "rgba(120, 100, 75, 0.7)";
+            ctx.fillRect(doorFrameX - doorFrameW / 2 - 4, 0, doorFrameW + 8, 10);
+            ctx.fillRect(doorFrameX - doorFrameW / 2 - 4, wallHeight - 10, doorFrameW + 8, 10);
+            const frontDoorH = wallHeight * 0.7;
+            const frontDoorY = wallHeight - frontDoorH;
+            ctx.fillStyle = wallG;
+            ctx.fillRect(doorFrameX - doorFrameW / 2 + 3, frontDoorY, doorFrameW - 6, frontDoorH - 10);
 
             // Draw each room
             for (let ri = 0; ri < activities.length; ri++) {
@@ -4281,18 +4308,14 @@
                 const rx1 = worldWidth * act.worldFraction[0];
                 const rx2 = worldWidth * act.worldFraction[1];
                 const rw = rx2 - rx1;
-                const rcx = rx1 + rw * 0.5;
 
                 // Room-specific decorations
-                if (act.id === "genkan") {
-                    drawGenkanRoom(ctx, rx1, rw, wallHeight);
-                } else if (act.id === "kitchen") {
+                if (act.id === "kitchen") {
                     drawKitchenRoom(ctx, rx1, rw, wallHeight);
                 } else if (act.id === "living") {
                     drawLivingRoom(ctx, rx1, rw, wallHeight);
-                } else if (act.id === "marriage") {
-                    drawLivingRoom(ctx, rx1, rw, wallHeight);
-                    drawMarriageEffects(ctx, rx1, rw, wallHeight, t);
+                } else if (act.id === "kidsroom") {
+                    drawKidsRoom(ctx, rx1, rw, wallHeight);
                 } else if (act.id === "bedroom") {
                     drawBedroomRoom(ctx, rx1, rw, wallHeight);
                 }
@@ -4301,30 +4324,26 @@
                 if (ri < activities.length - 1) {
                     const dx = rx2 + (worldWidth * activities[ri + 1].worldFraction[0] - rx2) * 0.5;
                     const dw = 18;
-                    // Wall pillar
                     ctx.fillStyle = "rgba(200, 190, 175, 0.7)";
                     ctx.fillRect(dx - dw / 2, 0, dw, wallHeight);
-                    // Door frame arch
                     ctx.fillStyle = "rgba(180, 170, 150, 0.6)";
                     ctx.fillRect(dx - dw / 2 - 4, 0, dw + 8, 8);
                     ctx.fillRect(dx - dw / 2 - 4, wallHeight - 8, dw + 8, 8);
-                    // Door opening (gap in the middle)
                     const doorH = wallHeight * 0.65;
                     const doorY = wallHeight - doorH;
                     ctx.fillStyle = wallG;
                     ctx.fillRect(dx - dw / 2 + 2, doorY, dw - 4, doorH - 10);
-                    // Door frame trim
                     ctx.strokeStyle = "rgba(160, 150, 135, 0.5)";
                     ctx.lineWidth = 2;
                     ctx.strokeRect(dx - dw / 2 + 1, doorY, dw - 2, doorH - 10);
                 }
             }
 
-            // Wood plank floor
+            // Wood plank floor (interior only)
             const plankW = 90;
             ctx.strokeStyle = "rgba(80, 60, 40, 0.08)";
             ctx.lineWidth = 1;
-            for (let x = 0; x < worldWidth; x += plankW) {
+            for (let x = interiorStart; x < worldWidth; x += plankW) {
                 ctx.beginPath();
                 ctx.moveTo(x, wallHeight); ctx.lineTo(x, height);
                 ctx.stroke();
@@ -4332,7 +4351,7 @@
             for (let y = wallHeight; y < height; y += 28) {
                 const offset = ((y - wallHeight) / 28) % 2 === 0 ? 0 : plankW / 2;
                 ctx.beginPath();
-                ctx.moveTo(offset, y); ctx.lineTo(worldWidth, y);
+                ctx.moveTo(Math.max(offset, interiorStart), y); ctx.lineTo(worldWidth, y);
                 ctx.stroke();
             }
         }
@@ -4493,6 +4512,91 @@
             ctx.beginPath();
             ctx.moveTo(winX + winW / 2, winY + 3); ctx.lineTo(winX + winW / 2, winY + winH - 3);
             ctx.stroke();
+        }
+
+        function drawThirtiesOutdoor(ctx, x1, x2, wallH) {
+            const w = x2 - x1;
+            // Sky gradient
+            const skyG = ctx.createLinearGradient(0, 0, 0, wallH);
+            skyG.addColorStop(0, "hsl(210, 60%, 75%)");
+            skyG.addColorStop(1, "hsl(200, 50%, 85%)");
+            ctx.fillStyle = skyG;
+            ctx.fillRect(x1, 0, w, wallH);
+            // Ground
+            ctx.fillStyle = "hsl(100, 35%, 55%)";
+            ctx.fillRect(x1, wallH, w, height - wallH);
+            // Grass texture
+            ctx.fillStyle = "hsl(105, 40%, 48%)";
+            for (let gx = x1; gx < x2; gx += 12) {
+                const gh = 4 + Math.sin(gx * 0.3) * 3;
+                ctx.fillRect(gx, wallH - gh, 3, gh);
+            }
+            // Distant building silhouette
+            ctx.fillStyle = "rgba(160, 165, 175, 0.4)";
+            ctx.fillRect(x1 + w * 0.05, wallH * 0.35, w * 0.18, wallH * 0.65);
+            ctx.fillRect(x1 + w * 0.28, wallH * 0.45, w * 0.15, wallH * 0.55);
+            // Simple tree
+            const treeX = x1 + w * 0.6;
+            ctx.fillStyle = "hsl(25, 35%, 35%)";
+            ctx.fillRect(treeX - 4, wallH * 0.4, 8, wallH * 0.6);
+            ctx.fillStyle = "hsl(120, 40%, 42%)";
+            ctx.beginPath();
+            ctx.arc(treeX, wallH * 0.35, w * 0.12, 0, Math.PI * 2);
+            ctx.fill();
+            // Small clouds
+            ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+            ctx.beginPath(); ctx.arc(x1 + w * 0.3, wallH * 0.15, 14, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(x1 + w * 0.35, wallH * 0.13, 10, 0, Math.PI * 2); ctx.fill();
+            // Path/walkway
+            ctx.fillStyle = "hsl(35, 15%, 65%)";
+            ctx.fillRect(x2 - 30, wallH, 30, height - wallH);
+        }
+
+        function drawKidsRoom(ctx, rx, rw, wallH) {
+            // Colorful wallpaper (pastel stripes)
+            const stripeW = rw / 8;
+            const colors = ["hsl(190, 55%, 82%)", "hsl(340, 50%, 85%)", "hsl(60, 55%, 85%)", "hsl(270, 40%, 85%)"];
+            for (let i = 0; i < 8; i++) {
+                ctx.fillStyle = colors[i % colors.length];
+                ctx.fillRect(rx + i * stripeW, 10, stripeW, wallH - 20);
+            }
+            // Toy shelf
+            const shelfW = rw * 0.35;
+            const shelfH = wallH * 0.28;
+            const shelfX = rx + rw * 0.05;
+            const shelfY = wallH * 0.35;
+            ctx.fillStyle = "hsl(30, 40%, 60%)";
+            ctx.fillRect(shelfX, shelfY, shelfW, 6);
+            ctx.fillRect(shelfX, shelfY + shelfH * 0.5, shelfW, 6);
+            ctx.fillRect(shelfX, shelfY, 5, shelfH);
+            ctx.fillRect(shelfX + shelfW - 5, shelfY, 5, shelfH);
+            // Toy blocks on shelf
+            ctx.fillStyle = "hsl(0, 60%, 65%)";
+            ctx.fillRect(shelfX + 12, shelfY - 14, 14, 14);
+            ctx.fillStyle = "hsl(210, 60%, 60%)";
+            ctx.fillRect(shelfX + 30, shelfY - 12, 12, 12);
+            ctx.fillStyle = "hsl(50, 70%, 60%)";
+            ctx.fillRect(shelfX + 16, shelfY + shelfH * 0.5 - 10, 10, 10);
+            // Small bed
+            const bedW = rw * 0.32;
+            const bedH = wallH * 0.18;
+            const bedX = rx + rw * 0.60;
+            const bedY = wallH - bedH;
+            ctx.fillStyle = "hsl(30, 35%, 50%)";
+            ctx.fillRect(bedX, bedY, bedW, bedH);
+            ctx.fillStyle = "hsl(190, 45%, 75%)";
+            ctx.fillRect(bedX + 3, bedY + 3, bedW - 6, bedH - 6);
+            // Pillow
+            ctx.fillStyle = "hsl(0, 0%, 95%)";
+            ctx.beginPath(); ctx.roundRect(bedX + 6, bedY + 6, bedW * 0.25, bedH * 0.5, 4); ctx.fill();
+            // Star stickers on wall
+            ctx.fillStyle = "hsl(50, 80%, 70%)";
+            const starPositions = [[0.45, 0.15], [0.55, 0.22], [0.75, 0.12], [0.85, 0.20]];
+            starPositions.forEach(([fx, fy]) => {
+                ctx.beginPath();
+                ctx.arc(rx + rw * fx, wallH * fy, 5, 0, Math.PI * 2);
+                ctx.fill();
+            });
         }
 
         function drawKitchenRoom(ctx, rx, rw, wallH) {
@@ -6798,46 +6902,22 @@
 
         // ======== THIRTIES PHASE (30代フェーズ — 家の中の間取り) ========
         const THIRTIES_ACTIVITIES = [
-            { id: "genkan", name: "玄関", nameEn: "Entrance", keyboardStyle: "piano-gentle",
-              color: "hsl(30, 40%, 60%)", worldFraction: [0.03, 0.20],
-              labels: { social: 3, cautious: 2, patient: 1 } },
-            { id: "kitchen", name: "キッチン", nameEn: "Kitchen", keyboardStyle: "organ-funky",
-              color: "hsl(45, 55%, 62%)", worldFraction: [0.25, 0.44],
+            { id: "kitchen", name: "キッチン", nameEn: "Kitchen",
+              color: "hsl(45, 55%, 62%)", worldFraction: [0.10, 0.30],
               labels: { creative: 3, patient: 2, focused: 1 } },
-            { id: "living", name: "リビング", nameEn: "Living Room", keyboardStyle: "piano-chord",
-              color: "hsl(25, 45%, 58%)", worldFraction: [0.50, 0.70],
+            { id: "living", name: "リビング", nameEn: "Living Room",
+              color: "hsl(25, 45%, 58%)", worldFraction: [0.36, 0.56],
               labels: { social: 3, expressive: 2, optimistic: 1 } },
-            { id: "bedroom", name: "寝室", nameEn: "Bedroom", keyboardStyle: "piano-gentle",
-              color: "hsl(260, 35%, 60%)", worldFraction: [0.76, 0.95],
+            { id: "bedroom", name: "寝室", nameEn: "Bedroom",
+              color: "hsl(260, 35%, 60%)", worldFraction: [0.62, 0.82],
               labels: { calm: 3, focused: 2, resilient: 1 } },
         ];
 
-        const THIRTIES_TIMBRE_SHIFTS = {
-            kitchen: {
-                target: "bass",
-                label: "Bass",
-                config: { osc: "sawtooth", attack: 0.005, decay: 0.12, sustain: 0.2, release: 0.15, filterBase: 200, filterOct: 3.5 }
-            },
-            kidsroom: {
-                target: "hat",
-                label: "Hat",
-                config: { noise: "white", hp: 9200, q: 1.2, decay: 0.035, release: 0.01 }
-            },
-            living: {
-                target: "keys",
-                label: "Keys",
-                config: { wave: "triangle", attack: 0.08, decay: 0.9, sustain: 0.4, release: 1.0,
-                          vibratoFreq: 2.0, vibratoDepth: 0.06 }
-            },
-            bedroom: {
-                target: "snare",
-                label: "Snare",
-                config: { noise: "pink", bp: 1200, q: 0.4, decay: 0.2, release: 0.12, body: true,
-                          bodyVol: -20 }
-            }
-        };
-
         let thirtiesHasMarriage = false;
+        let thirtiesRoomMelodies = null;      // { kitchen: { keys, keys2 }, living: ..., ... }
+        let thirtiesMelodyConfirmed = false;   // メロディ確定済み
+        let thirtiesHoveredRoom = null;        // ホバー中の部屋ID
+        let thirtiesPreviewingLead = false;    // ホバープレビュー中のLeadパターンあり
 
         function checkMarriageCondition() {
             const labelSums = {};
@@ -6851,15 +6931,14 @@
 
         function getThirtiesActivities(hasMarriage) {
             if (!hasMarriage) return THIRTIES_ACTIVITIES;
-            // With marriage: redistribute 5 rooms evenly
+            // With marriage: add kidsroom between living and bedroom
             return [
-                { ...THIRTIES_ACTIVITIES[0], worldFraction: [0.02, 0.15] },  // genkan
-                { ...THIRTIES_ACTIVITIES[1], worldFraction: [0.18, 0.32] },  // kitchen
-                { id: "marriage", name: "結婚", nameEn: "Marriage", keyboardStyle: "piano-chord",
-                  color: "hsl(340, 60%, 65%)", worldFraction: [0.36, 0.50],
-                  labels: { social: 5, expressive: 4, optimistic: 3 } },
-                { ...THIRTIES_ACTIVITIES[2], worldFraction: [0.54, 0.70] },  // living
-                { ...THIRTIES_ACTIVITIES[3], worldFraction: [0.74, 0.92] },  // bedroom
+                { ...THIRTIES_ACTIVITIES[0], worldFraction: [0.10, 0.27] },  // kitchen
+                { ...THIRTIES_ACTIVITIES[1], worldFraction: [0.30, 0.48] },  // living
+                { id: "kidsroom", name: "子供部屋", nameEn: "Kids Room",
+                  color: "hsl(190, 50%, 60%)", worldFraction: [0.52, 0.68],
+                  labels: { social: 4, expressive: 3, optimistic: 2 } },
+                { ...THIRTIES_ACTIVITIES[2], worldFraction: [0.72, 0.90] },  // bedroom
             ];
         }
 
@@ -10946,17 +11025,337 @@
             }, 550);
         }
 
+        // ======== THIRTIES HELPERS ========
+        function noteNameToMidi(name) {
+            const NOTES = { 'C': 0, 'C#': 1, 'Db': 1, 'D': 2, 'D#': 3, 'Eb': 3, 'E': 4, 'Fb': 4,
+                            'F': 5, 'E#': 5, 'F#': 6, 'Gb': 6, 'G': 7, 'G#': 8, 'Ab': 8,
+                            'A': 9, 'A#': 10, 'Bb': 10, 'B': 11, 'Cb': 11 };
+            const m = name.match(/^([A-G][#b]?)(\d+)$/);
+            if (!m) return 60;
+            return (parseInt(m[2]) + 1) * 12 + (NOTES[m[1]] || 0);
+        }
+
+        function doubleAllInheritedPatterns(stepsPerPage) {
+            if (baseRhythmInfo.kickPattern) {
+                baseRhythmInfo._originalKick = baseRhythmInfo._originalKick || baseRhythmInfo.kickPattern.slice();
+                baseRhythmInfo.kickPattern = [...baseRhythmInfo._originalKick, ...baseRhythmInfo._originalKick];
+            }
+            if (inheritedHatPattern) inheritedHatPattern = [...inheritedHatPattern.slice(0, stepsPerPage), ...inheritedHatPattern.slice(0, stepsPerPage)];
+            if (inheritedSnarePattern) inheritedSnarePattern = [...inheritedSnarePattern.slice(0, stepsPerPage), ...inheritedSnarePattern.slice(0, stepsPerPage)];
+            if (inheritedSnareVelocity) inheritedSnareVelocity = [...inheritedSnareVelocity.slice(0, stepsPerPage), ...inheritedSnareVelocity.slice(0, stepsPerPage)];
+            if (inheritedBassPattern) {
+                inheritedBassPattern = [...inheritedBassPattern.slice(0, stepsPerPage), ...inheritedBassPattern.slice(0, stepsPerPage)];
+                if (inheritedBassNotes) inheritedBassNotes = [...inheritedBassNotes.slice(0, stepsPerPage), ...inheritedBassNotes.slice(0, stepsPerPage)];
+                if (inheritedBassAttacks) inheritedBassAttacks = [...inheritedBassAttacks.slice(0, stepsPerPage), ...inheritedBassAttacks.slice(0, stepsPerPage)];
+                if (inheritedBassDurations) inheritedBassDurations = [...inheritedBassDurations.slice(0, stepsPerPage), ...inheritedBassDurations.slice(0, stepsPerPage)];
+                if (inheritedBassSustainType) inheritedBassSustainType = [...inheritedBassSustainType.slice(0, stepsPerPage), ...inheritedBassSustainType.slice(0, stepsPerPage)];
+            }
+            if (inheritedKeyboardPattern) {
+                inheritedKeyboardPattern = [...inheritedKeyboardPattern.slice(0, stepsPerPage), ...inheritedKeyboardPattern.slice(0, stepsPerPage)];
+                if (inheritedKeyboardNotes) inheritedKeyboardNotes = [...inheritedKeyboardNotes.slice(0, stepsPerPage), ...inheritedKeyboardNotes.slice(0, stepsPerPage)];
+                if (inheritedKeyboardAttacks) inheritedKeyboardAttacks = [...inheritedKeyboardAttacks.slice(0, stepsPerPage), ...inheritedKeyboardAttacks.slice(0, stepsPerPage)];
+                if (inheritedKeyboardDurations) inheritedKeyboardDurations = [...inheritedKeyboardDurations.slice(0, stepsPerPage), ...inheritedKeyboardDurations.slice(0, stepsPerPage)];
+                if (inheritedKeyboardSustainType) inheritedKeyboardSustainType = [...inheritedKeyboardSustainType.slice(0, stepsPerPage), ...inheritedKeyboardSustainType.slice(0, stepsPerPage)];
+            }
+            if (inheritedKeys2Pattern) {
+                inheritedKeys2Pattern = [...inheritedKeys2Pattern.slice(0, stepsPerPage), ...inheritedKeys2Pattern.slice(0, stepsPerPage)];
+                if (inheritedKeys2Notes) inheritedKeys2Notes = [...inheritedKeys2Notes.slice(0, stepsPerPage), ...inheritedKeys2Notes.slice(0, stepsPerPage)];
+                if (inheritedKeys2Attacks) inheritedKeys2Attacks = [...inheritedKeys2Attacks.slice(0, stepsPerPage), ...inheritedKeys2Attacks.slice(0, stepsPerPage)];
+                if (inheritedKeys2Durations) inheritedKeys2Durations = [...inheritedKeys2Durations.slice(0, stepsPerPage), ...inheritedKeys2Durations.slice(0, stepsPerPage)];
+                if (inheritedKeys2SustainType) inheritedKeys2SustainType = [...inheritedKeys2SustainType.slice(0, stepsPerPage), ...inheritedKeys2SustainType.slice(0, stepsPerPage)];
+            }
+            if (inheritedCymbalPattern) {
+                inheritedCymbalPattern = [...inheritedCymbalPattern.slice(0, stepsPerPage), ...inheritedCymbalPattern.slice(0, stepsPerPage)];
+                if (inheritedCymbalVelocity) inheritedCymbalVelocity = [...inheritedCymbalVelocity.slice(0, stepsPerPage), ...inheritedCymbalVelocity.slice(0, stepsPerPage)];
+            }
+        }
+
+        // ======== THIRTIES MELODY GENERATION ========
+        function computeMelodyParams(labelSums, soundConfig, roomId) {
+            let density = 0.4;
+            let longNoteBias = 0.5;
+            let leapiness = 0.3;
+            let syncopation = 0.2;
+            let ascendBias = 0.5;
+            let octaveRange = 1;
+
+            const get = (k) => (labelSums[k] || 0);
+
+            density += get('active') * 0.03;
+            octaveRange += get('active') * 0.05;
+            density -= get('calm') * 0.03;
+            longNoteBias += get('calm') * 0.04;
+            leapiness += get('expressive') * 0.04;
+            syncopation += get('creative') * 0.04;
+            leapiness -= get('focused') * 0.02;
+            octaveRange += get('adventurous') * 0.06;
+            leapiness += get('adventurous') * 0.03;
+            ascendBias += get('optimistic') * 0.03;
+            density -= get('patient') * 0.02;
+            longNoteBias += get('patient') * 0.02;
+            density += get('social') * 0.01;
+
+            if (soundConfig === 'entertainment' || soundConfig === 'pachinko-bells') {
+                density += 0.15; leapiness += 0.1; octaveRange += 0.3;
+            } else if (soundConfig === 'parttime' || soundConfig === 'organ-funky') {
+                density += 0.1; longNoteBias -= 0.2;
+            } else if (soundConfig === 'travel' || soundConfig === 'piano-chord') {
+                longNoteBias += 0.15;
+            } else if (soundConfig === 'jobhunt' || soundConfig === 'piano-sparse') {
+                density -= 0.15; longNoteBias += 0.1;
+            }
+
+            if (roomId === 'kitchen') {
+                density += 0.15; syncopation += 0.15;
+            } else if (roomId === 'bedroom') {
+                density -= 0.15; longNoteBias += 0.15;
+                leapiness -= 0.1;
+            } else if (roomId === 'kidsroom') {
+                density += 0.05; leapiness += 0.05;
+                longNoteBias += 0.05;
+            }
+
+            return {
+                density: Math.max(0.1, Math.min(0.9, density)),
+                longNoteBias: Math.max(0.1, Math.min(0.9, longNoteBias)),
+                leapiness: Math.max(0.0, Math.min(0.8, leapiness)),
+                syncopation: Math.max(0.0, Math.min(0.7, syncopation)),
+                ascendBias: Math.max(0.2, Math.min(0.8, ascendBias)),
+                octaveRange: Math.max(1, Math.min(2.5, octaveRange))
+            };
+        }
+
+        function buildThirtiesMelody(baseInfo, chordProg, params) {
+            const totalSteps = baseInfo.beatsPerBar * baseInfo.bars * STEPS_PER_BEAT;
+            const barSteps = baseInfo.beatsPerBar * STEPS_PER_BEAT;
+            const S = STEPS_PER_BEAT;
+
+            const chordRoots = chordProg.notes.map(t => t[0].replace(/\d+$/, ''));
+            const chordThirds = chordProg.notes.map(t => t[1].replace(/\d+$/, ''));
+            const chordFifths = chordProg.notes.map(t => t[2].replace(/\d+$/, ''));
+
+            const events = [];
+            const add = (si, note, len) => {
+                if (si >= 0 && si < totalSteps && note)
+                    events.push({ step: si, note, len: Math.min(len, totalSteps - si) });
+            };
+
+            const buildNotePool = (bar) => {
+                const R = chordRoots[bar % chordRoots.length];
+                const T = chordThirds[bar % chordThirds.length];
+                const F = chordFifths[bar % chordFifths.length];
+                const pool = [];
+                const baseOct = 4;
+                const lo = Math.max(3, Math.round(baseOct - params.octaveRange / 2));
+                const hi = Math.min(6, Math.round(baseOct + params.octaveRange / 2));
+                for (let oct = lo; oct <= hi; oct++) {
+                    pool.push(R + oct, T + oct, F + oct);
+                }
+                return { pool, R, T, F, baseOct };
+            };
+
+            let prevMidi = null;
+
+            for (let bar = 0; bar < baseInfo.bars; bar++) {
+                const b = bar * barSteps;
+                const { pool, R, T, F, baseOct } = buildNotePool(bar);
+
+                const maxNotesPerBar = Math.floor(baseInfo.beatsPerBar * 2);
+                const notesThisBar = Math.max(1,
+                    Math.round(1 + (maxNotesPerBar - 1) * params.density));
+
+                // Note onsets snap to 8th-note grid (even positions: 0,2,4,6,8,10,12,14)
+                const eighthGrid = [];
+                for (let s = 0; s < barSteps; s += 2) eighthGrid.push(s);
+
+                const slots = [];
+                for (let n = 0; n < notesThisBar; n++) {
+                    let step;
+                    if (Math.random() < params.syncopation) {
+                        // Syncopated: pick from offbeat 8th positions (2,6,10,14)
+                        const offbeats = eighthGrid.filter(s => s % 4 !== 0);
+                        step = b + offbeats[Math.floor(Math.random() * offbeats.length)];
+                    } else {
+                        // Normal: distribute evenly, snap to nearest 8th
+                        const raw = Math.round(n * barSteps / notesThisBar);
+                        step = b + (Math.round(raw / 2) * 2);
+                    }
+                    if (step < b + barSteps) slots.push(step);
+                }
+                slots.sort((a, b2) => a - b2);
+                const uniqueSlots = [...new Set(slots)];
+
+                uniqueSlots.forEach((step, idx) => {
+                    const maxLen = Math.round(2 + (barSteps / 2 - 2) * params.longNoteBias);
+                    const nextStep = idx < uniqueSlots.length - 1
+                        ? uniqueSlots[idx + 1] : b + barSteps;
+                    const len = Math.max(1, Math.min(maxLen, nextStep - step));
+
+                    let note;
+                    const chordTones = [R + baseOct, T + baseOct, F + baseOct];
+
+                    if (prevMidi === null || Math.random() < 0.3) {
+                        note = chordTones[Math.floor(Math.random() * 3)];
+                    } else if (Math.random() < params.leapiness) {
+                        note = pool[Math.floor(Math.random() * pool.length)];
+                    } else {
+                        const sorted = pool.map(n => ({
+                            note: n,
+                            midi: noteNameToMidi(n),
+                            dist: Math.abs(noteNameToMidi(n) - prevMidi)
+                        })).filter(x => x.dist > 0 && x.dist <= 7)
+                          .sort((a, b2) => a.dist - b2.dist);
+
+                        if (sorted.length > 0) {
+                            const ascending = sorted.filter(x => x.midi > prevMidi);
+                            const descending = sorted.filter(x => x.midi < prevMidi);
+                            if (ascending.length > 0 && Math.random() < params.ascendBias) {
+                                note = ascending[0].note;
+                            } else if (descending.length > 0) {
+                                note = descending[0].note;
+                            } else {
+                                note = sorted[0].note;
+                            }
+                        } else {
+                            note = chordTones[Math.floor(Math.random() * 3)];
+                        }
+                    }
+
+                    add(step, [note], len);
+                    prevMidi = noteNameToMidi(note);
+                });
+            }
+
+            // Convert events into arrays (same as buildKeyboardLine)
+            const pattern = new Array(totalSteps).fill(false);
+            const notes = new Array(totalSteps).fill(null);
+            const attacks = new Array(totalSteps).fill(false);
+            const durations = new Array(totalSteps).fill(null);
+            const sustainType = new Array(totalSteps).fill(null);
+
+            const stepToDur = (len) => {
+                if (len <= 1) return "16n";
+                if (len <= 2) return "8n";
+                if (len <= 3) return "8n.";
+                if (len <= 4) return "4n";
+                if (len <= 6) return "4n.";
+                if (len <= 8) return "2n";
+                return "1n";
+            };
+
+            events.sort((a, b) => a.step - b.step);
+            for (let i = 0; i < events.length - 1; i++) {
+                const endStep = events[i].step + events[i].len;
+                if (endStep > events[i + 1].step) {
+                    events[i].len = events[i + 1].step - events[i].step;
+                    if (events[i].len < 1) events[i].len = 1;
+                }
+            }
+
+            events.forEach(ev => {
+                attacks[ev.step] = true;
+                notes[ev.step] = ev.note;
+                durations[ev.step] = stepToDur(ev.len);
+                for (let s = ev.step; s < ev.step + ev.len && s < totalSteps; s++) {
+                    pattern[s] = true;
+                    if (!notes[s]) notes[s] = ev.note;
+                }
+                if (ev.len === 1) {
+                    sustainType[ev.step] = 'single';
+                } else {
+                    for (let s = ev.step; s < ev.step + ev.len && s < totalSteps; s++) {
+                        if (s === ev.step) sustainType[s] = 'start';
+                        else if (s === ev.step + ev.len - 1) sustainType[s] = 'end';
+                        else sustainType[s] = 'mid';
+                    }
+                }
+            });
+
+            return { pattern, notes, attacks, durations, sustainType };
+        }
+
+        function concatPages(page1, page2) {
+            return {
+                pattern: [...page1.pattern, ...page2.pattern],
+                notes: [...page1.notes, ...page2.notes],
+                attacks: [...page1.attacks, ...page2.attacks],
+                durations: [...page1.durations, ...page2.durations],
+                sustainType: [...page1.sustainType, ...page2.sustainType]
+            };
+        }
+
+        function generateRoomMelodies(baseInfo, chordProg, activities, labelSums) {
+            const melodies = {};
+            activities.forEach(act => {
+                const params = computeMelodyParams(labelSums, inheritedKeyboardSoundConfig, act.id);
+                const page1 = buildThirtiesMelody(baseInfo, chordProg, params);
+                const page2 = buildThirtiesMelody(baseInfo, chordProg, params);
+                melodies[act.id] = concatPages(page1, page2);
+            });
+            return melodies;
+        }
+
+        function previewRoomMelody(roomId) {
+            const melody = thirtiesRoomMelodies[roomId];
+            if (!melody) return;
+            leadPattern = melody.pattern;
+            leadNotes = melody.notes;
+            leadAttacks = melody.attacks;
+            leadDurations = melody.durations;
+            leadSustainType = melody.sustainType;
+            thirtiesPreviewingLead = true;
+        }
+
+        function restoreOriginalMelody() {
+            leadPattern = null;
+            leadNotes = null;
+            leadAttacks = null;
+            leadDurations = null;
+            leadSustainType = null;
+            thirtiesPreviewingLead = false;
+            // Silence any ringing lead notes
+            if (carryLeadSynth) {
+                try { carryLeadSynth.releaseAll(); } catch (e) {}
+            }
+        }
+
+        function showThirtiesIntro() {
+            const overlay = document.createElement('div');
+            overlay.id = 'thirties-intro-overlay';
+            overlay.innerHTML = `<div id="thirties-intro">` +
+                `<div class="thirties-intro-icon">\u266B</div>` +
+                `<p class="thirties-intro-body">` +
+                    `おかえりなさい。<br>` +
+                    `あなたの暮らしに、ボーカルメロディを添える時間です。<br>` +
+                    `それぞれの部屋に近づくと<br>その場所で生まれる歌のメロディが聴こえます。<br>` +
+                    `心に響く部屋を、選んでください。</p>` +
+                `<p class="thirties-intro-en">` +
+                    `Welcome home.<br>` +
+                    `It's time to give your life a vocal melody.<br>` +
+                    `Walk near each room to hear the song it holds.<br>` +
+                    `Choose the one that resonates with you.</p>` +
+                `<p class="thirties-intro-hint">` +
+                    `\u2669 リードの音色を控えたいときは<br>\u2699 Settings \u2192 Lead をミュートできます<br>` +
+                    `To mute the lead, tap \u2699 and toggle the Lead track.</p>` +
+                `<button id="thirties-intro-btn">\u2014\u00a0 はじめる / Begin \u00a0\u2014</button>` +
+            `</div>`;
+            document.body.appendChild(overlay);
+            document.getElementById('thirties-intro-btn').addEventListener('click', () => {
+                overlay.classList.add('hidden');
+                setTimeout(() => overlay.remove(), 600);
+            });
+        }
+
         // ======== THIRTIES PHASE START ========
         function startThirtiesPhase() {
             currentScene = SCENE.THIRTIES;
             worldWidth = Math.max(width * 3.2, 2800);
             baby = new Child(babyColorScheme);
             baby.x = worldWidth * 0.5;
-            thirtiesTimbreShifted = {};
-            thirtiesGlowingRow = null;
 
             thirtiesHasMarriage = checkMarriageCondition();
-            initThirtiesDrops(thirtiesHasMarriage);
+
+            // Carry layers init (before pattern doubling)
             initCarryHatLayer();
             initCarrySnareLayer();
             initCarryCymbalLayer();
@@ -10964,11 +11363,42 @@
             initCarryKeyboardLayer();
             initCarryKeys2Layer();
             startBaseGroove();
+
+            // Enable 2-page pagination
+            const stepsPerPage = baseRhythmInfo.beatsPerBar * baseRhythmInfo.bars * STEPS_PER_BEAT;
+            scoreHudState.pageCount = 2;
+            scoreHudState.currentPage = 0;
+            scoreHudState.stepsPerPage = stepsPerPage;
+            scoreHudState.barHighlights = [];
+
+            // Double ALL inherited patterns (同 TRAVEL の方式)
+            doubleAllInheritedPatterns(stepsPerPage);
+
+            // Reset melody state
+            thirtiesMelodyConfirmed = false;
+            thirtiesHoveredRoom = null;
+            thirtiesPreviewingLead = false;
+            leadPattern = null;
+            leadNotes = null;
+            leadAttacks = null;
+            leadDurations = null;
+            leadSustainType = null;
+
+            // Init Lead synth & volume track
+            initCarryLeadLayer();
+            addVolumeTrack('lead');
+
+            // Generate melodies for each room & init drops
+            initThirtiesDrops(thirtiesHasMarriage);
+
             buildScoreHud();
             updateScoreToggleUi();
             orbWorldX = baby.x;
             orbWorldY = height * ROOM_WALL_RATIO + TONE_FLOOR_OFFSET;
             orbParticles = [];
+
+            // Show intro explanation overlay
+            showThirtiesIntro();
         }
 
         let thirtiesChoiceTransitioning = false;
@@ -10980,6 +11410,18 @@
 
             const floorY = height * ROOM_WALL_RATIO + TONE_FLOOR_OFFSET;
             const activities = getThirtiesActivities(hasMarriage);
+
+            // Compute label sums from all selectedToys so far
+            const labelSums = {};
+            selectedToys.forEach(t => {
+                if (t.labels) Object.entries(t.labels).forEach(([k, v]) => {
+                    labelSums[k] = (labelSums[k] || 0) + v;
+                });
+            });
+
+            // Generate melodies for all rooms
+            thirtiesRoomMelodies = generateRoomMelodies(
+                baseRhythmInfo, inheritedChordProgression, activities, labelSums);
 
             for (let i = 0; i < activities.length; i++) {
                 const act = activities[i];
@@ -10996,7 +11438,7 @@
                     proximityVol: -100,
                     isHovered: false,
                     overlapAlpha: 0,
-                    instrument: "timbre",
+                    instrument: "melody",
                     activityId: act.id,
                     activityName: act.name,
                     activityNameEn: act.nameEn,
@@ -11007,78 +11449,11 @@
             }
         }
 
-        // ======== THIRTIES TIMBRE SHIFT ========
-        function applyTimbreShift(roomId) {
-            const shift = THIRTIES_TIMBRE_SHIFTS[roomId];
-            if (!shift) return;
-            const cfg = shift.config;
-
-            if (shift.target === "bass") {
-                disposeCarryBassLayer();
-                carryBassSynth = new Tone.MonoSynth({
-                    oscillator: { type: cfg.osc },
-                    envelope: { attack: cfg.attack, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release },
-                    filterEnvelope: {
-                        attack: cfg.attack * 0.5, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release,
-                        baseFrequency: cfg.filterBase, octaves: cfg.filterOct
-                    },
-                    volume: inheritedBassVolumeDb
-                }).toDestination();
-            }
-
-            if (shift.target === "hat") {
-                disposeCarryHatLayer();
-                carryHatFilter = new Tone.Filter({
-                    type: "highpass",
-                    frequency: cfg.hp,
-                    Q: cfg.q
-                }).toDestination();
-                carryHatSynth = new Tone.NoiseSynth({
-                    noise: { type: cfg.noise },
-                    envelope: { attack: 0.001, decay: cfg.decay, sustain: 0, release: cfg.release },
-                    volume: inheritedHatVolumeDb
-                }).connect(carryHatFilter);
-            }
-
-            if (shift.target === "keys") {
-                disposeCarryKeyboardLayer();
-                const vibrato = new Tone.Vibrato(cfg.vibratoFreq, cfg.vibratoDepth).toDestination();
-                carryKeyboardSynth = new Tone.PolySynth(Tone.Synth, {
-                    oscillator: { type: cfg.wave },
-                    envelope: { attack: cfg.attack, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release },
-                    volume: -22
-                }).connect(vibrato);
-                carryKeyboardEffects = [vibrato];
-            }
-
-            if (shift.target === "snare") {
-                disposeCarrySnareLayer();
-                carrySnareFilter = new Tone.Filter({
-                    type: "bandpass",
-                    frequency: cfg.bp,
-                    Q: cfg.q
-                }).toDestination();
-                carrySnareSynth = new Tone.NoiseSynth({
-                    noise: { type: cfg.noise },
-                    envelope: { attack: 0.001, decay: cfg.decay, sustain: 0, release: cfg.release },
-                    volume: inheritedSnareVolumeDb
-                }).connect(carrySnareFilter);
-                carrySnareBody = cfg.body ? new Tone.MembraneSynth({
-                    pitchDecay: 0.025,
-                    octaves: 2.5,
-                    oscillator: { type: "triangle" },
-                    envelope: { attack: 0.001, decay: 0.1, sustain: 0, release: 0.06 },
-                    volume: cfg.bodyVol || inheritedSnareBodyVolumeDb
-                }).toDestination() : null;
-            }
-
-            thirtiesTimbreShifted[shift.target] = true;
-        }
-
         // ======== THIRTIES TONE SELECTION ========
         function handle30sChoice(clickedDrop) {
             if (!clickedDrop.activityLabels) return;
             if (thirtiesChoiceTransitioning) return;
+            if (thirtiesMelodyConfirmed) return;
             thirtiesChoiceTransitioning = true;
             playTitleToneConfirmSound();
 
@@ -11088,7 +11463,9 @@
                 labels: clickedDrop.activityLabels
             });
 
-            const isGenkan = clickedDrop.activityId === "genkan";
+            // Confirm melody: keep current Lead patterns permanently
+            thirtiesMelodyConfirmed = true;
+            thirtiesPreviewingLead = false;
 
             const sx = clickedDrop.x - cameraX;
             const sy = clickedDrop.y;
@@ -11099,36 +11476,17 @@
             ripple.style.top = (sy - 40) + 'px';
             document.body.appendChild(ripple);
 
-            if (isGenkan) {
-                // Genkan = final confirmation → dispose all, transition to next phase
-                disposeToneDrops();
-                toneDrops = [];
-                fadeScreenTo(1, 1400);
-                setTimeout(() => {
-                    ripple.remove();
-                    thirtiesChoiceTransitioning = false;
-                    // TODO: 次のフェーズへ遷移（未定）
-                    fadeScreenTo(0, 1300);
-                }, 1400);
-            } else {
-                // Room selection → apply timbre shift, remove only this drop
-                applyTimbreShift(clickedDrop.activityId);
+            // Dispose ALL drops
+            disposeToneDrops();
+            toneDrops = [];
 
-                // Remove only the clicked drop (timbre drops have no synth to dispose)
-                const idx = toneDrops.indexOf(clickedDrop);
-                if (idx !== -1) toneDrops.splice(idx, 1);
-
-                // Clear hover glow since drop is gone
-                thirtiesGlowingRow = null;
-
-                fadeScreenTo(1, 1400);
-                setTimeout(() => {
-                    ripple.remove();
-                    thirtiesChoiceTransitioning = false;
-                    fadeScreenTo(0, 1300);
-                    renderScoreRows();
-                }, 1400);
-            }
+            fadeScreenTo(1, 1400);
+            setTimeout(() => {
+                ripple.remove();
+                thirtiesChoiceTransitioning = false;
+                fadeScreenTo(0, 1300);
+                renderScoreRows();
+            }, 1400);
         }
 
         // ======== TRAVEL PHASE (旅フェーズ) ========
@@ -11207,6 +11565,35 @@
             carryKeyboardEffects = kb.effects;
             if (carryKeyboardSynth) {
                 carryKeyboardSynth.volume.value = -22;
+            }
+        }
+
+        function disposeCarryLeadLayer() {
+            if (carryLeadSynth) {
+                carryLeadSynth.dispose();
+                carryLeadSynth = null;
+            }
+            if (carryLeadEffects) {
+                carryLeadEffects.forEach(e => e.dispose());
+                carryLeadEffects = [];
+            }
+        }
+
+        function initCarryLeadLayer() {
+            disposeCarryLeadLayer();
+            // Lead synth: bright saw-based synth with filter + vibrato
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "fatsawtooth", spread: 20, count: 3 },
+                envelope: { attack: 0.02, decay: 0.2, sustain: 0.7, release: 0.3 }
+            });
+            synth.volume.value = -100;
+            const filter = new Tone.Filter({ type: "lowpass", frequency: 3500, Q: 1.8 });
+            const vibrato = new Tone.Vibrato({ frequency: 5, depth: 0.08 });
+            carryLeadEffects = [filter, vibrato];
+            synth.chain(filter, vibrato, Tone.Destination);
+            carryLeadSynth = synth;
+            if (carryLeadSynth) {
+                carryLeadSynth.volume.value = -12;
             }
         }
 
@@ -11524,8 +11911,8 @@
             "griddle-sear":     { wave: "sawtooth", attack: 0.001, decay: 0.1,  sustain: 0.05, release: 0.08, filterType: "bandpass", filterFreq: 2500 },
             "griddle-scrape":   { wave: "square",   attack: 0.001, decay: 0.05, sustain: 0.0, release: 0.03, filterType: "highpass", filterFreq: 3500 },
             "griddle-clang":    { wave: "triangle", attack: 0.001, decay: 0.15, sustain: 0.0, release: 0.08 },
-            "dishes-clink":     { wave: "sine",     attack: 0.001, decay: 0.3,  sustain: 0.0, release: 0.15, filterType: "highpass", filterFreq: 1800 },
-            "dishes-splash":    { wave: "triangle", attack: 0.01,  decay: 0.08, sustain: 0.0, release: 0.05, filterType: "lowpass", filterFreq: 600 },
+            "dishes-clink":     { wave: "sine",     attack: 0.001, decay: 0.3,  sustain: 0.0, release: 0.15, filterType: "highpass", filterFreq: 900 },
+            "dishes-splash":    { wave: "triangle", attack: 0.008, decay: 0.15, sustain: 0.0, release: 0.08, filterType: "lowpass", filterFreq: 2400 },
             "dishes-chime":     { wave: "sine",     attack: 0.001, decay: 0.4,  sustain: 0.0, release: 0.2 }
         };
         const PARTTIME_FACILITY_TIMBRES = {
@@ -11959,6 +12346,7 @@
                     keyboardAttacks: kbBundle.attacks,
                     keyboardDurations: kbBundle.durations,
                     keyboardSustainType: kbBundle.sustainType,
+                    partTimbre: timbreName,
                     activityId: fac.id,
                     activityName: fac.name,
                     activityNameEn: fac.nameEn,
@@ -12714,6 +13102,16 @@
             if (!clickedDrop.activityLabels) return;
             playTitleToneConfirmSound();
             selectedToys.push({ id: clickedDrop.activityId, name: clickedDrop.activityName, labels: clickedDrop.activityLabels });
+            // Save keyboard as Keys2 for carry into THIRTIES
+            if (clickedDrop.pattern) {
+                inheritedKeys2Pattern = clickedDrop.pattern.slice();
+                inheritedKeys2Notes = clickedDrop.keyboardNotes ? clickedDrop.keyboardNotes.slice() : null;
+                inheritedKeys2Attacks = clickedDrop.keyboardAttacks ? clickedDrop.keyboardAttacks.slice() : null;
+                inheritedKeys2Durations = clickedDrop.keyboardDurations ? clickedDrop.keyboardDurations.slice() : null;
+                inheritedKeys2SustainType = clickedDrop.keyboardSustainType ? clickedDrop.keyboardSustainType.slice() : null;
+                inheritedKeys2SoundConfig = clickedDrop.partTimbre || clickedDrop.activityId || null;
+            }
+            addVolumeTrack('keys2');
             disposeToneDrops();
             toneDrops = [];
             partTimeObstacles = [];
@@ -14597,10 +14995,19 @@
             disposeCarryKeys2Layer();
             if (!inheritedKeys2Pattern || !inheritedKeys2Notes) return;
 
+            // Check if the sound config is a PART_TIME timbre name directly (e.g., "register-beep")
+            const ptCfg = PARTTIME_TIMBRES[inheritedKeys2SoundConfig];
+            if (ptCfg) {
+                const kb = createPartTimeSynth(inheritedKeys2SoundConfig);
+                carryKeys2Synth = kb.synth;
+                carryKeys2Effects = kb.effects;
+                if (carryKeys2Synth) carryKeys2Synth.volume.value = -22;
+                return;
+            }
+
             // Check if the sound config is a JOB_HUNT timbre name directly
             const jhCfg = JOBHUNT_TIMBRES[inheritedKeys2SoundConfig];
             if (jhCfg) {
-                // Use createJobHuntSynth for accurate JOB_HUNT timbre
                 const kb = createJobHuntSynth(inheritedKeys2SoundConfig);
                 carryKeys2Synth = kb.synth;
                 carryKeys2Effects = kb.effects;
@@ -16353,7 +16760,7 @@
                         ctx.font = "700 22px sans-serif";
                         ctx.fillText("\u2713", 0, 32);
                     }
-                } else if (drop.instrument === "keyboard" || drop.instrument === "timbre") {
+                } else if (drop.instrument === "keyboard" || drop.instrument === "timbre" || drop.instrument === "melody") {
                     ctx.font = "700 14px 'Zen Maru Gothic', sans-serif";
                     ctx.fillText(drop.activityName || "", 0, -6);
                     if (drop.activityNameEn) {
@@ -17138,7 +17545,7 @@
 
             toneDrops.forEach(drop => {
                 const dist = Math.hypot(orbWorldX - drop.x, orbWorldY - drop.y);
-                const hoverR = (drop.instrument === "chord" || drop.instrument === "bass" || drop.instrument === "keyboard" || drop.instrument === "modifier" || drop.instrument === "timbre") ? 60 : 50;
+                const hoverR = (drop.instrument === "chord" || drop.instrument === "bass" || drop.instrument === "keyboard" || drop.instrument === "modifier" || drop.instrument === "timbre" || drop.instrument === "melody") ? 60 : 50;
                 const wasHovered = drop.isHovered;
                 // Keep drop hovered while confirmation dialog is open for it
                 drop.isHovered = dist <= hoverR || (adultConfirmation.active && adultConfirmation.drop === drop);
@@ -17211,12 +17618,19 @@
                 const hov = toneDrops.find(d => d.instrument === "bass" && d.isHovered);
                 hoveredSchoolActivity = hov ? hov.activityId : null;
             }
-            // THIRTIES: glow the score row for the hovered room's target instrument
-            if (currentScene === SCENE.THIRTIES) {
-                const hov = toneDrops.find(d => d.instrument === "timbre" && d.isHovered && d.activityId !== "genkan");
-                const newGlow = hov && THIRTIES_TIMBRE_SHIFTS[hov.activityId] ? THIRTIES_TIMBRE_SHIFTS[hov.activityId].label : null;
-                if (newGlow !== thirtiesGlowingRow) {
-                    thirtiesGlowingRow = newGlow;
+            // THIRTIES: melody preview on hover
+            if (currentScene === SCENE.THIRTIES && !thirtiesMelodyConfirmed) {
+                const hov = toneDrops.find(d => d.instrument === "melody" && d.isHovered);
+                const newRoom = hov ? hov.activityId : null;
+
+                if (newRoom !== thirtiesHoveredRoom) {
+                    if (thirtiesHoveredRoom && !newRoom) {
+                        restoreOriginalMelody();
+                    }
+                    if (newRoom && thirtiesRoomMelodies && thirtiesRoomMelodies[newRoom]) {
+                        previewRoomMelody(newRoom);
+                    }
+                    thirtiesHoveredRoom = newRoom;
                     renderScoreRows();
                 }
             }
@@ -19030,6 +19444,20 @@
                             try { carryKeys2Synth.triggerAttackRelease(k2Note, k2Dur); } catch (e) { /* ignore */ }
                         }
                     }
+                    // Carry Lead playback (THIRTIES)
+                    if (
+                        currentScene === SCENE.THIRTIES &&
+                        carryLeadSynth &&
+                        leadAttacks &&
+                        leadAttacks[step]
+                    ) {
+                        const lNote = leadNotes ? leadNotes[step] : null;
+                        const lDur = leadDurations ? leadDurations[step] : "8n";
+                        if (lNote) {
+                            try { carryLeadSynth.releaseAll(); } catch (e) {}
+                            try { carryLeadSynth.triggerAttackRelease(lNote, lDur); } catch (e) { /* ignore */ }
+                        }
+                    }
                     updateScoreHudPlayhead(step);
 
                     // Chord hover preview: play next chord in progression on each beat 1
@@ -19858,6 +20286,9 @@
                 case 'keys2':
                     if (carryKeys2Synth) apply(carryKeys2Synth, -22);
                     break;
+                case 'lead':
+                    if (carryLeadSynth) apply(carryLeadSynth, -12);
+                    break;
             }
         }
 
@@ -19972,7 +20403,7 @@
             // --- PREVIEW ROW LOGIC (Hovering a Tone Drop) ---
             // --- PREVIEW ROW LOGIC (Hovering a Tone Drop) ---
             // THIRTIES timbre drops have no sound — skip preview rows for them
-            if (previewDropIndex !== null && toneDrops[previewDropIndex] && toneDrops[previewDropIndex].instrument !== "timbre") {
+            if (previewDropIndex !== null && toneDrops[previewDropIndex] && toneDrops[previewDropIndex].instrument !== "timbre" && toneDrops[previewDropIndex].instrument !== "melody") {
                 const preview = toneDrops[previewDropIndex];
                 const isCymbal = preview.instrument === "cymbal";
                 const isSnare = preview.instrument === "snare";
@@ -20015,6 +20446,9 @@
             }
 
             // --- INHERITED ROWS LOGIC (The sounds the user already has) ---
+            if (isThirties && leadPattern) {
+                rows.push({ label: 'Lead', pattern: slicePage(leadPattern), styleClass: 'lead', sustainType: slicePage(leadSustainType || null) });
+            }
             if ((isPartTime || isJobHunt || isJobHunt2 || isTravel || isThirties) && inheritedKeys2Pattern) {
                 rows.push({ label: 'Keys2', pattern: slicePage(inheritedKeys2Pattern), styleClass: 'bass', sustainType: slicePage(inheritedKeys2SustainType || null) });
             }
@@ -20119,12 +20553,14 @@
             rows.forEach(row => {
                 const rowEl = document.createElement('div');
                 rowEl.className = 'score-row';
-                if (row.label.startsWith('Hat') || row.label.startsWith('Snare') || row.label.startsWith('Cymbal') || row.label.startsWith('Bass') || row.label.startsWith('Keys')) rowEl.classList.add('preview');
+                if (row.label.startsWith('Hat') || row.label.startsWith('Snare') || row.label.startsWith('Cymbal') || row.label.startsWith('Bass') || row.label.startsWith('Keys') || row.label.startsWith('Lead')) rowEl.classList.add('preview');
 
-                // THIRTIES: hover glow preview and confirmed shift glow
-                if (thirtiesGlowingRow && row.label === thirtiesGlowingRow) rowEl.classList.add('timbre-glow-preview');
-                const shiftEntry = Object.values(THIRTIES_TIMBRE_SHIFTS).find(s => s.label === row.label);
-                if (shiftEntry && thirtiesTimbreShifted[shiftEntry.target]) rowEl.classList.add('timbre-shifted');
+                // THIRTIES: melody preview glow on hovered Keys/Keys2 rows
+                if (currentScene === SCENE.THIRTIES && thirtiesHoveredRoom && !thirtiesMelodyConfirmed) {
+                    if (row.label === 'Lead') {
+                        rowEl.classList.add('melody-preview');
+                    }
+                }
 
                 const labelEl = document.createElement('div');
                 labelEl.className = 'score-label';
