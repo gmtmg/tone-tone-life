@@ -12,6 +12,8 @@
         let worldWidth = 0;
         let cameraX = 0;
         let baby = null;
+        let thirtiesSpouse = null;   // Child instance (opposite gender)
+        let thirtiesKid = null;      // Toddler instance
         let chosenColor = '';
         let leftTrack = null;
         let middleTrack = null;
@@ -170,6 +172,8 @@
         let jobHuntCameraZoom = 1.0;
         let partTimeNpcs = [];
         let partTimeObstacles = [];
+        let cityNpcs = [];
+        let cityObstacles = [];
         let jobHuntObstacles = [];
         let jobHuntNpcs = [];
         let inheritedKeys2Pattern = null;
@@ -283,6 +287,7 @@
             { id: 'keyboard', label: 'Keys',     color: 'rgba(100,80,168,0.96)' },
             { id: 'keys2',    label: 'Keys2',    color: 'rgba(120,95,180,0.96)' },
             { id: 'lead',     label: 'Lead',     color: 'rgba(200,140,60,0.96)' },
+            { id: 'texture',  label: 'Texture',  color: 'rgba(110,170,130,0.96)' },
         ];
 
         let activeMinigame = null;
@@ -411,7 +416,7 @@
         const toySystem = window.TTLToyData || { LIFE_LABELS: [], TOY_LIBRARY: [], drawToy: () => {} };
 
         // シーン管理
-        const SCENE = { TITLE: 0, CHOICE: 1, TRANSITION: 2, CRAWL: 3, CRAWL2: 4, TODDLE1: 5, CHILD1: 6, CHILD2: 7, LESSON: 8, ADULT: 9, UNIVERSITY: 10, PART_TIME: 11, JOB_HUNT: 12, JOB_HUNT2: 13, TRAVEL: 14, ENTERTAINMENT: 15, THIRTIES: 16 };
+        const SCENE = { TITLE: 0, CHOICE: 1, TRANSITION: 2, CRAWL: 3, CRAWL2: 4, TODDLE1: 5, CHILD1: 6, CHILD2: 7, LESSON: 8, ADULT: 9, UNIVERSITY: 10, PART_TIME: 11, JOB_HUNT: 12, JOB_HUNT2: 13, TRAVEL: 14, ENTERTAINMENT: 15, THIRTIES: 16, CITY: 17 };
         let currentScene = SCENE.TITLE;
         const RHYTHM_BARS = 4;
         const STEPS_PER_BEAT = 4;
@@ -505,6 +510,14 @@
                     baby.x = Math.max(0, Math.min(jobHuntSideScrollWorldW - 40, baby.x));
                     baby.y = height * ROOM_WALL_RATIO;
                 }
+            }
+            if (thirtiesSpouse) {
+                thirtiesSpouse.x = Math.max(80, Math.min(worldWidth - 80, thirtiesSpouse.x));
+                if (!isTopDownScene) thirtiesSpouse.y = height * ROOM_WALL_RATIO;
+            }
+            if (thirtiesKid) {
+                thirtiesKid.x = Math.max(80, Math.min(worldWidth - 80, thirtiesKid.x));
+                if (!isTopDownScene) thirtiesKid.y = height * ROOM_WALL_RATIO;
             }
         }
         window.addEventListener('resize', resize);
@@ -703,6 +716,7 @@
                     else if (currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) handleJobHuntChoice(chosen);
                     else if (currentScene === SCENE.TRAVEL) handleTravelChoice(chosen);
                     else if (currentScene === SCENE.THIRTIES) handle30sChoice(chosen);
+                    else if (currentScene === SCENE.CITY) handleCityChoice(chosen);
                     return;
                 }
                 if (adultConfirmation.noRect && rx >= adultConfirmation.noRect.x && rx <= adultConfirmation.noRect.x + adultConfirmation.noRect.w && ry >= adultConfirmation.noRect.y && ry <= adultConfirmation.noRect.y + adultConfirmation.noRect.h) {
@@ -725,7 +739,7 @@
                 handleChildChoice(picked);
             } else if (currentScene === SCENE.CHILD2) {
                 handleChild2Choice(picked);
-            } else if (currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.THIRTIES) {
+            } else if (currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY) {
                 // Enter confirmation mode for later stages
                 adultConfirmation.active = true;
                 adultConfirmation.drop = picked;
@@ -1453,6 +1467,96 @@
 
                 ctx.restore();
             }
+            updateTopDown(tx, ty) {
+                const dx = tx - this.x;
+                const dy = ty - this.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist > 10) {
+                    this.direction = dx > 0 ? 1 : -1;
+                    const speed = Math.min(dist * 0.08, 2.5);
+                    this.x += (dx / dist) * speed;
+                    this.y += (dy / dist) * speed;
+                    this.walkCycle += 0.12;
+                } else {
+                    this.walkCycle += 0.04;
+                }
+                this.x = Math.max(20, Math.min(worldWidth - 20, this.x));
+                this.y = Math.max(20, Math.min(worldHeight - 20, this.y));
+                if (currentScene === SCENE.CITY) {
+                    resolveObstacleCollision(this, 16, cityObstacles);
+                }
+            }
+            drawTopDown(ctx, t) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                const wt = this.walkCycle;
+                const bodySway = Math.sin(wt) * 0.07;
+                const forwardLean = Math.sin(wt * 0.5) * 0.10;
+                const verticalBob = Math.abs(Math.sin(wt)) * 4;
+                ctx.scale(this.direction * this.scale, this.scale);
+                ctx.rotate(bodySway + forwardLean);
+                ctx.translate(0, -verticalBob);
+                const legSwingL = Math.sin(wt) * 0.30;
+                const legSwingR = Math.sin(wt + Math.PI) * 0.30;
+                const kneeCounterL = -legSwingL * 0.35;
+                const kneeCounterR = -legSwingR * 0.35;
+                const armAngleL = -0.75 + Math.sin(wt + Math.PI) * 0.18;
+                const armAngleR = 0.75 + Math.sin(wt) * 0.18;
+                const armLowerL = 0.15;
+                const armLowerR = -0.15;
+                const headBob = Math.sin(wt * 2) * 0.04;
+                const drawArm = (x, y, upperAng, lowerAng) => {
+                    this.drawPart(ctx, x, y, upperAng, c => {
+                        c.fillStyle = this.limbColor;
+                        c.beginPath(); c.roundRect(-6, 0, 12, 13, 6); c.fill();
+                        this.drawPart(c, 0, 13, lowerAng, c2 => {
+                            c2.fillStyle = this.skinColor;
+                            c2.beginPath(); c2.roundRect(-5, 0, 10, 11, 5); c2.fill();
+                            c2.fillStyle = this.skinColor;
+                            c2.beginPath(); c2.ellipse(0, 13, 7, 5, 0, 0, Math.PI * 2); c2.fill();
+                        });
+                    });
+                };
+                const drawLeg = (x, y, upperAng, lowerAng) => {
+                    this.drawPart(ctx, x, y, upperAng, c => {
+                        c.fillStyle = this.limbColor;
+                        c.beginPath(); c.roundRect(-8, 0, 16, 14, 8); c.fill();
+                        this.drawPart(c, 0, 14, lowerAng, c2 => {
+                            c2.fillStyle = this.skinColor;
+                            c2.beginPath(); c2.roundRect(-7, 0, 14, 12, 7); c2.fill();
+                            c2.fillStyle = this.skinColor;
+                            c2.beginPath(); c2.ellipse(3, 12, 10, 6, 0, 0, Math.PI * 2); c2.fill();
+                        });
+                    });
+                };
+                drawLeg(-10, -6, legSwingL, kneeCounterL);
+                drawArm(-18, -50, armAngleL, armLowerL);
+                ctx.fillStyle = this.bodyColor;
+                ctx.beginPath(); ctx.ellipse(0, -26, 26, 24, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = "rgba(255,255,255,0.1)";
+                ctx.beginPath(); ctx.ellipse(0, -24, 16, 14, 0, 0, Math.PI * 2); ctx.fill();
+                drawLeg(10, -6, legSwingR, kneeCounterR);
+                drawArm(18, -50, armAngleR, armLowerR);
+                this.drawPart(ctx, 0, -64, headBob, c => {
+                    c.fillStyle = this.skinColor;
+                    c.beginPath(); c.arc(0, 0, 28, 0, Math.PI * 2); c.fill();
+                    c.fillStyle = this.skinColor;
+                    c.beginPath(); c.arc(-24, 4, 7, 0, Math.PI * 2); c.fill();
+                    c.beginPath(); c.arc(24, 4, 7, 0, Math.PI * 2); c.fill();
+                    c.fillStyle = this.cheekColor;
+                    c.beginPath(); c.arc(-24, 4, 4, 0, Math.PI * 2); c.fill();
+                    c.beginPath(); c.arc(24, 4, 4, 0, Math.PI * 2); c.fill();
+                    c.strokeStyle = this.hairColor;
+                    c.lineWidth = 2.5; c.lineCap = "round";
+                    c.beginPath(); c.moveTo(-8, -28); c.quadraticCurveTo(-10, -36, -6, -30); c.stroke();
+                    c.beginPath(); c.moveTo(-3, -28); c.quadraticCurveTo(0, -38, 4, -30); c.stroke();
+                    c.beginPath(); c.moveTo(3, -28); c.quadraticCurveTo(8, -35, 10, -26); c.stroke();
+                    c.beginPath(); c.moveTo(8, -26); c.quadraticCurveTo(14, -34, 16, -24); c.stroke();
+                    c.lineCap = "butt";
+                    drawBabyFace(c, this.faceType, this.skinColor, this.cheekColor, null, false);
+                });
+                ctx.restore();
+            }
         }
 
         // 4. The Child Rig — T-shirt + shorts, socks, shoes, backpack, proper hair
@@ -1511,6 +1615,10 @@
                             triggerJobHuntEnterInterview();
                         }
                     }
+                } else if (currentScene === SCENE.CITY) {
+                    this.x = Math.max(20, Math.min(worldWidth - 20, this.x));
+                    this.y = Math.max(20, Math.min(worldHeight - 20, this.y));
+                    resolveObstacleCollision(this, 20, cityObstacles);
                 } else {
                     this.x = Math.max(20, Math.min(worldWidth - 20, this.x));
                     this.y = Math.max(20, Math.min(worldHeight - 20, this.y));
@@ -4516,86 +4624,601 @@
 
         function drawThirtiesOutdoor(ctx, x1, x2, wallH) {
             const w = x2 - x1;
-            // Sky gradient
+            const groundY = wallH;
+
+            // === 1. Rich sky gradient ===
             const skyG = ctx.createLinearGradient(0, 0, 0, wallH);
-            skyG.addColorStop(0, "hsl(210, 60%, 75%)");
-            skyG.addColorStop(1, "hsl(200, 50%, 85%)");
+            skyG.addColorStop(0, "hsl(215, 55%, 68%)");
+            skyG.addColorStop(0.3, "hsl(210, 50%, 75%)");
+            skyG.addColorStop(0.6, "hsl(200, 48%, 82%)");
+            skyG.addColorStop(1, "hsl(195, 42%, 88%)");
             ctx.fillStyle = skyG;
             ctx.fillRect(x1, 0, w, wallH);
-            // Ground
-            ctx.fillStyle = "hsl(100, 35%, 55%)";
-            ctx.fillRect(x1, wallH, w, height - wallH);
-            // Grass texture
-            ctx.fillStyle = "hsl(105, 40%, 48%)";
-            for (let gx = x1; gx < x2; gx += 12) {
-                const gh = 4 + Math.sin(gx * 0.3) * 3;
-                ctx.fillRect(gx, wallH - gh, 3, gh);
-            }
-            // Distant building silhouette
-            ctx.fillStyle = "rgba(160, 165, 175, 0.4)";
-            ctx.fillRect(x1 + w * 0.05, wallH * 0.35, w * 0.18, wallH * 0.65);
-            ctx.fillRect(x1 + w * 0.28, wallH * 0.45, w * 0.15, wallH * 0.55);
-            // Simple tree
-            const treeX = x1 + w * 0.6;
-            ctx.fillStyle = "hsl(25, 35%, 35%)";
-            ctx.fillRect(treeX - 4, wallH * 0.4, 8, wallH * 0.6);
-            ctx.fillStyle = "hsl(120, 40%, 42%)";
+
+            // === 2. Clouds (4 fluffy composite clouds) ===
+            const drawCloud = (cx, cy, scale) => {
+                ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
+                const s = scale;
+                ctx.beginPath(); ctx.arc(cx, cy, 12 * s, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(cx - 10 * s, cy + 3 * s, 9 * s, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(cx + 11 * s, cy + 2 * s, 10 * s, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(cx + 5 * s, cy - 5 * s, 8 * s, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
+                ctx.beginPath(); ctx.arc(cx - 18 * s, cy + 5 * s, 7 * s, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(cx + 19 * s, cy + 5 * s, 7 * s, 0, Math.PI * 2); ctx.fill();
+            };
+            drawCloud(x1 + w * 0.15, wallH * 0.12, 1.1);
+            drawCloud(x1 + w * 0.45, wallH * 0.08, 1.3);
+            drawCloud(x1 + w * 0.72, wallH * 0.16, 0.9);
+            drawCloud(x1 + w * 0.88, wallH * 0.10, 0.7);
+
+            // === 3. Distant mountain layers ===
+            // Far mountains (pale, bluish)
+            ctx.fillStyle = "hsla(220, 25%, 75%, 0.5)";
             ctx.beginPath();
-            ctx.arc(treeX, wallH * 0.35, w * 0.12, 0, Math.PI * 2);
+            ctx.moveTo(x1, wallH * 0.55);
+            ctx.lineTo(x1 + w * 0.08, wallH * 0.38);
+            ctx.lineTo(x1 + w * 0.18, wallH * 0.42);
+            ctx.lineTo(x1 + w * 0.30, wallH * 0.30);
+            ctx.lineTo(x1 + w * 0.42, wallH * 0.40);
+            ctx.lineTo(x1 + w * 0.55, wallH * 0.34);
+            ctx.lineTo(x1 + w * 0.68, wallH * 0.42);
+            ctx.lineTo(x1 + w * 0.80, wallH * 0.36);
+            ctx.lineTo(x1 + w * 0.92, wallH * 0.44);
+            ctx.lineTo(x2, wallH * 0.50);
+            ctx.lineTo(x2, wallH);
+            ctx.lineTo(x1, wallH);
+            ctx.closePath();
             ctx.fill();
-            // Small clouds
+
+            // Mid mountains (slightly darker)
+            ctx.fillStyle = "hsla(200, 22%, 68%, 0.5)";
+            ctx.beginPath();
+            ctx.moveTo(x1, wallH * 0.62);
+            ctx.lineTo(x1 + w * 0.12, wallH * 0.48);
+            ctx.lineTo(x1 + w * 0.25, wallH * 0.54);
+            ctx.lineTo(x1 + w * 0.38, wallH * 0.44);
+            ctx.lineTo(x1 + w * 0.52, wallH * 0.52);
+            ctx.lineTo(x1 + w * 0.65, wallH * 0.46);
+            ctx.lineTo(x1 + w * 0.78, wallH * 0.50);
+            ctx.lineTo(x1 + w * 0.90, wallH * 0.48);
+            ctx.lineTo(x2, wallH * 0.56);
+            ctx.lineTo(x2, wallH);
+            ctx.lineTo(x1, wallH);
+            ctx.closePath();
+            ctx.fill();
+
+            // Near hills (greenish)
+            ctx.fillStyle = "hsla(130, 20%, 62%, 0.45)";
+            ctx.beginPath();
+            ctx.moveTo(x1, wallH * 0.72);
+            ctx.quadraticCurveTo(x1 + w * 0.15, wallH * 0.58, x1 + w * 0.30, wallH * 0.66);
+            ctx.quadraticCurveTo(x1 + w * 0.45, wallH * 0.56, x1 + w * 0.60, wallH * 0.62);
+            ctx.quadraticCurveTo(x1 + w * 0.75, wallH * 0.55, x1 + w * 0.90, wallH * 0.64);
+            ctx.lineTo(x2, wallH * 0.68);
+            ctx.lineTo(x2, wallH);
+            ctx.lineTo(x1, wallH);
+            ctx.closePath();
+            ctx.fill();
+
+            // === 4. Housing silhouettes (3-4 houses with triangular roofs) ===
+            const drawHouse = (hx, hw, hh, roofH, color, windowColor) => {
+                const baseY = groundY;
+                // Wall
+                ctx.fillStyle = color;
+                ctx.fillRect(hx, baseY - hh, hw, hh);
+                // Triangular roof
+                ctx.fillStyle = "hsla(15, 30%, 42%, 0.6)";
+                ctx.beginPath();
+                ctx.moveTo(hx - 5, baseY - hh);
+                ctx.lineTo(hx + hw / 2, baseY - hh - roofH);
+                ctx.lineTo(hx + hw + 5, baseY - hh);
+                ctx.closePath();
+                ctx.fill();
+                // Windows (2 windows)
+                ctx.fillStyle = windowColor;
+                const winSize = hw * 0.18;
+                const winY = baseY - hh + hh * 0.25;
+                ctx.fillRect(hx + hw * 0.18, winY, winSize, winSize);
+                ctx.fillRect(hx + hw * 0.62, winY, winSize, winSize);
+                // Window crosses
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1;
+                const drawWinCross = (wx, wy) => {
+                    ctx.beginPath();
+                    ctx.moveTo(wx + winSize / 2, wy); ctx.lineTo(wx + winSize / 2, wy + winSize);
+                    ctx.moveTo(wx, wy + winSize / 2); ctx.lineTo(wx + winSize, wy + winSize / 2);
+                    ctx.stroke();
+                };
+                drawWinCross(hx + hw * 0.18, winY);
+                drawWinCross(hx + hw * 0.62, winY);
+                // Door
+                ctx.fillStyle = "hsla(25, 35%, 38%, 0.7)";
+                const doorW = hw * 0.2;
+                const doorH = hh * 0.42;
+                ctx.beginPath();
+                ctx.roundRect(hx + hw / 2 - doorW / 2, baseY - doorH, doorW, doorH, [3, 3, 0, 0]);
+                ctx.fill();
+            };
+            drawHouse(x1 + w * 0.04, w * 0.13, wallH * 0.32, wallH * 0.12,
+                "hsla(35, 25%, 78%, 0.7)", "hsla(200, 60%, 82%, 0.7)");
+            drawHouse(x1 + w * 0.20, w * 0.10, wallH * 0.26, wallH * 0.10,
+                "hsla(10, 20%, 80%, 0.65)", "hsla(200, 55%, 80%, 0.65)");
+            drawHouse(x1 + w * 0.33, w * 0.14, wallH * 0.35, wallH * 0.14,
+                "hsla(45, 22%, 76%, 0.7)", "hsla(190, 50%, 78%, 0.7)");
+            drawHouse(x1 + w * 0.50, w * 0.09, wallH * 0.22, wallH * 0.09,
+                "hsla(20, 18%, 82%, 0.6)", "hsla(200, 50%, 85%, 0.6)");
+
+            // === 5. Ground / lawn ===
+            const grassG = ctx.createLinearGradient(0, groundY, 0, height);
+            grassG.addColorStop(0, "hsl(105, 38%, 52%)");
+            grassG.addColorStop(0.4, "hsl(100, 35%, 48%)");
+            grassG.addColorStop(1, "hsl(95, 30%, 42%)");
+            ctx.fillStyle = grassG;
+            ctx.fillRect(x1, groundY, w, height - groundY);
+
+            // === 6. Stone path (cobblestone leading to door) ===
+            const pathCX = x2 - 20;
+            const pathW = 34;
+            const stoneColors = ["hsl(35, 12%, 68%)", "hsl(30, 10%, 62%)", "hsl(40, 14%, 72%)"];
+            for (let sy = groundY; sy < height; sy += 11) {
+                const row = Math.floor((sy - groundY) / 11);
+                const offsetX = (row % 2) * 6 - 3;
+                for (let sx = -1; sx <= 2; sx++) {
+                    const stoneX = pathCX - pathW / 2 + sx * 10 + offsetX;
+                    const stoneW = 8 + Math.sin(sy * 0.4 + sx) * 1.5;
+                    const stoneH = 9 + Math.cos(sy * 0.3 + sx * 2) * 1;
+                    ctx.fillStyle = stoneColors[(row + sx) % 3];
+                    ctx.beginPath();
+                    ctx.roundRect(stoneX, sy, stoneW, stoneH, 2);
+                    ctx.fill();
+                    ctx.strokeStyle = "rgba(100, 90, 70, 0.2)";
+                    ctx.lineWidth = 0.5;
+                    ctx.stroke();
+                }
+            }
+
+            // === 7. Grass tufts (varied heights and colors) + small flowers ===
+            for (let gx = x1; gx < x2; gx += 7) {
+                // Skip path area
+                if (Math.abs(gx - pathCX) < pathW / 2 + 4) continue;
+                const gh = 4 + Math.sin(gx * 0.4) * 3 + Math.cos(gx * 0.7) * 2;
+                const hueShift = Math.sin(gx * 0.2) * 12;
+                ctx.fillStyle = `hsl(${105 + hueShift}, ${38 + Math.sin(gx * 0.3) * 8}%, ${42 + Math.sin(gx * 0.5) * 6}%)`;
+                ctx.fillRect(gx, groundY - gh, 2, gh);
+                ctx.fillRect(gx + 3, groundY - gh * 0.7, 2, gh * 0.7);
+            }
+            // Small flowers
+            const flowerPositions = [0.08, 0.18, 0.32, 0.45, 0.55, 0.70, 0.82];
+            const flowerColors = ["hsl(350, 65%, 72%)", "hsl(45, 75%, 70%)", "hsl(280, 50%, 72%)", "hsl(30, 70%, 68%)"];
+            flowerPositions.forEach((fp, fi) => {
+                const fx = x1 + w * fp;
+                if (Math.abs(fx - pathCX) < pathW / 2 + 8) return;
+                const fy = groundY - 2;
+                ctx.fillStyle = flowerColors[fi % flowerColors.length];
+                // Petals
+                for (let p = 0; p < 5; p++) {
+                    const angle = (p / 5) * Math.PI * 2;
+                    ctx.beginPath();
+                    ctx.arc(fx + Math.cos(angle) * 3, fy + Math.sin(angle) * 3, 2.2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.fillStyle = "hsl(50, 70%, 60%)";
+                ctx.beginPath(); ctx.arc(fx, fy, 1.8, 0, Math.PI * 2); ctx.fill();
+                // Stem
+                ctx.strokeStyle = "hsl(120, 35%, 40%)";
+                ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(fx, fy + 3); ctx.lineTo(fx, fy + 9); ctx.stroke();
+            });
+
+            // === 8. White picket fence ===
+            const fenceY = groundY - 22;
+            const fenceBot = groundY;
+            ctx.fillStyle = "rgba(250, 248, 244, 0.85)";
+            // Horizontal rail top
+            ctx.fillRect(x1 + 4, fenceY + 4, w * 0.58, 3);
+            // Horizontal rail bottom
+            ctx.fillRect(x1 + 4, fenceBot - 7, w * 0.58, 3);
+            // Pickets
+            ctx.fillStyle = "rgba(248, 245, 240, 0.9)";
+            for (let px = x1 + 6; px < x1 + w * 0.58; px += 9) {
+                ctx.beginPath();
+                ctx.moveTo(px, fenceBot);
+                ctx.lineTo(px, fenceY + 2);
+                ctx.lineTo(px + 3, fenceY - 2); // pointed top
+                ctx.lineTo(px + 6, fenceY + 2);
+                ctx.lineTo(px + 6, fenceBot);
+                ctx.closePath();
+                ctx.fill();
+                // Outline
+                ctx.strokeStyle = "rgba(200, 195, 185, 0.4)";
+                ctx.lineWidth = 0.5;
+                ctx.stroke();
+            }
+
+            // === 9. Realistic tree (trunk + branches + leaf clusters) ===
+            const treeX = x1 + w * 0.68;
+            const trunkBot = groundY;
+            const trunkTop = groundY - wallH * 0.35;
+            const trunkW = 10;
+            // Trunk
+            const trunkG = ctx.createLinearGradient(treeX - trunkW / 2, 0, treeX + trunkW / 2, 0);
+            trunkG.addColorStop(0, "hsl(25, 30%, 32%)");
+            trunkG.addColorStop(0.5, "hsl(25, 28%, 40%)");
+            trunkG.addColorStop(1, "hsl(25, 30%, 34%)");
+            ctx.fillStyle = trunkG;
+            ctx.beginPath();
+            ctx.moveTo(treeX - trunkW / 2 - 2, trunkBot);
+            ctx.lineTo(treeX - trunkW / 2 + 1, trunkTop + 10);
+            ctx.lineTo(treeX + trunkW / 2 - 1, trunkTop + 10);
+            ctx.lineTo(treeX + trunkW / 2 + 2, trunkBot);
+            ctx.closePath();
+            ctx.fill();
+            // Branches (subtle lines)
+            ctx.strokeStyle = "hsl(25, 25%, 36%)";
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(treeX - 2, trunkTop + 20);
+            ctx.lineTo(treeX - 18, trunkTop + 5);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(treeX + 2, trunkTop + 15);
+            ctx.lineTo(treeX + 20, trunkTop);
+            ctx.stroke();
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            ctx.moveTo(treeX, trunkTop + 25);
+            ctx.lineTo(treeX - 12, trunkTop - 5);
+            ctx.stroke();
+            // Leaf clusters (overlapping circles)
+            const leafClusters = [
+                { dx: 0, dy: -8, r: 22 },
+                { dx: -18, dy: 0, r: 17 },
+                { dx: 16, dy: -4, r: 19 },
+                { dx: -8, dy: -18, r: 15 },
+                { dx: 10, dy: -16, r: 14 },
+                { dx: -22, dy: 8, r: 13 },
+                { dx: 20, dy: 6, r: 14 },
+            ];
+            leafClusters.forEach((lc, li) => {
+                const shade = 38 + li * 3;
+                ctx.fillStyle = `hsl(${118 + li * 4}, ${38 + li * 2}%, ${shade}%)`;
+                ctx.beginPath();
+                ctx.arc(treeX + lc.dx, trunkTop + lc.dy, lc.r, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            // Leaf highlights
+            ctx.fillStyle = "rgba(180, 220, 140, 0.25)";
+            ctx.beginPath(); ctx.arc(treeX - 5, trunkTop - 12, 10, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(treeX + 12, trunkTop - 6, 8, 0, Math.PI * 2); ctx.fill();
+
+            // === 10. Street lamp ===
+            const lampX = x1 + w * 0.88;
+            const lampBot = groundY;
+            const lampTop = groundY - wallH * 0.50;
+            // Pole
+            ctx.fillStyle = "hsl(0, 0%, 35%)";
+            ctx.fillRect(lampX - 2, lampTop, 4, lampBot - lampTop);
+            // Base
+            ctx.fillStyle = "hsl(0, 0%, 30%)";
+            ctx.fillRect(lampX - 7, lampBot - 5, 14, 5);
+            ctx.fillRect(lampX - 5, lampBot - 8, 10, 4);
+            // Lamp head (arm + lantern)
+            ctx.strokeStyle = "hsl(0, 0%, 33%)";
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(lampX, lampTop);
+            ctx.quadraticCurveTo(lampX - 5, lampTop - 8, lampX - 14, lampTop - 5);
+            ctx.stroke();
+            // Lantern
+            ctx.fillStyle = "hsl(45, 60%, 80%)";
+            ctx.beginPath();
+            ctx.roundRect(lampX - 20, lampTop - 12, 12, 14, 2);
+            ctx.fill();
+            ctx.fillStyle = "rgba(255, 245, 200, 0.4)";
+            ctx.beginPath();
+            ctx.roundRect(lampX - 19, lampTop - 10, 10, 10, 1);
+            ctx.fill();
+            // Glow
+            const glowG = ctx.createRadialGradient(lampX - 14, lampTop - 5, 2, lampX - 14, lampTop - 5, 30);
+            glowG.addColorStop(0, "rgba(255, 245, 200, 0.12)");
+            glowG.addColorStop(1, "rgba(255, 245, 200, 0)");
+            ctx.fillStyle = glowG;
+            ctx.beginPath();
+            ctx.arc(lampX - 14, lampTop - 5, 30, 0, Math.PI * 2);
+            ctx.fill();
+
+            // === 11. Red mailbox post ===
+            const postX = x1 + w * 0.52;
+            const postBot = groundY;
+            const postH = 28;
+            // Post pole
+            ctx.fillStyle = "hsl(0, 0%, 40%)";
+            ctx.fillRect(postX - 2, postBot - postH - 14, 4, postH + 14);
+            // Mailbox body
+            ctx.fillStyle = "hsl(0, 70%, 48%)";
+            ctx.beginPath();
+            ctx.roundRect(postX - 10, postBot - postH - 18, 20, 16, [3, 3, 0, 0]);
+            ctx.fill();
+            // Top cap
+            ctx.fillStyle = "hsl(0, 65%, 42%)";
+            ctx.beginPath();
+            ctx.roundRect(postX - 12, postBot - postH - 20, 24, 5, [3, 3, 0, 0]);
+            ctx.fill();
+            // Mail slot
+            ctx.fillStyle = "hsl(0, 60%, 35%)";
+            ctx.fillRect(postX - 6, postBot - postH - 12, 12, 2);
+            // 〒 symbol hint
             ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
-            ctx.beginPath(); ctx.arc(x1 + w * 0.3, wallH * 0.15, 14, 0, Math.PI * 2); ctx.fill();
-            ctx.beginPath(); ctx.arc(x1 + w * 0.35, wallH * 0.13, 10, 0, Math.PI * 2); ctx.fill();
-            // Path/walkway
-            ctx.fillStyle = "hsl(35, 15%, 65%)";
-            ctx.fillRect(x2 - 30, wallH, 30, height - wallH);
+            ctx.font = "7px sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("〒", postX, postBot - postH - 6);
+        }
+
+        function drawFivePointStar(ctx, cx, cy, r) {
+            ctx.beginPath();
+            for (let i = 0; i < 5; i++) {
+                const outerAngle = -Math.PI / 2 + (i * 2 * Math.PI / 5);
+                const innerAngle = outerAngle + Math.PI / 5;
+                const ox = cx + Math.cos(outerAngle) * r;
+                const oy = cy + Math.sin(outerAngle) * r;
+                const ix = cx + Math.cos(innerAngle) * r * 0.4;
+                const iy = cy + Math.sin(innerAngle) * r * 0.4;
+                if (i === 0) ctx.moveTo(ox, oy);
+                else ctx.lineTo(ox, oy);
+                ctx.lineTo(ix, iy);
+            }
+            ctx.closePath();
+            ctx.fill();
         }
 
         function drawKidsRoom(ctx, rx, rw, wallH) {
-            // Colorful wallpaper (pastel stripes)
-            const stripeW = rw / 8;
-            const colors = ["hsl(190, 55%, 82%)", "hsl(340, 50%, 85%)", "hsl(60, 55%, 85%)", "hsl(270, 40%, 85%)"];
-            for (let i = 0; i < 8; i++) {
-                ctx.fillStyle = colors[i % colors.length];
-                ctx.fillRect(rx + i * stripeW, 10, stripeW, wallH - 20);
+            // 1. Polka-dot wallpaper — pastel green base with white dots
+            const wallG = ctx.createLinearGradient(rx, 0, rx, wallH);
+            wallG.addColorStop(0, "hsl(140, 40%, 85%)");
+            wallG.addColorStop(1, "hsl(140, 35%, 80%)");
+            ctx.fillStyle = wallG;
+            ctx.fillRect(rx, 10, rw, wallH - 20);
+            ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
+            const dotSpacing = 28;
+            for (let dy = 20; dy < wallH - 10; dy += dotSpacing) {
+                const row = Math.floor(dy / dotSpacing);
+                const offsetX = (row % 2) * (dotSpacing / 2);
+                for (let dx = 0; dx < rw; dx += dotSpacing) {
+                    ctx.beginPath();
+                    ctx.arc(rx + dx + offsetX + 8, dy, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
             }
-            // Toy shelf
-            const shelfW = rw * 0.35;
-            const shelfH = wallH * 0.28;
-            const shelfX = rx + rw * 0.05;
-            const shelfY = wallH * 0.35;
-            ctx.fillStyle = "hsl(30, 40%, 60%)";
-            ctx.fillRect(shelfX, shelfY, shelfW, 6);
-            ctx.fillRect(shelfX, shelfY + shelfH * 0.5, shelfW, 6);
-            ctx.fillRect(shelfX, shelfY, 5, shelfH);
-            ctx.fillRect(shelfX + shelfW - 5, shelfY, 5, shelfH);
-            // Toy blocks on shelf
-            ctx.fillStyle = "hsl(0, 60%, 65%)";
-            ctx.fillRect(shelfX + 12, shelfY - 14, 14, 14);
-            ctx.fillStyle = "hsl(210, 60%, 60%)";
-            ctx.fillRect(shelfX + 30, shelfY - 12, 12, 12);
-            ctx.fillStyle = "hsl(50, 70%, 60%)";
-            ctx.fillRect(shelfX + 16, shelfY + shelfH * 0.5 - 10, 10, 10);
-            // Small bed
-            const bedW = rw * 0.32;
-            const bedH = wallH * 0.18;
-            const bedX = rx + rw * 0.60;
-            const bedY = wallH - bedH;
-            ctx.fillStyle = "hsl(30, 35%, 50%)";
-            ctx.fillRect(bedX, bedY, bedW, bedH);
-            ctx.fillStyle = "hsl(190, 45%, 75%)";
-            ctx.fillRect(bedX + 3, bedY + 3, bedW - 6, bedH - 6);
-            // Pillow
-            ctx.fillStyle = "hsl(0, 0%, 95%)";
-            ctx.beginPath(); ctx.roundRect(bedX + 6, bedY + 6, bedW * 0.25, bedH * 0.5, 4); ctx.fill();
-            // Star stickers on wall
-            ctx.fillStyle = "hsl(50, 80%, 70%)";
-            const starPositions = [[0.45, 0.15], [0.55, 0.22], [0.75, 0.12], [0.85, 0.20]];
-            starPositions.forEach(([fx, fy]) => {
+
+            // 2. Round window with curtains and light
+            const winCX = rx + rw * 0.5;
+            const winCY = wallH * 0.28;
+            const winR = Math.min(rw * 0.1, wallH * 0.15);
+            // Window glass
+            const skyG = ctx.createRadialGradient(winCX, winCY, 0, winCX, winCY, winR);
+            skyG.addColorStop(0, "hsl(200, 70%, 88%)");
+            skyG.addColorStop(1, "hsl(200, 50%, 78%)");
+            ctx.fillStyle = skyG;
+            ctx.beginPath(); ctx.arc(winCX, winCY, winR, 0, Math.PI * 2); ctx.fill();
+            // Window frame
+            ctx.strokeStyle = "hsl(30, 30%, 55%)";
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.arc(winCX, winCY, winR, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(winCX - winR, winCY); ctx.lineTo(winCX + winR, winCY); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(winCX, winCY - winR); ctx.lineTo(winCX, winCY + winR); ctx.stroke();
+            // Curtains
+            ctx.fillStyle = "hsl(340, 40%, 82%)";
+            ctx.beginPath(); ctx.moveTo(winCX - winR - 10, winCY - winR - 8);
+            ctx.quadraticCurveTo(winCX - winR - 4, winCY + winR * 0.5, winCX - winR + 6, winCY + winR + 12);
+            ctx.lineTo(winCX - winR - 14, winCY + winR + 12);
+            ctx.closePath(); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(winCX + winR + 10, winCY - winR - 8);
+            ctx.quadraticCurveTo(winCX + winR + 4, winCY + winR * 0.5, winCX + winR - 6, winCY + winR + 12);
+            ctx.lineTo(winCX + winR + 14, winCY + winR + 12);
+            ctx.closePath(); ctx.fill();
+            // Light rays
+            ctx.fillStyle = "rgba(255, 255, 200, 0.06)";
+            ctx.beginPath();
+            ctx.moveTo(winCX - winR * 0.6, winCY + winR);
+            ctx.lineTo(winCX - winR * 1.5, wallH);
+            ctx.lineTo(winCX + winR * 1.5, wallH);
+            ctx.lineTo(winCX + winR * 0.6, winCY + winR);
+            ctx.closePath(); ctx.fill();
+
+            // 3. Ceiling mobile — stars, moon, cloud hanging from strings
+            const mobX = rx + rw * 0.72;
+            const mobY = 18;
+            ctx.strokeStyle = "rgba(0,0,0,0.15)";
+            ctx.lineWidth = 0.8;
+            // Center rod
+            ctx.beginPath(); ctx.moveTo(mobX - 20, mobY); ctx.lineTo(mobX + 20, mobY); ctx.stroke();
+            // Strings + ornaments
+            const mobItems = [
+                { dx: -18, dy: 28, type: "star", color: "hsl(50, 80%, 68%)" },
+                { dx: 0, dy: 38, type: "moon", color: "hsl(45, 65%, 75%)" },
+                { dx: 18, dy: 24, type: "cloud", color: "hsl(0, 0%, 92%)" }
+            ];
+            mobItems.forEach(item => {
+                const ix = mobX + item.dx;
+                const iy = mobY + item.dy;
+                ctx.beginPath(); ctx.moveTo(mobX + item.dx * 0.3, mobY); ctx.lineTo(ix, iy); ctx.stroke();
+                ctx.fillStyle = item.color;
+                if (item.type === "star") {
+                    drawFivePointStar(ctx, ix, iy, 6);
+                } else if (item.type === "moon") {
+                    ctx.beginPath(); ctx.arc(ix, iy, 6, 0, Math.PI * 2); ctx.fill();
+                    ctx.fillStyle = "hsl(140, 40%, 85%)";
+                    ctx.beginPath(); ctx.arc(ix + 3, iy - 2, 5, 0, Math.PI * 2); ctx.fill();
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(ix - 4, iy, 5, 0, Math.PI * 2); ctx.fill();
+                    ctx.arc(ix + 4, iy, 5, 0, Math.PI * 2); ctx.fill();
+                    ctx.arc(ix, iy - 3, 5, 0, Math.PI * 2); ctx.fill();
+                }
+            });
+
+            // 4. Colorful patchwork rug on floor
+            const rugCX = rx + rw * 0.45;
+            const rugCY = wallH - 6;
+            const rugR = Math.min(rw * 0.18, 50);
+            const rugColors = ["hsl(350, 55%, 72%)", "hsl(40, 65%, 72%)", "hsl(170, 50%, 70%)", "hsl(260, 45%, 75%)", "hsl(20, 60%, 70%)", "hsl(200, 50%, 72%)"];
+            for (let ri = 0; ri < 6; ri++) {
+                ctx.fillStyle = rugColors[ri];
                 ctx.beginPath();
-                ctx.arc(rx + rw * fx, wallH * fy, 5, 0, Math.PI * 2);
-                ctx.fill();
+                ctx.moveTo(rugCX, rugCY);
+                ctx.arc(rugCX, rugCY, rugR, (ri * Math.PI * 2) / 6, ((ri + 1) * Math.PI * 2) / 6);
+                ctx.closePath(); ctx.fill();
+            }
+            ctx.strokeStyle = "rgba(255,255,255,0.5)";
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(rugCX, rugCY, rugR, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.arc(rugCX, rugCY, rugR * 0.55, 0, Math.PI * 2); ctx.stroke();
+
+            // 5. Baby crib with bars, sheet, pillow
+            const cribW = rw * 0.30;
+            const cribH = wallH * 0.32;
+            const cribX = rx + rw * 0.64;
+            const cribY = wallH - cribH;
+            // Crib body
+            const cribG = ctx.createLinearGradient(cribX, cribY, cribX, cribY + cribH);
+            cribG.addColorStop(0, "hsl(30, 35%, 62%)");
+            cribG.addColorStop(1, "hsl(30, 30%, 52%)");
+            ctx.fillStyle = cribG;
+            ctx.beginPath(); ctx.roundRect(cribX, cribY, cribW, cribH, [4, 4, 0, 0]); ctx.fill();
+            // Mattress/sheet
+            ctx.fillStyle = "hsl(190, 50%, 88%)";
+            ctx.fillRect(cribX + 5, cribY + cribH * 0.35, cribW - 10, cribH * 0.6);
+            // Pillow
+            ctx.fillStyle = "hsl(0, 0%, 96%)";
+            ctx.beginPath(); ctx.roundRect(cribX + 8, cribY + cribH * 0.38, cribW * 0.28, cribH * 0.22, 5); ctx.fill();
+            // Bars (round rod style)
+            ctx.strokeStyle = "hsl(30, 25%, 58%)";
+            ctx.lineWidth = 2.5;
+            const barCount = Math.floor(cribW / 10);
+            for (let bi = 1; bi < barCount; bi++) {
+                const bx = cribX + (bi * cribW) / barCount;
+                ctx.beginPath(); ctx.moveTo(bx, cribY + 2); ctx.lineTo(bx, cribY + cribH * 0.34); ctx.stroke();
+            }
+            // Top rail
+            ctx.strokeStyle = "hsl(30, 30%, 50%)";
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(cribX, cribY); ctx.lineTo(cribX + cribW, cribY); ctx.stroke();
+
+            // 6. Detailed toy shelf — shelves, blocks, stuffed animal, picture book
+            const shelfW = rw * 0.28;
+            const shelfH = wallH * 0.40;
+            const shelfX = rx + rw * 0.04;
+            const shelfY = wallH * 0.32;
+            // Shelf frame
+            const shG = ctx.createLinearGradient(shelfX, shelfY, shelfX, shelfY + shelfH);
+            shG.addColorStop(0, "hsl(30, 35%, 60%)");
+            shG.addColorStop(1, "hsl(30, 30%, 50%)");
+            ctx.fillStyle = shG;
+            ctx.fillRect(shelfX, shelfY, 4, shelfH);
+            ctx.fillRect(shelfX + shelfW - 4, shelfY, 4, shelfH);
+            // 3 shelf boards
+            for (let si = 0; si < 3; si++) {
+                const sy = shelfY + si * (shelfH / 3);
+                ctx.fillStyle = "hsl(30, 32%, 58%)";
+                ctx.fillRect(shelfX, sy, shelfW, 5);
+            }
+            ctx.fillRect(shelfX, shelfY + shelfH - 3, shelfW, 5);
+            // Top shelf items: colored blocks
+            const blockY = shelfY + 5;
+            const blockColors = ["hsl(0, 65%, 62%)", "hsl(210, 65%, 58%)", "hsl(50, 75%, 58%)", "hsl(130, 50%, 55%)"];
+            blockColors.forEach((c, i) => {
+                ctx.fillStyle = c;
+                const bw = 10 + Math.random() * 4;
+                ctx.fillRect(shelfX + 8 + i * (bw + 3), blockY + (14 - bw * 0.8), bw, bw * 0.8);
+                // Letter on block
+                ctx.fillStyle = "rgba(255,255,255,0.7)";
+                ctx.font = `${bw * 0.5}px sans-serif`;
+                ctx.fillText("ABCD"[i], shelfX + 10 + i * (bw + 3) + 1, blockY + 12);
+            });
+            // Middle shelf: stuffed bear
+            const bearY = shelfY + shelfH / 3 + 6;
+            ctx.fillStyle = "hsl(28, 45%, 65%)";
+            ctx.beginPath(); ctx.arc(shelfX + 16, bearY + 10, 8, 0, Math.PI * 2); ctx.fill(); // body
+            ctx.beginPath(); ctx.arc(shelfX + 16, bearY + 2, 6, 0, Math.PI * 2); ctx.fill(); // head
+            ctx.fillStyle = "hsl(28, 40%, 55%)";
+            ctx.beginPath(); ctx.arc(shelfX + 11, bearY - 1, 3, 0, Math.PI * 2); ctx.fill(); // ear
+            ctx.beginPath(); ctx.arc(shelfX + 21, bearY - 1, 3, 0, Math.PI * 2); ctx.fill(); // ear
+            ctx.fillStyle = "#222";
+            ctx.beginPath(); ctx.arc(shelfX + 14, bearY + 1, 1, 0, Math.PI * 2); ctx.fill(); // eye
+            ctx.beginPath(); ctx.arc(shelfX + 18, bearY + 1, 1, 0, Math.PI * 2); ctx.fill(); // eye
+            // Middle shelf: picture books (standing)
+            const bookColors = ["hsl(340, 50%, 60%)", "hsl(200, 55%, 55%)", "hsl(80, 45%, 55%)"];
+            bookColors.forEach((c, i) => {
+                ctx.fillStyle = c;
+                const bx = shelfX + 32 + i * 10;
+                const bh = 18 + i * 2;
+                ctx.fillRect(bx, bearY + 18 - bh, 7, bh);
+                // Spine line
+                ctx.strokeStyle = "rgba(255,255,255,0.3)";
+                ctx.lineWidth = 0.5;
+                ctx.beginPath(); ctx.moveTo(bx + 3.5, bearY + 18 - bh + 2); ctx.lineTo(bx + 3.5, bearY + 16); ctx.stroke();
+            });
+
+            // 7. Growth chart on wall
+            const chartX = rx + rw * 0.38;
+            const chartY = wallH * 0.18;
+            const chartH = wallH * 0.52;
+            ctx.fillStyle = "hsl(45, 60%, 92%)";
+            ctx.beginPath(); ctx.roundRect(chartX, chartY, 14, chartH, 2); ctx.fill();
+            ctx.strokeStyle = "hsl(30, 30%, 60%)";
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.roundRect(chartX, chartY, 14, chartH, 2); ctx.stroke();
+            // Ruler markings
+            ctx.strokeStyle = "hsl(0, 0%, 40%)";
+            ctx.lineWidth = 0.6;
+            for (let m = 0; m < 8; m++) {
+                const my = chartY + chartH - m * (chartH / 8);
+                ctx.beginPath(); ctx.moveTo(chartX + 2, my); ctx.lineTo(chartX + (m % 2 === 0 ? 10 : 7), my); ctx.stroke();
+            }
+            // Heart mark
+            ctx.fillStyle = "hsl(350, 60%, 65%)";
+            ctx.beginPath(); ctx.arc(chartX + 7, chartY + chartH * 0.45, 3, 0, Math.PI * 2); ctx.fill();
+
+            // 8. Wall decals — tree, clouds, birds
+            // Tree silhouette
+            const treeX = rx + rw * 0.86;
+            const treeBase = wallH * 0.85;
+            ctx.fillStyle = "hsl(30, 25%, 55%)";
+            ctx.fillRect(treeX - 3, treeBase - 30, 6, 30); // trunk
+            ctx.fillStyle = "hsl(130, 40%, 68%)";
+            ctx.beginPath(); ctx.arc(treeX, treeBase - 35, 16, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(treeX - 10, treeBase - 28, 12, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(treeX + 10, treeBase - 28, 12, 0, Math.PI * 2); ctx.fill();
+            // Small cloud decals
+            ctx.fillStyle = "rgba(255,255,255,0.45)";
+            [[0.15, 0.12], [0.78, 0.10]].forEach(([fx, fy]) => {
+                const cx = rx + rw * fx;
+                const cy = wallH * fy;
+                ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(cx + 7, cy + 1, 6, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(cx - 6, cy + 2, 5, 0, Math.PI * 2); ctx.fill();
+            });
+            // Birds (V-shapes)
+            ctx.strokeStyle = "rgba(80, 80, 80, 0.25)";
+            ctx.lineWidth = 1.2;
+            [[0.22, 0.08], [0.26, 0.11], [0.82, 0.06]].forEach(([fx, fy]) => {
+                const bx = rx + rw * fx;
+                const by = wallH * fy;
+                ctx.beginPath(); ctx.moveTo(bx - 5, by + 3); ctx.quadraticCurveTo(bx, by, bx + 5, by + 3); ctx.stroke();
+            });
+
+            // 9. Five-point star stickers on wall
+            const starData = [
+                { fx: 0.45, fy: 0.15, r: 7, color: "hsl(50, 80%, 68%)" },
+                { fx: 0.55, fy: 0.22, r: 5, color: "hsl(340, 60%, 72%)" },
+                { fx: 0.75, fy: 0.12, r: 6, color: "hsl(200, 60%, 70%)" },
+                { fx: 0.18, fy: 0.20, r: 5, color: "hsl(130, 55%, 68%)" },
+                { fx: 0.92, fy: 0.18, r: 4, color: "hsl(280, 50%, 72%)" }
+            ];
+            starData.forEach(s => {
+                ctx.fillStyle = s.color;
+                drawFivePointStar(ctx, rx + rw * s.fx, wallH * s.fy, s.r);
             });
         }
 
@@ -7077,6 +7700,13 @@
                 if (inheritedKeyboardDurations) inheritedKeyboardDurations = [...inheritedKeyboardDurations.slice(0, stepsPerPage), ...inheritedKeyboardDurations.slice(0, stepsPerPage)];
                 if (inheritedKeyboardSustainType) inheritedKeyboardSustainType = [...inheritedKeyboardSustainType.slice(0, stepsPerPage), ...inheritedKeyboardSustainType.slice(0, stepsPerPage)];
             }
+            if (inheritedKeys2Pattern) {
+                inheritedKeys2Pattern = [...inheritedKeys2Pattern.slice(0, stepsPerPage), ...inheritedKeys2Pattern.slice(0, stepsPerPage)];
+                if (inheritedKeys2Notes) inheritedKeys2Notes = [...inheritedKeys2Notes.slice(0, stepsPerPage), ...inheritedKeys2Notes.slice(0, stepsPerPage)];
+                if (inheritedKeys2Attacks) inheritedKeys2Attacks = [...inheritedKeys2Attacks.slice(0, stepsPerPage), ...inheritedKeys2Attacks.slice(0, stepsPerPage)];
+                if (inheritedKeys2Durations) inheritedKeys2Durations = [...inheritedKeys2Durations.slice(0, stepsPerPage), ...inheritedKeys2Durations.slice(0, stepsPerPage)];
+                if (inheritedKeys2SustainType) inheritedKeys2SustainType = [...inheritedKeys2SustainType.slice(0, stepsPerPage), ...inheritedKeys2SustainType.slice(0, stepsPerPage)];
+            }
             if (inheritedCymbalPattern) {
                 inheritedCymbalPattern = [...inheritedCymbalPattern.slice(0, stepsPerPage), ...inheritedCymbalPattern.slice(0, stepsPerPage)];
                 if (inheritedCymbalVelocity) inheritedCymbalVelocity = [...inheritedCymbalVelocity.slice(0, stepsPerPage), ...inheritedCymbalVelocity.slice(0, stepsPerPage)];
@@ -8000,13 +8630,19 @@
                 labels: clickedDrop.activityLabels
             });
 
-            // Save the drop's Keys2 line for carry into next phases
+            // Keep inherited Keys (keyboard) from previous phases intact —
+            // the travel drop's Keys pattern was for proximity preview only.
+
+            // Save travel drop's Keys2 as a NEW inherited layer
+            // (no prior Keys2 exists in the ADULT→TRAVEL path)
             if (clickedDrop.keys2Pattern) {
                 inheritedKeys2Pattern = clickedDrop.keys2Pattern.slice();
                 inheritedKeys2Notes = clickedDrop.keys2Notes ? clickedDrop.keys2Notes.slice() : null;
                 inheritedKeys2Attacks = clickedDrop.keys2Attacks ? clickedDrop.keys2Attacks.slice() : null;
                 inheritedKeys2Durations = clickedDrop.keys2Durations ? clickedDrop.keys2Durations.slice() : null;
                 inheritedKeys2SustainType = clickedDrop.keys2SustainType ? clickedDrop.keys2SustainType.slice() : null;
+                inheritedKeys2SoundConfig = clickedDrop.activityId === "sea_end" ? "syncopated" : "staccato-bounce";
+                addVolumeTrack('keys2');
             }
 
             disposeToneDrops();
@@ -11036,37 +11672,49 @@
         }
 
         function doubleAllInheritedPatterns(stepsPerPage) {
+            const twoPages = stepsPerPage * 2;
+            // Helper: double a 1-page array, or keep as-is if already 2 pages
+            const dbl = (arr) => {
+                if (!arr) return arr;
+                if (arr.length >= twoPages) return arr; // already 2 pages — preserve page 2
+                return [...arr.slice(0, stepsPerPage), ...arr.slice(0, stepsPerPage)];
+            };
+
             if (baseRhythmInfo.kickPattern) {
-                baseRhythmInfo._originalKick = baseRhythmInfo._originalKick || baseRhythmInfo.kickPattern.slice();
-                baseRhythmInfo.kickPattern = [...baseRhythmInfo._originalKick, ...baseRhythmInfo._originalKick];
+                if (baseRhythmInfo.kickPattern.length >= twoPages) {
+                    // Already 2 pages (from TRAVEL) — keep with page 2 variations intact
+                } else {
+                    baseRhythmInfo._originalKick = baseRhythmInfo._originalKick || baseRhythmInfo.kickPattern.slice();
+                    baseRhythmInfo.kickPattern = [...baseRhythmInfo._originalKick, ...baseRhythmInfo._originalKick];
+                }
             }
-            if (inheritedHatPattern) inheritedHatPattern = [...inheritedHatPattern.slice(0, stepsPerPage), ...inheritedHatPattern.slice(0, stepsPerPage)];
-            if (inheritedSnarePattern) inheritedSnarePattern = [...inheritedSnarePattern.slice(0, stepsPerPage), ...inheritedSnarePattern.slice(0, stepsPerPage)];
-            if (inheritedSnareVelocity) inheritedSnareVelocity = [...inheritedSnareVelocity.slice(0, stepsPerPage), ...inheritedSnareVelocity.slice(0, stepsPerPage)];
+            if (inheritedHatPattern) inheritedHatPattern = dbl(inheritedHatPattern);
+            if (inheritedSnarePattern) inheritedSnarePattern = dbl(inheritedSnarePattern);
+            if (inheritedSnareVelocity) inheritedSnareVelocity = dbl(inheritedSnareVelocity);
             if (inheritedBassPattern) {
-                inheritedBassPattern = [...inheritedBassPattern.slice(0, stepsPerPage), ...inheritedBassPattern.slice(0, stepsPerPage)];
-                if (inheritedBassNotes) inheritedBassNotes = [...inheritedBassNotes.slice(0, stepsPerPage), ...inheritedBassNotes.slice(0, stepsPerPage)];
-                if (inheritedBassAttacks) inheritedBassAttacks = [...inheritedBassAttacks.slice(0, stepsPerPage), ...inheritedBassAttacks.slice(0, stepsPerPage)];
-                if (inheritedBassDurations) inheritedBassDurations = [...inheritedBassDurations.slice(0, stepsPerPage), ...inheritedBassDurations.slice(0, stepsPerPage)];
-                if (inheritedBassSustainType) inheritedBassSustainType = [...inheritedBassSustainType.slice(0, stepsPerPage), ...inheritedBassSustainType.slice(0, stepsPerPage)];
+                inheritedBassPattern = dbl(inheritedBassPattern);
+                inheritedBassNotes = dbl(inheritedBassNotes);
+                inheritedBassAttacks = dbl(inheritedBassAttacks);
+                inheritedBassDurations = dbl(inheritedBassDurations);
+                inheritedBassSustainType = dbl(inheritedBassSustainType);
             }
             if (inheritedKeyboardPattern) {
-                inheritedKeyboardPattern = [...inheritedKeyboardPattern.slice(0, stepsPerPage), ...inheritedKeyboardPattern.slice(0, stepsPerPage)];
-                if (inheritedKeyboardNotes) inheritedKeyboardNotes = [...inheritedKeyboardNotes.slice(0, stepsPerPage), ...inheritedKeyboardNotes.slice(0, stepsPerPage)];
-                if (inheritedKeyboardAttacks) inheritedKeyboardAttacks = [...inheritedKeyboardAttacks.slice(0, stepsPerPage), ...inheritedKeyboardAttacks.slice(0, stepsPerPage)];
-                if (inheritedKeyboardDurations) inheritedKeyboardDurations = [...inheritedKeyboardDurations.slice(0, stepsPerPage), ...inheritedKeyboardDurations.slice(0, stepsPerPage)];
-                if (inheritedKeyboardSustainType) inheritedKeyboardSustainType = [...inheritedKeyboardSustainType.slice(0, stepsPerPage), ...inheritedKeyboardSustainType.slice(0, stepsPerPage)];
+                inheritedKeyboardPattern = dbl(inheritedKeyboardPattern);
+                inheritedKeyboardNotes = dbl(inheritedKeyboardNotes);
+                inheritedKeyboardAttacks = dbl(inheritedKeyboardAttacks);
+                inheritedKeyboardDurations = dbl(inheritedKeyboardDurations);
+                inheritedKeyboardSustainType = dbl(inheritedKeyboardSustainType);
             }
             if (inheritedKeys2Pattern) {
-                inheritedKeys2Pattern = [...inheritedKeys2Pattern.slice(0, stepsPerPage), ...inheritedKeys2Pattern.slice(0, stepsPerPage)];
-                if (inheritedKeys2Notes) inheritedKeys2Notes = [...inheritedKeys2Notes.slice(0, stepsPerPage), ...inheritedKeys2Notes.slice(0, stepsPerPage)];
-                if (inheritedKeys2Attacks) inheritedKeys2Attacks = [...inheritedKeys2Attacks.slice(0, stepsPerPage), ...inheritedKeys2Attacks.slice(0, stepsPerPage)];
-                if (inheritedKeys2Durations) inheritedKeys2Durations = [...inheritedKeys2Durations.slice(0, stepsPerPage), ...inheritedKeys2Durations.slice(0, stepsPerPage)];
-                if (inheritedKeys2SustainType) inheritedKeys2SustainType = [...inheritedKeys2SustainType.slice(0, stepsPerPage), ...inheritedKeys2SustainType.slice(0, stepsPerPage)];
+                inheritedKeys2Pattern = dbl(inheritedKeys2Pattern);
+                inheritedKeys2Notes = dbl(inheritedKeys2Notes);
+                inheritedKeys2Attacks = dbl(inheritedKeys2Attacks);
+                inheritedKeys2Durations = dbl(inheritedKeys2Durations);
+                inheritedKeys2SustainType = dbl(inheritedKeys2SustainType);
             }
             if (inheritedCymbalPattern) {
-                inheritedCymbalPattern = [...inheritedCymbalPattern.slice(0, stepsPerPage), ...inheritedCymbalPattern.slice(0, stepsPerPage)];
-                if (inheritedCymbalVelocity) inheritedCymbalVelocity = [...inheritedCymbalVelocity.slice(0, stepsPerPage), ...inheritedCymbalVelocity.slice(0, stepsPerPage)];
+                inheritedCymbalPattern = dbl(inheritedCymbalPattern);
+                inheritedCymbalVelocity = dbl(inheritedCymbalVelocity);
             }
         }
 
@@ -11128,11 +11776,22 @@
         function buildThirtiesMelody(baseInfo, chordProg, params) {
             const totalSteps = baseInfo.beatsPerBar * baseInfo.bars * STEPS_PER_BEAT;
             const barSteps = baseInfo.beatsPerBar * STEPS_PER_BEAT;
-            const S = STEPS_PER_BEAT;
 
             const chordRoots = chordProg.notes.map(t => t[0].replace(/\d+$/, ''));
             const chordThirds = chordProg.notes.map(t => t[1].replace(/\d+$/, ''));
             const chordFifths = chordProg.notes.map(t => t[2].replace(/\d+$/, ''));
+
+            // Detect major/minor from first chord's 3rd interval
+            const firstRootMidi = noteNameToMidi(chordRoots[0] + '4');
+            const firstThirdMidi = noteNameToMidi(chordThirds[0] + '4');
+            const thirdInterval = ((firstThirdMidi - firstRootMidi) % 12 + 12) % 12;
+            const isMajorKey = (thirdInterval === 4); // major 3rd = 4 semitones
+
+            // Build scale degrees (semitone offsets from root)
+            const MAJOR_SCALE = [0, 2, 4, 5, 7, 9, 11];
+            const MINOR_SCALE = [0, 2, 3, 5, 7, 8, 10];
+            const scaleIntervals = isMajorKey ? MAJOR_SCALE : MINOR_SCALE;
+            const rootPc = firstRootMidi % 12; // pitch class of key root
 
             const events = [];
             const add = (si, note, len) => {
@@ -11140,31 +11799,55 @@
                     events.push({ step: si, note, len: Math.min(len, totalSteps - si) });
             };
 
+            // Helper: MIDI → note name using key-aware spelling
+            const SHARP_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+            const midiToName = (midi) => SHARP_NAMES[midi % 12] + (Math.floor(midi / 12) - 1);
+
+            // Build full scale note pool for a bar (chord tones + passing tones)
             const buildNotePool = (bar) => {
                 const R = chordRoots[bar % chordRoots.length];
                 const T = chordThirds[bar % chordThirds.length];
                 const F = chordFifths[bar % chordFifths.length];
-                const pool = [];
                 const baseOct = 4;
                 const lo = Math.max(3, Math.round(baseOct - params.octaveRange / 2));
                 const hi = Math.min(6, Math.round(baseOct + params.octaveRange / 2));
+
+                // Chord tones (strong)
+                const chordPool = [];
                 for (let oct = lo; oct <= hi; oct++) {
-                    pool.push(R + oct, T + oct, F + oct);
+                    chordPool.push(R + oct, T + oct, F + oct);
                 }
-                return { pool, R, T, F, baseOct };
+
+                // Scale tones including passing tones (all 7 degrees)
+                const scalePool = [];
+                for (let oct = lo; oct <= hi; oct++) {
+                    scaleIntervals.forEach(offset => {
+                        const midi = (oct + 1) * 12 + ((rootPc + offset) % 12);
+                        scalePool.push(midiToName(midi));
+                    });
+                }
+
+                return { chordPool, scalePool, R, T, F, baseOct };
             };
 
+            // === Generate bar events, storing per-bar for motif reuse ===
+            const barEvents = []; // barEvents[bar] = [{relStep, note, len}, ...]
             let prevMidi = null;
 
-            for (let bar = 0; bar < baseInfo.bars; bar++) {
+            const generateBar = (bar) => {
                 const b = bar * barSteps;
-                const { pool, R, T, F, baseOct } = buildNotePool(bar);
+                const { chordPool, scalePool, R, T, F, baseOct } = buildNotePool(bar);
 
                 const maxNotesPerBar = Math.floor(baseInfo.beatsPerBar * 2);
                 const notesThisBar = Math.max(1,
                     Math.round(1 + (maxNotesPerBar - 1) * params.density));
 
-                // Note onsets snap to 8th-note grid (even positions: 0,2,4,6,8,10,12,14)
+                // Rest: when density < 0.35, chance to skip entire bar
+                if (params.density < 0.35 && Math.random() < (0.4 - params.density)) {
+                    return [];
+                }
+
+                // 8th-note grid
                 const eighthGrid = [];
                 for (let s = 0; s < barSteps; s += 2) eighthGrid.push(s);
 
@@ -11172,39 +11855,50 @@
                 for (let n = 0; n < notesThisBar; n++) {
                     let step;
                     if (Math.random() < params.syncopation) {
-                        // Syncopated: pick from offbeat 8th positions (2,6,10,14)
                         const offbeats = eighthGrid.filter(s => s % 4 !== 0);
-                        step = b + offbeats[Math.floor(Math.random() * offbeats.length)];
+                        step = offbeats[Math.floor(Math.random() * offbeats.length)];
                     } else {
-                        // Normal: distribute evenly, snap to nearest 8th
                         const raw = Math.round(n * barSteps / notesThisBar);
-                        step = b + (Math.round(raw / 2) * 2);
+                        step = Math.round(raw / 2) * 2;
                     }
-                    if (step < b + barSteps) slots.push(step);
+                    if (step < barSteps) slots.push(step);
                 }
-                slots.sort((a, b2) => a - b2);
+                slots.sort((a2, b2) => a2 - b2);
                 const uniqueSlots = [...new Set(slots)];
 
-                uniqueSlots.forEach((step, idx) => {
+                // Per-note rest: when density < 0.5, randomly skip some notes
+                const filteredSlots = uniqueSlots.filter(() => {
+                    if (params.density < 0.5 && Math.random() < (0.3 - params.density * 0.4)) return false;
+                    return true;
+                });
+                if (filteredSlots.length === 0 && uniqueSlots.length > 0) {
+                    filteredSlots.push(uniqueSlots[0]); // keep at least one
+                }
+
+                const barEvs = [];
+                filteredSlots.forEach((relStep, idx) => {
                     const maxLen = Math.round(2 + (barSteps / 2 - 2) * params.longNoteBias);
-                    const nextStep = idx < uniqueSlots.length - 1
-                        ? uniqueSlots[idx + 1] : b + barSteps;
-                    const len = Math.max(1, Math.min(maxLen, nextStep - step));
+                    const nextStep = idx < filteredSlots.length - 1
+                        ? filteredSlots[idx + 1] : barSteps;
+                    const len = Math.max(1, Math.min(maxLen, nextStep - relStep));
 
                     let note;
                     const chordTones = [R + baseOct, T + baseOct, F + baseOct];
 
-                    if (prevMidi === null || Math.random() < 0.3) {
+                    if (prevMidi === null || Math.random() < 0.25) {
+                        // Phrase start: chord tone
                         note = chordTones[Math.floor(Math.random() * 3)];
                     } else if (Math.random() < params.leapiness) {
-                        note = pool[Math.floor(Math.random() * pool.length)];
+                        // Leap: chord tone from wider range
+                        note = chordPool[Math.floor(Math.random() * chordPool.length)];
                     } else {
-                        const sorted = pool.map(n => ({
+                        // Stepwise: use full scale pool for smooth passing motion
+                        const sorted = scalePool.map(n => ({
                             note: n,
                             midi: noteNameToMidi(n),
                             dist: Math.abs(noteNameToMidi(n) - prevMidi)
-                        })).filter(x => x.dist > 0 && x.dist <= 7)
-                          .sort((a, b2) => a.dist - b2.dist);
+                        })).filter(x => x.dist > 0 && x.dist <= 4)
+                          .sort((a2, b2) => a2.dist - b2.dist);
 
                         if (sorted.length > 0) {
                             const ascending = sorted.filter(x => x.midi > prevMidi);
@@ -11221,8 +11915,69 @@
                         }
                     }
 
-                    add(step, [note], len);
+                    barEvs.push({ relStep, note, len });
                     prevMidi = noteNameToMidi(note);
+                });
+                return barEvs;
+            };
+
+            // Motif variation: transpose a motif's intervals to fit a new bar's chord
+            const varyMotif = (sourceEvs, bar) => {
+                const { chordPool, scalePool, R, baseOct } = buildNotePool(bar);
+                if (sourceEvs.length === 0) return [];
+
+                // Anchor: start from the new bar's root
+                const newRootMidi = noteNameToMidi(R + baseOct);
+                const srcFirstMidi = noteNameToMidi(sourceEvs[0].note);
+                const transpose = newRootMidi - srcFirstMidi;
+
+                return sourceEvs.map((ev, i) => {
+                    const srcMidi = noteNameToMidi(ev.note);
+                    let targetMidi = srcMidi + transpose;
+
+                    // Small random variation (occasionally shift a note by 1-2 semitones)
+                    if (i > 0 && Math.random() < 0.3) {
+                        targetMidi += (Math.random() < 0.5 ? 1 : -1) * (Math.random() < 0.5 ? 1 : 2);
+                    }
+
+                    // Snap to nearest scale tone
+                    let bestDist = 99, bestMidi = targetMidi;
+                    scalePool.forEach(n => {
+                        const m = noteNameToMidi(n);
+                        const d = Math.abs(m - targetMidi);
+                        if (d < bestDist) { bestDist = d; bestMidi = m; }
+                    });
+
+                    // Slight length variation
+                    let newLen = ev.len;
+                    if (Math.random() < 0.25) {
+                        newLen = Math.max(1, ev.len + (Math.random() < 0.5 ? 1 : -1));
+                    }
+
+                    return { relStep: ev.relStep, note: midiToName(bestMidi), len: newLen };
+                });
+            };
+
+            // === Build all bars with motif repetition ===
+            for (let bar = 0; bar < baseInfo.bars; bar++) {
+                // Motif repetition: bar 2 → variation of bar 0, bar 3 → variation of bar 1
+                // Strength controlled by focused/patient labels (via low leapiness)
+                const motifChance = Math.max(0.3, 1.0 - params.leapiness * 1.2);
+                let evs;
+                if (bar >= 2 && barEvents[bar - 2] && barEvents[bar - 2].length > 0
+                    && Math.random() < motifChance) {
+                    evs = varyMotif(barEvents[bar - 2], bar);
+                    // Update prevMidi for continuity
+                    if (evs.length > 0) prevMidi = noteNameToMidi(evs[evs.length - 1].note);
+                } else {
+                    evs = generateBar(bar);
+                }
+                barEvents.push(evs);
+
+                // Convert relative steps to absolute and add to events
+                const b = bar * barSteps;
+                evs.forEach(ev => {
+                    add(b + ev.relStep, [ev.note], ev.len);
                 });
             }
 
@@ -11355,6 +12110,40 @@
 
             thirtiesHasMarriage = checkMarriageCondition();
 
+            // Family followers (spouse + kid)
+            if (thirtiesHasMarriage) {
+                const spouseHue = (babyHue + 180) % 360;
+                const spouseColors = {
+                    body: `hsl(${spouseHue}, 78%, 70%)`,
+                    limb: `hsl(${(spouseHue + 50) % 360}, 74%, 68%)`,
+                    head: babyColorScheme.head,
+                    skin: babyColorScheme.skin,
+                    cheek: babyColorScheme.cheek,
+                    hair: `hsl(${(28 + 30) % 360}, 38%, 48%)`
+                };
+                const kidHue = (babyHue + 90) % 360;
+                const kidColors = {
+                    body: `hsl(${kidHue}, 80%, 72%)`,
+                    limb: `hsl(${(kidHue + 40) % 360}, 76%, 70%)`,
+                    head: babyColorScheme.head,
+                    skin: babyColorScheme.skin,
+                    cheek: babyColorScheme.cheek,
+                    hair: babyColorScheme.hair
+                };
+                thirtiesSpouse = new Child(spouseColors);
+                thirtiesSpouse.isBoy = !babyIsBoy;
+                thirtiesSpouse.hairStyle = Math.floor(Math.random() * 3);
+                thirtiesSpouse.x = baby.x - 55;
+                thirtiesSpouse.y = baby.y;
+
+                thirtiesKid = new Toddler(kidColors);
+                thirtiesKid.x = baby.x - 100;
+                thirtiesKid.y = baby.y;
+            } else {
+                thirtiesSpouse = null;
+                thirtiesKid = null;
+            }
+
             // Carry layers init (before pattern doubling)
             initCarryHatLayer();
             initCarrySnareLayer();
@@ -11467,6 +12256,18 @@
             thirtiesMelodyConfirmed = true;
             thirtiesPreviewingLead = false;
 
+            // Set lead volume to 50%
+            if (volumeState['lead']) {
+                volumeState['lead'].volume = 50;
+                const row = volumeState['lead'].el;
+                if (row) {
+                    row.querySelector('.vol-bar-fill').style.width = '50%';
+                    row.querySelector('.vol-bar-thumb').style.left = '50%';
+                    row.querySelector('.vol-pct').textContent = '50%';
+                }
+                applyTrackVolume('lead');
+            }
+
             const sx = clickedDrop.x - cameraX;
             const sy = clickedDrop.y;
             const ripple = document.createElement('div');
@@ -11487,6 +12288,411 @@
                 fadeScreenTo(0, 1300);
                 renderScoreRows();
             }, 1400);
+        }
+
+        // ======== CITY PHASE (住宅街フェーズ) ========
+        function initCityObstacles() {
+            const wW = worldWidth, wH = worldHeight;
+            cityObstacles = [
+                // Player's house (upper centre)
+                { x: wW * 0.38, y: wH * 0.04, w: wW * 0.24, h: wH * 0.14 },
+                // Neighbour houses
+                { x: wW * 0.04, y: wH * 0.06, w: wW * 0.18, h: wH * 0.12 },
+                { x: wW * 0.78, y: wH * 0.06, w: wW * 0.18, h: wH * 0.12 },
+                { x: wW * 0.05, y: wH * 0.28, w: wW * 0.14, h: wH * 0.10 },
+                { x: wW * 0.82, y: wH * 0.28, w: wW * 0.14, h: wH * 0.10 },
+                { x: wW * 0.82, y: wH * 0.60, w: wW * 0.14, h: wH * 0.10 },
+                // Park bench
+                { x: wW * 0.30, y: wH * 0.60, w: wW * 0.06, h: wH * 0.03 },
+                // Trees (circular approximation)
+                { x: wW * 0.24, y: wH * 0.55, w: wW * 0.04, h: wH * 0.04 },
+                { x: wW * 0.40, y: wH * 0.57, w: wW * 0.04, h: wH * 0.04 },
+                // Vending machine
+                { x: wW * 0.52, y: wH * 0.76, w: wW * 0.06, h: wH * 0.04 },
+                // Flower bed
+                { x: wW * 0.14, y: wH * 0.48, w: wW * 0.08, h: wH * 0.05 },
+                // Parked cars
+                { x: wW * 0.62, y: wH * 0.30, w: wW * 0.08, h: wH * 0.04 },
+                { x: wW * 0.62, y: wH * 0.36, w: wW * 0.08, h: wH * 0.04 },
+            ];
+        }
+
+        function initCityNpcs() {
+            cityNpcs = [];
+            const npcCount = 5 + randInt(0, 2); // 5-7
+            for (let i = 0; i < npcCount; i++) {
+                cityNpcs.push({
+                    x: worldWidth * (0.15 + Math.random() * 0.70),
+                    y: worldHeight * (0.30 + Math.random() * 0.55),
+                    targetX: 0, targetY: 0,
+                    moveTimer: Math.random() * 120,
+                    speed: 0.8 + Math.random() * 1.0,
+                    walkCycle: Math.random() * Math.PI * 2,
+                    bodyHue: randInt(0, 360),
+                    limbHue: randInt(0, 360),
+                    isStaff: false,
+                    scale: 0.85 + Math.random() * 0.2,
+                    skinTone: `hsl(25, ${58 + randInt(0, 20)}%, ${78 + randInt(0, 10)}%)`,
+                    hairColor: `hsl(${randInt(15, 45)}, ${30 + randInt(0, 25)}%, ${35 + randInt(0, 25)}%)`,
+                    faceType: randInt(0, 4),
+                    isBoy: Math.random() < 0.5,
+                    hairStyle: randInt(0, 2),
+                    cheekColor: "hsl(350, 62%, 78%)",
+                    dir: Math.random() < 0.5 ? 1 : -1
+                });
+            }
+            cityNpcs.forEach(n => { n.targetX = n.x; n.targetY = n.y; });
+        }
+
+        function updateCityNpcs() {
+            cityNpcs.forEach(npc => {
+                npc.moveTimer--;
+                if (npc.moveTimer <= 0) {
+                    npc.targetX = worldWidth * (0.10 + Math.random() * 0.80);
+                    npc.targetY = worldHeight * (0.25 + Math.random() * 0.60);
+                    npc.moveTimer = 60 + Math.random() * 120;
+                }
+                const dx = npc.targetX - npc.x;
+                const dy = npc.targetY - npc.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist > 4) {
+                    npc.x += (dx / dist) * npc.speed;
+                    npc.y += (dy / dist) * npc.speed;
+                    npc.walkCycle += 0.3;
+                    npc.dir = dx > 0 ? 1 : -1;
+                } else {
+                    npc.walkCycle += 0.02;
+                }
+                resolveObstacleCollision(npc, 15, cityObstacles);
+            });
+        }
+
+        function initCityDrops() {
+            disposeToneDrops();
+            toneDrops = [];
+            if (!baseRhythmInfo || !inheritedChordProgression) return;
+            // Double helper for 2-page patterns
+            const stepsPerPage = baseRhythmInfo.beatsPerBar * baseRhythmInfo.bars * STEPS_PER_BEAT;
+            const dbl = (arr) => {
+                if (!arr) return arr;
+                if (arr.length >= stepsPerPage * 2) return arr;
+                return [...arr.slice(0, stepsPerPage), ...arr.slice(0, stepsPerPage)];
+            };
+            for (let i = 0; i < CITY_DROPS.length; i++) {
+                const fac = CITY_DROPS[i];
+                const timbreName = fac.timbre;
+                const kbBundle = buildCityTextureLine(baseRhythmInfo, timbreName, inheritedChordProgression);
+                const kb = createCitySynth(timbreName);
+                toneDrops.push({
+                    x: worldWidth * fac.xFrac,
+                    y: worldHeight * fac.yFrac,
+                    pattern: dbl(kbBundle.pattern),
+                    velocityPattern: null,
+                    proximityVol: -100,
+                    isHovered: false,
+                    overlapAlpha: 0,
+                    instrument: "keyboard",
+                    keyboardSynth: kb.synth,
+                    keyboardEffects: kb.effects,
+                    keyboardNotes: dbl(kbBundle.notes),
+                    keyboardAttacks: dbl(kbBundle.attacks),
+                    keyboardDurations: dbl(kbBundle.durations),
+                    keyboardSustainType: dbl(kbBundle.sustainType),
+                    partTimbre: timbreName,
+                    activityId: fac.id,
+                    activityName: fac.name,
+                    activityNameEn: fac.nameEn,
+                    dropColor: fac.color,
+                    activityLabels: fac.labels,
+                    ripples: [],
+                    cityTexture: true
+                });
+            }
+            primeToneDrops();
+        }
+
+        function startCityPhase() {
+            currentScene = SCENE.CITY;
+            isTopDownScene = true;
+            worldWidth = Math.max(width * 1.4, 1100);
+            worldHeight = Math.max(height * 2.6, 1500);
+            baby = new Child(babyColorScheme);
+            baby.isTopDown = true;
+            baby.x = worldWidth * 0.50;
+            baby.y = worldHeight * 0.22;
+
+            // Family followers carry-over from THIRTIES
+            if (thirtiesHasMarriage && thirtiesSpouse) {
+                thirtiesSpouse.isTopDown = true;
+                thirtiesSpouse.x = baby.x - 40;
+                thirtiesSpouse.y = baby.y;
+            }
+            if (thirtiesHasMarriage && thirtiesKid) {
+                thirtiesKid.x = thirtiesSpouse ? thirtiesSpouse.x - 35 : baby.x - 70;
+                thirtiesKid.y = baby.y;
+            }
+
+            cameraX = 0;
+            topDownCameraX = Math.max(0, Math.min(baby.x - width / 2, worldWidth - width));
+            topDownCameraY = Math.max(0, Math.min(baby.y - height / 2, worldHeight - height));
+
+            initCityObstacles();
+            initCityNpcs();
+            initCityDrops();
+
+            initCarryHatLayer(); initCarrySnareLayer(); initCarryCymbalLayer();
+            initCarryBassLayer(); initCarryKeyboardLayer();
+            initCarryKeys2Layer(); initCarryLeadLayer();
+            startBaseGroove();
+
+            // Preserve 2-page pagination from THIRTIES
+            if (baseRhythmInfo) {
+                const stepsPerPage = baseRhythmInfo.beatsPerBar * baseRhythmInfo.bars * STEPS_PER_BEAT;
+                scoreHudState.pageCount = 2;
+                scoreHudState.currentPage = 0;
+                scoreHudState.stepsPerPage = stepsPerPage;
+            }
+            buildScoreHud(); updateScoreToggleUi();
+
+            orbWorldX = baby.x;
+            orbWorldY = baby.y;
+            fadeScreenTo(0, 1300);
+        }
+
+        function drawCityBackground() {
+            const wW = worldWidth, wH = worldHeight;
+            const t = Date.now() * 0.001;
+
+            // === 1. Grass base ===
+            const grassG = ctx.createLinearGradient(0, 0, 0, wH);
+            grassG.addColorStop(0, "#7ebc5a");
+            grassG.addColorStop(0.5, "#6aad48");
+            grassG.addColorStop(1, "#5a9e3c");
+            ctx.fillStyle = grassG;
+            ctx.fillRect(0, 0, wW, wH);
+
+            // === 2. Main road (horizontal, y: 0.40–0.52) ===
+            const roadTop = wH * 0.40, roadBot = wH * 0.52;
+            const roadH = roadBot - roadTop;
+            ctx.fillStyle = "#6a6a6a";
+            ctx.fillRect(0, roadTop, wW, roadH);
+            // White road shoulders
+            ctx.fillStyle = "rgba(255,255,255,0.5)";
+            ctx.fillRect(0, roadTop, wW, 3);
+            ctx.fillRect(0, roadBot - 3, wW, 3);
+            // Yellow centre dashes
+            ctx.strokeStyle = "#e8c840";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([20, 14]);
+            ctx.beginPath(); ctx.moveTo(0, roadTop + roadH / 2); ctx.lineTo(wW, roadTop + roadH / 2); ctx.stroke();
+            ctx.setLineDash([]);
+
+            // === 3. Side streets (vertical) ===
+            const sideStreets = [wW * 0.28, wW * 0.52, wW * 0.76];
+            sideStreets.forEach(sx => {
+                ctx.fillStyle = "#6a6a6a";
+                ctx.fillRect(sx - wW * 0.03, 0, wW * 0.06, wH);
+                ctx.fillStyle = "rgba(255,255,255,0.35)";
+                ctx.fillRect(sx - wW * 0.03, 0, 2, wH);
+                ctx.fillRect(sx + wW * 0.03 - 2, 0, 2, wH);
+            });
+
+            // === 4. Sidewalks ===
+            ctx.fillStyle = "#c8c0b0";
+            // Along main road
+            ctx.fillRect(0, roadTop - 12, wW, 12);
+            ctx.fillRect(0, roadBot, wW, 12);
+            // Along side streets
+            sideStreets.forEach(sx => {
+                ctx.fillRect(sx - wW * 0.03 - 10, 0, 10, wH);
+                ctx.fillRect(sx + wW * 0.03, 0, 10, wH);
+            });
+
+            // === 5. Player's house (upper centre) ===
+            const phX = wW * 0.38, phY = wH * 0.04, phW = wW * 0.24, phH = wH * 0.14;
+            // Cream wall
+            ctx.fillStyle = "#f5eed8";
+            ctx.fillRect(phX, phY + phH * 0.3, phW, phH * 0.7);
+            // Red roof (triangle)
+            ctx.fillStyle = "#cc4444";
+            ctx.beginPath();
+            ctx.moveTo(phX - 6, phY + phH * 0.3);
+            ctx.lineTo(phX + phW / 2, phY);
+            ctx.lineTo(phX + phW + 6, phY + phH * 0.3);
+            ctx.closePath(); ctx.fill();
+            // Roof ridge highlight
+            ctx.strokeStyle = "#dd5555"; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(phX + phW / 2, phY); ctx.lineTo(phX + phW + 6, phY + phH * 0.3); ctx.stroke();
+            // Windows (2)
+            ctx.fillStyle = "#a8d8ea";
+            ctx.fillRect(phX + phW * 0.15, phY + phH * 0.45, phW * 0.22, phH * 0.25);
+            ctx.fillRect(phX + phW * 0.63, phY + phH * 0.45, phW * 0.22, phH * 0.25);
+            ctx.strokeStyle = "#8a7a60"; ctx.lineWidth = 1;
+            ctx.strokeRect(phX + phW * 0.15, phY + phH * 0.45, phW * 0.22, phH * 0.25);
+            ctx.strokeRect(phX + phW * 0.63, phY + phH * 0.45, phW * 0.22, phH * 0.25);
+            // Window cross
+            [phX + phW * 0.15, phX + phW * 0.63].forEach(wx => {
+                const wy = phY + phH * 0.45, ww = phW * 0.22, whh = phH * 0.25;
+                ctx.beginPath(); ctx.moveTo(wx + ww / 2, wy); ctx.lineTo(wx + ww / 2, wy + whh); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(wx, wy + whh / 2); ctx.lineTo(wx + ww, wy + whh / 2); ctx.stroke();
+            });
+            // Door
+            ctx.fillStyle = "#8b5e3c";
+            ctx.beginPath(); ctx.roundRect(phX + phW * 0.40, phY + phH * 0.50, phW * 0.20, phH * 0.50, [4, 4, 0, 0]); ctx.fill();
+            ctx.fillStyle = "#d4a855";
+            ctx.beginPath(); ctx.arc(phX + phW * 0.55, phY + phH * 0.76, 2, 0, Math.PI * 2); ctx.fill();
+
+            // === 6. Neighbour houses (5 total) ===
+            const houses = [
+                { x: wW * 0.04, y: wH * 0.06, w: wW * 0.18, h: wH * 0.12, roof: "#5588bb", wall: "#e8e0d0" },
+                { x: wW * 0.78, y: wH * 0.06, w: wW * 0.18, h: wH * 0.12, roof: "#88aa44", wall: "#f0e8d8" },
+                { x: wW * 0.05, y: wH * 0.28, w: wW * 0.14, h: wH * 0.10, roof: "#bb7744", wall: "#f5f0e0" },
+                { x: wW * 0.82, y: wH * 0.28, w: wW * 0.14, h: wH * 0.10, roof: "#9966aa", wall: "#ede5d8" },
+                { x: wW * 0.82, y: wH * 0.60, w: wW * 0.14, h: wH * 0.10, roof: "#dd8855", wall: "#f0ead5" },
+            ];
+            houses.forEach(h => {
+                ctx.fillStyle = h.wall;
+                ctx.fillRect(h.x, h.y + h.h * 0.35, h.w, h.h * 0.65);
+                ctx.fillStyle = h.roof;
+                ctx.beginPath();
+                ctx.moveTo(h.x - 4, h.y + h.h * 0.35);
+                ctx.lineTo(h.x + h.w / 2, h.y);
+                ctx.lineTo(h.x + h.w + 4, h.y + h.h * 0.35);
+                ctx.closePath(); ctx.fill();
+                // Window
+                ctx.fillStyle = "#a8d8ea";
+                ctx.fillRect(h.x + h.w * 0.2, h.y + h.h * 0.50, h.w * 0.25, h.h * 0.22);
+                ctx.fillRect(h.x + h.w * 0.55, h.y + h.h * 0.50, h.w * 0.25, h.h * 0.22);
+                // Door
+                ctx.fillStyle = "#7a5030";
+                ctx.beginPath(); ctx.roundRect(h.x + h.w * 0.40, h.y + h.h * 0.55, h.w * 0.20, h.h * 0.45, [3, 3, 0, 0]); ctx.fill();
+            });
+
+            // === 7. Park area (lower-left) ===
+            // Bright grass
+            ctx.fillStyle = "#8ecc60";
+            ctx.beginPath(); ctx.roundRect(wW * 0.20, wH * 0.54, wW * 0.26, wH * 0.14, 8); ctx.fill();
+            // Bench
+            const benchX = wW * 0.33, benchY = wH * 0.61;
+            ctx.fillStyle = "#8b6f47";
+            ctx.fillRect(benchX - 18, benchY - 4, 36, 8);
+            ctx.fillRect(benchX - 16, benchY + 4, 4, 8);
+            ctx.fillRect(benchX + 12, benchY + 4, 4, 8);
+            ctx.fillStyle = "#6a5535";
+            ctx.fillRect(benchX - 18, benchY - 8, 36, 4);
+            // Trees (2)
+            const drawTree = (tx, ty) => {
+                ctx.fillStyle = "#6a4a30";
+                ctx.fillRect(tx - 3, ty, 6, 16);
+                ctx.fillStyle = "#3a8a30";
+                ctx.beginPath(); ctx.arc(tx, ty - 4, 18, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = "#4a9a40";
+                ctx.beginPath(); ctx.arc(tx + 4, ty - 8, 12, 0, Math.PI * 2); ctx.fill();
+            };
+            drawTree(wW * 0.26, wH * 0.57);
+            drawTree(wW * 0.42, wH * 0.59);
+
+            // === 8. Vending machine ===
+            const vmX = wW * 0.52, vmY = wH * 0.76, vmW = wW * 0.06, vmH = wH * 0.04;
+            ctx.fillStyle = "#3366aa";
+            ctx.beginPath(); ctx.roundRect(vmX, vmY, vmW, vmH, 3); ctx.fill();
+            // Product rows
+            ctx.fillStyle = "#aaddff";
+            ctx.fillRect(vmX + vmW * 0.1, vmY + vmH * 0.12, vmW * 0.8, vmH * 0.2);
+            ctx.fillStyle = "#ffcc88";
+            ctx.fillRect(vmX + vmW * 0.1, vmY + vmH * 0.38, vmW * 0.8, vmH * 0.2);
+            ctx.fillStyle = "#ff8888";
+            ctx.fillRect(vmX + vmW * 0.1, vmY + vmH * 0.64, vmW * 0.8, vmH * 0.2);
+            // Coin slot
+            ctx.fillStyle = "#222";
+            ctx.fillRect(vmX + vmW * 0.82, vmY + vmH * 0.4, vmW * 0.08, vmH * 0.15);
+
+            // === 9. Flower bed ===
+            const fbX = wW * 0.14, fbY = wH * 0.48, fbW = wW * 0.08, fbH = wH * 0.05;
+            ctx.fillStyle = "#8b6b45";
+            ctx.beginPath(); ctx.roundRect(fbX, fbY, fbW, fbH, 4); ctx.fill();
+            // Flowers
+            const flowerColors = ["#ff6688", "#ffaa44", "#aa66dd", "#ff4466", "#ffcc22"];
+            for (let fi = 0; fi < 8; fi++) {
+                const fx = fbX + fbW * 0.1 + (fi % 4) * (fbW * 0.22);
+                const fy = fbY + fbH * 0.2 + Math.floor(fi / 4) * (fbH * 0.45);
+                // Stem
+                ctx.strokeStyle = "#3a8a30"; ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.moveTo(fx, fy + 6); ctx.lineTo(fx, fy); ctx.stroke();
+                // Petals
+                ctx.fillStyle = flowerColors[fi % flowerColors.length];
+                ctx.beginPath(); ctx.arc(fx, fy, 4, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = "#ffe066";
+                ctx.beginPath(); ctx.arc(fx, fy, 1.5, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // === 10. Parked cars (2) ===
+            const drawCar = (cx, cy, color) => {
+                const cW = wW * 0.07, cH = wH * 0.035;
+                // Body
+                ctx.fillStyle = color;
+                ctx.beginPath(); ctx.roundRect(cx, cy, cW, cH, 4); ctx.fill();
+                // Cabin (windshield)
+                ctx.fillStyle = "#aaddee";
+                ctx.fillRect(cx + cW * 0.25, cy + 2, cW * 0.5, cH * 0.5);
+                // Tires
+                ctx.fillStyle = "#333";
+                ctx.beginPath(); ctx.arc(cx + cW * 0.2, cy + cH, 4, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(cx + cW * 0.8, cy + cH, 4, 0, Math.PI * 2); ctx.fill();
+            };
+            drawCar(wW * 0.62, wH * 0.305, "#cc4444");
+            drawCar(wW * 0.62, wH * 0.365, "#4466aa");
+
+            // === 11. Street lamps (3) ===
+            const lampXs = [wW * 0.25, wW * 0.50, wW * 0.75];
+            lampXs.forEach(lx => {
+                const ly = roadTop - 14;
+                // Pole
+                ctx.fillStyle = "#555";
+                ctx.fillRect(lx - 2, ly, 4, 16);
+                // Lamp head
+                ctx.fillStyle = "#888";
+                ctx.beginPath(); ctx.roundRect(lx - 8, ly - 6, 16, 6, 2); ctx.fill();
+                // Glow
+                const glowG = ctx.createRadialGradient(lx, ly, 0, lx, ly, 30);
+                glowG.addColorStop(0, "rgba(255,255,200,0.15)");
+                glowG.addColorStop(1, "rgba(255,255,200,0)");
+                ctx.fillStyle = glowG;
+                ctx.fillRect(lx - 30, ly - 30, 60, 60);
+            });
+
+            // === 12. Clouds (decorative) ===
+            const drawCloud = (cx, cy, s) => {
+                ctx.fillStyle = "rgba(255,255,255,0.6)";
+                ctx.beginPath(); ctx.arc(cx, cy, 14 * s, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(cx - 12 * s, cy + 4 * s, 10 * s, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(cx + 14 * s, cy + 2 * s, 12 * s, 0, Math.PI * 2); ctx.fill();
+            };
+            drawCloud(wW * 0.15 + Math.sin(t * 0.2) * 10, wH * 0.02, 1.0);
+            drawCloud(wW * 0.55 + Math.sin(t * 0.15 + 1) * 12, wH * 0.01, 1.2);
+            drawCloud(wW * 0.85 + Math.sin(t * 0.18 + 2) * 8, wH * 0.03, 0.9);
+
+            // === 13. NPCs ===
+            updateCityNpcs();
+            cityNpcs.forEach(npc => drawTopDownNpc(npc, ctx));
+        }
+
+        function handleCityChoice(clickedDrop) {
+            if (!clickedDrop.activityLabels) return;
+            playTitleToneConfirmSound();
+            selectedToys.push({ id: clickedDrop.activityId, name: clickedDrop.activityName, labels: clickedDrop.activityLabels });
+            // Add Texture volume track at 50%
+            addVolumeTrack('texture');
+            if (volumeState['texture']) {
+                volumeState['texture'].volume = 50;
+                const row = volumeState['texture'].el;
+                if (row) {
+                    row.querySelector('.vol-bar-fill').style.width = '50%';
+                    row.querySelector('.vol-bar-thumb').style.left = '50%';
+                    row.querySelector('.vol-pct').textContent = '50%';
+                }
+                applyTrackVolume('texture');
+            }
         }
 
         // ======== TRAVEL PHASE (旅フェーズ) ========
@@ -11595,6 +12801,7 @@
             if (carryLeadSynth) {
                 carryLeadSynth.volume.value = -12;
             }
+            applyTrackVolume('lead');
         }
 
         function initUniversityDrops() {
@@ -11933,6 +13140,109 @@
             { id: "griddle",  name: "鉄板",    nameEn: "Griddle",  color: "hsl(15, 50%, 50%)",  labels: { focused: 4, patient: 3 },     xFrac: 0.70, yFrac: 0.10 },
             { id: "dishes",   name: "洗い物",   nameEn: "Dishes",  color: "hsl(195, 50%, 55%)", labels: { patient: 4, organized: 3 },   xFrac: 0.72, yFrac: 0.18 }
         ];
+
+        // ======== CITY PHASE (住宅街フェーズ) — timbres & drops ========
+        const CITY_TIMBRES = {
+            "city-wind-chime": { wave: "sine",     attack: 0.15,  decay: 0.3,  sustain: 0.2, release: 0.8 },
+            "city-birdsong":   { wave: "triangle", attack: 0.005, decay: 0.15, sustain: 0.0, release: 0.12, vibratoFreq: 8, vibratoDepth: 0.3 },
+            "city-footsteps":  { wave: "square",   attack: 0.001, decay: 0.04, sustain: 0.0, release: 0.02, filterType: "highpass", filterFreq: 1800 },
+            "city-fountain":   { wave: "sawtooth", attack: 0.02,  decay: 0.25, sustain: 0.1, release: 0.6,  filterType: "lowpass",  filterFreq: 1200 }
+        };
+        // City texture line builder — sparse patterns, max ~8 notes per page
+        function buildCityTextureLine(baseInfo, timbreName, chordProg) {
+            const totalSteps = baseInfo.beatsPerBar * baseInfo.bars * STEPS_PER_BEAT;
+            const barSteps = baseInfo.beatsPerBar * STEPS_PER_BEAT;
+            const S = STEPS_PER_BEAT;
+            const chordRoots = chordProg.notes.map(t => t[0].replace(/\d+$/, ''));
+            const chordThirds = chordProg.notes.map(t => t[1].replace(/\d+$/, ''));
+            const chordFifths = chordProg.notes.map(t => t[2].replace(/\d+$/, ''));
+            const events = [];
+            const add = (si, note, len) => {
+                if (si >= 0 && si < totalSteps && note) events.push({ step: si, note, len: Math.min(len, totalSteps - si) });
+            };
+            for (let bar = 0; bar < baseInfo.bars; bar++) {
+                const b = bar * barSteps;
+                const R = chordRoots[bar % chordRoots.length];
+                const T = chordThirds[bar % chordThirds.length];
+                const F = chordFifths[bar % chordFifths.length];
+                if (timbreName === "city-wind-chime") {
+                    // Long, ringing tones — 2 notes per bar
+                    if (bar % 2 === 0) {
+                        add(b, [R + "5", F + "5"], barSteps);
+                    } else {
+                        add(b + S, [T + "5"], Math.floor(barSteps * 0.7));
+                    }
+                } else if (timbreName === "city-birdsong") {
+                    // Short chirps — 2 per bar, staccato
+                    add(b + 1, [R + "6"], 2);
+                    if (baseInfo.beatsPerBar >= 3) add(b + 2 * S + 2, [F + "5"], 2);
+                } else if (timbreName === "city-footsteps") {
+                    // Crisp taps — 2 per bar, very short
+                    add(b, [R + "4"], 1);
+                    if (baseInfo.beatsPerBar >= 3) add(b + 2 * S, [T + "4"], 1);
+                } else if (timbreName === "city-fountain") {
+                    // Flowing sustained — 1-2 per bar, long release
+                    if (bar % 2 === 0) {
+                        add(b, [R + "3", F + "3"], Math.floor(barSteps * 0.8));
+                    } else {
+                        add(b + S, [T + "4"], Math.floor(barSteps * 0.6));
+                    }
+                }
+            }
+            // Convert events → step arrays
+            const pattern = new Array(totalSteps).fill(0);
+            const notes = new Array(totalSteps).fill(null);
+            const attacks = new Array(totalSteps).fill(0);
+            const durations = new Array(totalSteps).fill(null);
+            const sustainType = new Array(totalSteps).fill(null);
+            events.forEach(ev => {
+                pattern[ev.step] = 1;
+                notes[ev.step] = ev.note;
+                attacks[ev.step] = 1;
+                const stepLen = ev.len || 1;
+                durations[ev.step] = stepLen <= 1 ? "16n" : stepLen <= 2 ? "8n" : stepLen <= 4 ? "4n" : stepLen <= 8 ? "2n" : "1n";
+                sustainType[ev.step] = stepLen > 2 ? "sustain" : "staccato";
+                for (let s = 1; s < stepLen && ev.step + s < totalSteps; s++) {
+                    pattern[ev.step + s] = 1;
+                    sustainType[ev.step + s] = "held";
+                }
+            });
+            return { pattern, notes, attacks, durations, sustainType };
+        }
+        const CITY_DROPS = [
+            { id: "bench",    timbre: "city-wind-chime", name: "公園ベンチ",  nameEn: "Park Bench",   color: "hsl(140, 45%, 55%)", labels: { relaxed: 4, reflective: 3 },    xFrac: 0.35, yFrac: 0.62 },
+            { id: "corner",   timbre: "city-birdsong",   name: "街角",       nameEn: "Street Corner", color: "hsl(45, 55%, 60%)",  labels: { adventurous: 4, social: 3 },    xFrac: 0.70, yFrac: 0.45 },
+            { id: "vending",  timbre: "city-footsteps",  name: "自販機前",    nameEn: "Vending Machine", color: "hsl(210, 50%, 55%)", labels: { curious: 4, independent: 3 }, xFrac: 0.55, yFrac: 0.78 },
+            { id: "flowerbed",timbre: "city-fountain",   name: "花壇",       nameEn: "Flower Bed",   color: "hsl(330, 50%, 60%)", labels: { creative: 4, patient: 3 },       xFrac: 0.18, yFrac: 0.50 }
+        ];
+
+        function createCitySynth(timbreName) {
+            const cfg = CITY_TIMBRES[timbreName];
+            if (!cfg) return { synth: null, effects: [] };
+            const effects = [];
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: cfg.wave },
+                envelope: { attack: cfg.attack, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release }
+            });
+            synth.volume.value = -100;
+            if (cfg.filterType && cfg.vibratoFreq) {
+                const filter = new Tone.Filter({ type: cfg.filterType, frequency: cfg.filterFreq, Q: 1.5 });
+                const vibrato = new Tone.Vibrato({ frequency: cfg.vibratoFreq, depth: cfg.vibratoDepth });
+                effects.push(filter, vibrato);
+                synth.chain(filter, vibrato, Tone.Destination);
+            } else if (cfg.filterType) {
+                const filter = new Tone.Filter({ type: cfg.filterType, frequency: cfg.filterFreq, Q: 1.5 });
+                effects.push(filter);
+                synth.chain(filter, Tone.Destination);
+            } else if (cfg.vibratoFreq) {
+                const vibrato = new Tone.Vibrato({ frequency: cfg.vibratoFreq, depth: cfg.vibratoDepth });
+                effects.push(vibrato);
+                synth.chain(vibrato, Tone.Destination);
+            } else {
+                synth.toDestination();
+            }
+            return { synth, effects };
+        }
 
         function createPartTimeSynth(timbreName) {
             const cfg = PARTTIME_TIMBRES[timbreName];
@@ -15015,6 +16325,16 @@
                 return;
             }
 
+            // Check if the sound config is a KEYBOARD timbre name directly (e.g., travel K2: "staccato-bounce", "syncopated")
+            const kbCfg = KEYBOARD_TIMBRES[inheritedKeys2SoundConfig];
+            if (kbCfg) {
+                const kb = createKeyboardSynth(inheritedKeys2SoundConfig);
+                carryKeys2Synth = kb.synth;
+                carryKeys2Effects = kb.effects;
+                if (carryKeys2Synth) carryKeys2Synth.volume.value = -22;
+                return;
+            }
+
             // Otherwise use university facility mapping
             const styleMap = {
                 "gate": "bells", "field": "xylophone", "building": "piano-gentle",
@@ -16800,7 +18120,7 @@
         let hoveredToyHudAlpha = 0;
         let lastHoveredToy = null;
         function drawToyStatsHud() {
-            if (currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.ADULT && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL && currentScene !== SCENE.THIRTIES) {
+            if (currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.ADULT && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL && currentScene !== SCENE.THIRTIES && currentScene !== SCENE.CITY) {
                 hoveredToyHudAlpha = 0;
                 return;
             }
@@ -16808,7 +18128,7 @@
             let hovToy = null;
             toneDrops.forEach(drop => {
                 if (drop.isHovered && drop.toy) hovToy = drop.toy;
-                if (drop.isHovered && drop.activityLabels && (currentScene === SCENE.CHILD1 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.THIRTIES)) {
+                if (drop.isHovered && drop.activityLabels && (currentScene === SCENE.CHILD1 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY)) {
                     hovToy = { name: drop.activityNameEn ? `${drop.activityName} / ${drop.activityNameEn}` : drop.activityName, labels: drop.activityLabels };
                 }
             });
@@ -16934,14 +18254,14 @@
         let cumulHudAlpha = 0;
         let lastCumulToy = null;
         function drawCumulativeStatsHud() {
-            if (currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.ADULT && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL && currentScene !== SCENE.THIRTIES) {
+            if (currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.ADULT && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL && currentScene !== SCENE.THIRTIES && currentScene !== SCENE.CITY) {
                 cumulHudAlpha = 0;
                 return;
             }
             let hovToy = null;
             toneDrops.forEach(drop => {
                 if (drop.isHovered && drop.toy) hovToy = drop.toy;
-                if (drop.isHovered && drop.activityLabels && (currentScene === SCENE.CHILD1 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.THIRTIES)) {
+                if (drop.isHovered && drop.activityLabels && (currentScene === SCENE.CHILD1 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY)) {
                     hovToy = { name: drop.activityNameEn ? `${drop.activityName} / ${drop.activityNameEn}` : drop.activityName, labels: drop.activityLabels };
                 }
             });
@@ -17518,7 +18838,7 @@
         }
 
         function updateToneDropProximity() {
-            if ((currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.ADULT && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL && currentScene !== SCENE.THIRTIES) || !toneDrops.length) {
+            if ((currentScene !== SCENE.CRAWL && currentScene !== SCENE.CRAWL2 && currentScene !== SCENE.TODDLE1 && currentScene !== SCENE.CHILD1 && currentScene !== SCENE.CHILD2 && currentScene !== SCENE.ADULT && currentScene !== SCENE.UNIVERSITY && currentScene !== SCENE.PART_TIME && currentScene !== SCENE.JOB_HUNT && currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL && currentScene !== SCENE.THIRTIES && currentScene !== SCENE.CITY) || !toneDrops.length) {
                 return;
             }
 
@@ -19371,7 +20691,7 @@
                         baseGroove.kickSynth.triggerAttackRelease("C1", "8n");
                     }
                     if (
-                        (currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES) &&
+                        (currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY) &&
                         carryHatSynth &&
                         carryHatFilter &&
                         inheritedHatPattern &&
@@ -19381,7 +20701,7 @@
                         carryHatSynth.triggerAttackRelease("32n");
                     }
                     if (
-                        (currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES) &&
+                        (currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY) &&
                         carrySnareSynth &&
                         carrySnareFilter &&
                         inheritedSnarePattern &&
@@ -19395,7 +20715,7 @@
                         }
                     }
                     if (
-                        (currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES) &&
+                        (currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY) &&
                         carryCymbalSynth &&
                         inheritedCymbalPattern &&
                         inheritedCymbalPattern[step]
@@ -19405,7 +20725,7 @@
                     // Carry chord playback removed from ADULT (bass + guitar only)
                     // Carry bass playback (ADULT+: play inherited bass line)
                     if (
-                        (currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES) &&
+                        (currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY) &&
                         carryBassSynth &&
                         inheritedBassAttacks &&
                         inheritedBassAttacks[step]
@@ -19418,7 +20738,7 @@
                     }
                     // Carry keyboard playback (UNIVERSITY+: play inherited keyboard line)
                     if (
-                        (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES) &&
+                        (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY) &&
                         carryKeyboardSynth &&
                         inheritedKeyboardAttacks &&
                         inheritedKeyboardAttacks[step]
@@ -19432,7 +20752,7 @@
                     }
                     // Carry Keys2 playback (PART_TIME onwards)
                     if (
-                        (currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES) &&
+                        (currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY) &&
                         carryKeys2Synth &&
                         inheritedKeys2Attacks &&
                         inheritedKeys2Attacks[step]
@@ -19446,7 +20766,7 @@
                     }
                     // Carry Lead playback (THIRTIES)
                     if (
-                        currentScene === SCENE.THIRTIES &&
+                        (currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY) &&
                         carryLeadSynth &&
                         leadAttacks &&
                         leadAttacks[step]
@@ -19789,7 +21109,7 @@
                 orbWorldX = mouseX + cameraX;
                 orbWorldY = mouseY;
             } else if (isTopDownScene) {
-                if (currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) {
+                if (currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.CITY) {
                     updateTopDownCamera();
                     topDownOffsetX = worldWidth <= width ? (width - worldWidth) / 2 : -topDownCameraX;
                     topDownOffsetY = worldHeight <= height ? (height - worldHeight) / 2 : -topDownCameraY;
@@ -19840,6 +21160,16 @@
                         }
                     } else {
                         baby.updateTopDown(orbWorldX, orbWorldY);
+                        // CITY: family followers updateTopDown
+                        if (currentScene === SCENE.CITY) {
+                            if (thirtiesSpouse) {
+                                thirtiesSpouse.updateTopDown(baby.x - 40, baby.y);
+                            }
+                            if (thirtiesKid) {
+                                const kidTargetX = thirtiesSpouse ? thirtiesSpouse.x - 35 : baby.x - 70;
+                                thirtiesKid.updateTopDown(kidTargetX, baby.y);
+                            }
+                        }
                     }
                 }
 
@@ -19878,8 +21208,15 @@
                         drawPartTimeBackground();
                     } else if (currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) {
                         drawJobHuntBackground();
+                    } else if (currentScene === SCENE.CITY) {
+                        drawCityBackground();
                     }
                     drawToneDrops();
+                    // CITY: family followers draw
+                    if (currentScene === SCENE.CITY) {
+                        if (thirtiesKid) thirtiesKid.drawTopDown(ctx, thirtiesKid.walkCycle);
+                        if (thirtiesSpouse) thirtiesSpouse.drawTopDown(ctx, thirtiesSpouse.walkCycle);
+                    }
                     if (baby) baby.drawTopDown(ctx, baby.walkCycle);
                     ctx.restore();
                 }
@@ -19977,6 +21314,24 @@
                 if (baby) {
                     if (!isMinigameActive && !adultConfirmation.active && !travelStill.active) {
                         baby.update(orbWorldX);
+                        // THIRTIES: family followers
+                        if (currentScene === SCENE.THIRTIES && thirtiesSpouse) {
+                            thirtiesSpouse.update(baby.x - 55);
+                            thirtiesSpouse.y = baby.y;
+                        }
+                        if (currentScene === SCENE.THIRTIES && thirtiesKid) {
+                            thirtiesKid.update(thirtiesSpouse ? thirtiesSpouse.x - 45 : baby.x - 80);
+                            thirtiesKid.y = baby.y;
+                        }
+                        // THIRTIES: left-edge exit transition
+                        if (currentScene === SCENE.THIRTIES && thirtiesMelodyConfirmed
+                            && !thirtiesChoiceTransitioning && baby.x < worldWidth * 0.03) {
+                            thirtiesChoiceTransitioning = true;
+                            fadeScreenTo(1, 1400);
+                            setTimeout(() => {
+                                startCityPhase();
+                            }, 1400);
+                        }
                     }
                     if (!travelStill.active) updateCamera();
                 }
@@ -20037,7 +21392,27 @@
                     
                     envEffects.draw(ctx, cameraX);
                     drawToneDrops();
+                    // Draw order: kid (back) → spouse (middle) → baby (front)
+                    if (currentScene === SCENE.THIRTIES) {
+                        if (thirtiesKid) thirtiesKid.draw(ctx);
+                        if (thirtiesSpouse) thirtiesSpouse.draw(ctx);
+                    }
                     if (baby) baby.draw(ctx);
+                    ctx.restore();
+                }
+
+                // THIRTIES: "go outside" prompt (screen coordinates, after camera restore)
+                if (currentScene === SCENE.THIRTIES && thirtiesMelodyConfirmed) {
+                    const promptAlpha = 0.5 + 0.3 * Math.sin(Date.now() * 0.003);
+                    ctx.save();
+                    ctx.globalAlpha = promptAlpha;
+                    ctx.fillStyle = "#5a4a3a";
+                    ctx.font = "bold 1.1rem 'Zen Maru Gothic', sans-serif";
+                    ctx.textAlign = "center";
+                    ctx.fillText("← 外に出ましょう", width / 2, height * 0.28);
+                    ctx.font = "0.75rem 'Zen Maru Gothic', sans-serif";
+                    ctx.fillStyle = "#9a8a7a";
+                    ctx.fillText("Let's go outside ←", width / 2, height * 0.28 + 22);
                     ctx.restore();
                 }
 
@@ -20289,6 +21664,9 @@
                 case 'lead':
                     if (carryLeadSynth) apply(carryLeadSynth, -12);
                     break;
+                case 'texture':
+                    toneDrops.forEach(function(d) { if (d.cityTexture && d.keyboardSynth) apply(d.keyboardSynth, -22); });
+                    break;
             }
         }
 
@@ -20345,7 +21723,7 @@
         }
 
         function updateScoreToggleUi() {
-            const available = (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.THIRTIES) && !!baseRhythmInfo;
+            const available = (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY) && !!baseRhythmInfo;
             scoreToggleBtn.classList.remove('visible');
             setScoreHudVisible(available);
             // Settings button: visible only during gameplay scenes
@@ -20386,12 +21764,13 @@
             const isJobHunt2 = currentScene === SCENE.JOB_HUNT2;
             const isTravel = currentScene === SCENE.TRAVEL;
             const isThirties = currentScene === SCENE.THIRTIES;
-            const isPostAdult = isUniversity || isPartTime || isJobHunt || isJobHunt2 || isTravel || isThirties;
+            const isCity = currentScene === SCENE.CITY;
+            const isPostAdult = isUniversity || isPartTime || isJobHunt || isJobHunt2 || isTravel || isThirties || isCity;
             const rows = [];
             let chordRow = null;
 
             // Pagination support for JOB_HUNT2, TRAVEL, and THIRTIES
-            const usePagination = (isJobHunt2 || isTravel || isThirties) && scoreHudState.pageCount > 1;
+            const usePagination = (isJobHunt2 || isTravel || isThirties || isCity) && scoreHudState.pageCount > 1;
             const displayPage = scoreHudState.currentPage;
             const pageOffset = usePagination ? displayPage * scoreHudState.stepsPerPage : 0;
             const displaySteps = usePagination ? scoreHudState.stepsPerPage : null; // null = show all
@@ -20421,8 +21800,9 @@
                             sustainType: slicePage(preview.keys2SustainType || null)
                         });
                     } else {
+                        const kbLabel = preview.cityTexture ? 'Texture' : (preview.instrument === "keyboard" ? 'Keys' : (preview.activityName || 'Bass'));
                         rows.push({
-                            label: preview.instrument === "keyboard" ? 'Keys' : (preview.activityName || 'Bass'),
+                            label: kbLabel,
                             pattern: slicePage(preview.pattern),
                             styleClass: 'bass',
                             sustainType: slicePage(preview.keyboardSustainType || preview.bassSustainType || null)
@@ -20446,13 +21826,13 @@
             }
 
             // --- INHERITED ROWS LOGIC (The sounds the user already has) ---
-            if (isThirties && leadPattern) {
+            if ((isThirties || isCity) && leadPattern) {
                 rows.push({ label: 'Lead', pattern: slicePage(leadPattern), styleClass: 'lead', sustainType: slicePage(leadSustainType || null) });
             }
-            if ((isPartTime || isJobHunt || isJobHunt2 || isTravel || isThirties) && inheritedKeys2Pattern) {
+            if ((isPartTime || isJobHunt || isJobHunt2 || isTravel || isThirties || isCity) && inheritedKeys2Pattern) {
                 rows.push({ label: 'Keys2', pattern: slicePage(inheritedKeys2Pattern), styleClass: 'bass', sustainType: slicePage(inheritedKeys2SustainType || null) });
             }
-            if ((isUniversity || isPartTime || isJobHunt || isJobHunt2 || isTravel || isThirties) && inheritedKeyboardPattern) {
+            if ((isUniversity || isPartTime || isJobHunt || isJobHunt2 || isTravel || isThirties || isCity) && inheritedKeyboardPattern) {
                 rows.push({ label: 'Keys', pattern: slicePage(inheritedKeyboardPattern), styleClass: 'bass', sustainType: slicePage(inheritedKeyboardSustainType || null) });
             }
             if ((isAdult || isPostAdult) && inheritedBassPattern) {
@@ -20695,7 +22075,7 @@
             scoreMeta.textContent = `${baseRhythmInfo.beatsPerBar}/4 x ${baseRhythmInfo.bars}  |  ${Math.round(baseRhythmInfo.bpm)} BPM`;
             scoreHudState.previewDropIndex = null;
             // Reset pagination for scenes without pagination
-            if (currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL && currentScene !== SCENE.THIRTIES) {
+            if (currentScene !== SCENE.JOB_HUNT2 && currentScene !== SCENE.TRAVEL && currentScene !== SCENE.THIRTIES && currentScene !== SCENE.CITY) {
                 scoreHudState.pageCount = 1;
                 scoreHudState.currentPage = 0;
                 scoreHudState.stepsPerPage = 0;
