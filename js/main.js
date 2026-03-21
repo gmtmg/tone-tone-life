@@ -103,6 +103,8 @@
         let vocalBuffersReady = false;  // pre-render complete flag
         let finaleVerseIndex = 0, finaleLyrics = null, finaleVocalActive = false;
         let finaleStepInPattern = 0;
+        let finaleLoopCount = 0;
+        let finaleTriggered = false;
         let universityNpcs = null;
         let universityBuildingSeeds = [];
         let adultTransitionLock = false;
@@ -15415,48 +15417,350 @@
 
         // enterCityHome / exitCityHome / drawCityHomeInterior removed — home uses still window now
 
-        function triggerFinale() {
-            fadeScreenTo(1, 3000);
-            setTimeout(() => {
-                currentScene = SCENE.FINALE;
-                isTopDownScene = false;
-                // Full-width score HUD centered vertically
-                const scoreHud = document.getElementById('score-hud');
-                if (scoreHud) {
-                    scoreHud.style.position = 'fixed';
-                    scoreHud.style.bottom = '';
-                    scoreHud.style.top = '50%';
-                    scoreHud.style.left = '50%';
-                    scoreHud.style.transform = 'translate(-50%, -50%)';
-                    scoreHud.style.width = '96vw';
-                    scoreHud.style.maxWidth = '96vw';
-                }
-                buildScoreHud();
-                updateScoreToggleUi();
-                fadeScreenTo(0, 2000);
+        // ======== FINALE導入メッセージ演出 ========
 
-                // Generate lyrics from player choices
+        function getLifeCategory(labelSums) {
+            var categories = {
+                explorer:   ['curious','adventurous','independent'],
+                creator:    ['creative','expressive'],
+                connector:  ['social','optimistic'],
+                achiever:   ['study','focused','patient'],
+                challenger: ['active','resilient'],
+                thinker:    ['calm','reflective','relaxed','cautious']
+            };
+            var best = 'connector', bestScore = -Infinity;
+            Object.entries(categories).forEach(function([cat, labels]) {
+                var score = labels.reduce(function(s, l) { return s + (labelSums[l] || 0); }, 0);
+                if (score > bestScore) { bestScore = score; best = cat; }
+            });
+            return best;
+        }
+
+        function getAdultChoice() {
+            var adultIds = ["university","parttime","jobhunt","travel","entertainment"];
+            var found = selectedToys.find(function(t) { return adultIds.includes(t.id); });
+            return found ? found.id : "university";
+        }
+
+        function getTravelChoice() {
+            if (selectedToys.some(function(t) { return t.id === "sea_end"; })) return "sea";
+            if (selectedToys.some(function(t) { return t.id === "mtn_end"; })) return "mountain";
+            return null;
+        }
+
+        function getThirtiesRoom() {
+            var roomIds = ["kitchen","living","bedroom","kidsroom"];
+            var found = selectedToys.find(function(t) { return roomIds.includes(t.id); });
+            return found ? found.id : null;
+        }
+
+        function getCityFavorite() {
+            if (!cityTextureSlots.length) return null;
+            return cityTextureSlots[cityTextureSlots.length - 1].name || null;
+        }
+
+        var FINALE_LINE1 = {
+            explorer: {
+                university:    "教室の窓から見えた景色は、いつも遠くにあった。",
+                parttime:      "レジの向こう側に、まだ見ぬ世界を夢見ていた。",
+                jobhunt:       "面接室を出るたび、知らない自分に出会った。",
+                travel:        "地図に載らない道ばかり、選んできた。",
+                entertainment: "退屈なんてなかった。好奇心がいつも足を動かしていた。"
+            },
+            creator: {
+                university:    "ノートの片隅に描いた落書きが、いちばん正直だった。",
+                parttime:      "繰り返しの毎日の中にも、小さな美しさを見つけていた。",
+                jobhunt:       "うまく話せなくても、伝えたい何かがあった。",
+                travel:        "言葉にならないものを、ずっと探していた。",
+                entertainment: "光と音の中に、自分だけの色を見つけた。"
+            },
+            connector: {
+                university:    "キャンパスで出会った声が、今も胸に響いている。",
+                parttime:      "「いらっしゃいませ」から始まった日々が、宝物になった。",
+                jobhunt:       "緊張の中でも、相手の目をまっすぐ見ていた。",
+                travel:        "どこへ行っても、人の温もりに手を伸ばしていた。",
+                entertainment: "みんなが笑えば、それだけで十分だった。"
+            },
+            achiever: {
+                university:    "誰よりも早く図書館の席に座っていた。",
+                parttime:      "地味な仕事ほど丁寧に、誰も見てなくても。",
+                jobhunt:       "何度書き直した履歴書も、嘘はひとつもなかった。",
+                travel:        "遠くに来て初めて、歩いた距離に気づいた。",
+                entertainment: "遊びにも全力で、手を抜くのが苦手だった。"
+            },
+            challenger: {
+                university:    "講義よりも、校門の外が教室だった。",
+                parttime:      "汗も油も、勲章みたいなものだった。",
+                jobhunt:       "不採用の数だけ、拳を握り直した。",
+                travel:        "立ち止まるくらいなら、間違った道でも歩いた。",
+                entertainment: "負けたって笑えた。挑むことが生きることだった。"
+            },
+            thinker: {
+                university:    "静かな教室の片隅で、世界の輪郭を描いていた。",
+                parttime:      "黙々と手を動かす時間が、いちばん落ち着いた。",
+                jobhunt:       "自分の言葉を見つけるのに、少し時間がかかった。",
+                travel:        "ひとりで歩いた道の静けさが、答えをくれた。",
+                entertainment: "にぎやかな場所でも、心の中は静かだった。"
+            }
+        };
+
+        var FINALE_LINE2 = {
+            sea: {
+                married: "波の音を二人で聴いた、あの夕暮れを覚えている。",
+                single:  "波打ち際に残した足跡は、もう消えただろうか。"
+            },
+            mountain: {
+                married: "山の頂で並んで見た空は、どこまでも広かった。",
+                single:  "山の稜線に、答えのない問いを置いてきた。"
+            },
+            none: {
+                married: "隣にいる温もりが、何よりの景色だった。",
+                single:  "自分だけの足跡が、ここまで続いている。"
+            }
+        };
+
+        var FINALE_LINE3 = {
+            "公園ベンチ":  "ベンチに座って風を感じる時間が、贅沢だった。",
+            "街角":       "何気ない街角に、いつも新しい発見があった。",
+            "自販機前":    "自販機の灯りに、ふと足を止める夜があった。",
+            "花壇":       "花壇に咲く小さな花が、季節を教えてくれた。",
+            "カフェ":      "馴染みのカフェで、いつもの席で、窓の外を見ていた。",
+            "駅前":       "駅前の雑踏の中に、不思議と安心があった。",
+            "庭園":       "庭園の静けさに、自分の呼吸を取り戻した。",
+            "夕暮れ広場":  "夕暮れの広場で、空の色がゆっくり変わるのを見ていた。",
+            "橋":         "橋の上から見る景色は、いつも少し特別だった。",
+            "ポスト前":    "ポストの前で少し立ち止まる、そんな日々だった。",
+            "遊び場":     "子供たちの声が聞こえる場所が、好きだった。",
+            "バス停":     "バス停で風に吹かれながら、次の場所を想っていた。",
+            "_default":   "何気ない日常の一瞬が、宝石みたいに光っていた。"
+        };
+
+        var FINALE_LINE4 = {
+            explorer:   "——さあ、まだ聴いたことのない音が鳴る。",
+            creator:    "——さあ、あなたの色が歌になる。",
+            connector:  "——さあ、みんなの声がひとつになる。",
+            achiever:   "——さあ、積み上げた日々が音になる。",
+            challenger: "——さあ、あなたの鼓動が響き始める。",
+            thinker:    "——さあ、静かに、あなたの音が鳴る。"
+        };
+
+        var FINALE_LINE1_EN = {
+            explorer: {
+                university:    "The view from the classroom window always seemed so far away.",
+                parttime:      "Beyond the register, I dreamed of worlds yet unseen.",
+                jobhunt:       "Each time I left an interview, I met a stranger — myself.",
+                travel:        "I always chose the roads that weren't on any map.",
+                entertainment: "Boredom never stood a chance. Curiosity kept me moving."
+            },
+            creator: {
+                university:    "The doodles in the margins of my notebook were the most honest.",
+                parttime:      "Even in the repetition of each day, I found small beauty.",
+                jobhunt:       "Even when words failed me, I had something to say.",
+                travel:        "I kept searching for what words could never capture.",
+                entertainment: "In light and sound, I found a color all my own."
+            },
+            connector: {
+                university:    "The voices I met on campus still echo in my heart.",
+                parttime:      "Days that began with 'Welcome' became my treasure.",
+                jobhunt:       "Even through the nerves, I looked people in the eye.",
+                travel:        "Wherever I went, I reached for the warmth of others.",
+                entertainment: "When everyone smiled, that was enough."
+            },
+            achiever: {
+                university:    "I was always the first to take my seat in the library.",
+                parttime:      "The humbler the task, the more care I gave — even unseen.",
+                jobhunt:       "No matter how many rewrites, not a single lie on my resume.",
+                travel:        "Only after going far did I realize how far I'd walked.",
+                entertainment: "I gave my all even to play — cutting corners wasn't my thing."
+            },
+            challenger: {
+                university:    "The real classroom was always beyond the school gates.",
+                parttime:      "Sweat and grime were badges of honor.",
+                jobhunt:       "With every rejection, I clenched my fist tighter.",
+                travel:        "Rather than stand still, I walked even the wrong paths.",
+                entertainment: "I could laugh even in defeat. To challenge was to live."
+            },
+            thinker: {
+                university:    "In a quiet corner of the classroom, I traced the world's outline.",
+                parttime:      "The hours spent working in silence brought the most peace.",
+                jobhunt:       "Finding my own words took a little more time.",
+                travel:        "The silence of paths walked alone gave me my answers.",
+                entertainment: "Even in the noisiest places, my heart was still."
+            }
+        };
+
+        var FINALE_LINE2_EN = {
+            sea: {
+                married: "I remember that sunset, listening to the waves together.",
+                single:  "I wonder if the footprints I left at the shore have washed away."
+            },
+            mountain: {
+                married: "The sky we saw side by side from the peak stretched on forever.",
+                single:  "I left my unanswered questions on the mountain ridge."
+            },
+            none: {
+                married: "The warmth beside me was the most beautiful view of all.",
+                single:  "My footprints alone have led me all the way here."
+            }
+        };
+
+        var FINALE_LINE3_EN = {
+            "公園ベンチ":  "Sitting on a bench, feeling the breeze — that was true luxury.",
+            "街角":       "Every ordinary street corner held a new discovery.",
+            "自販機前":    "Some nights, I paused at the glow of a vending machine.",
+            "花壇":       "The small flowers in the garden told me the seasons.",
+            "カフェ":      "At my usual café, my usual seat, watching the world outside.",
+            "駅前":       "In the bustle by the station, I found a strange comfort.",
+            "庭園":       "In the garden's stillness, I found my breath again.",
+            "夕暮れ広場":  "In the evening square, I watched the sky slowly change color.",
+            "橋":         "The view from the bridge was always a little special.",
+            "ポスト前":    "Pausing by the mailbox — those were the kind of days I had.",
+            "遊び場":     "I loved the places where children's voices could be heard.",
+            "バス停":     "At the bus stop, wind in my hair, dreaming of the next place.",
+            "_default":   "Ordinary moments sparkled like jewels."
+        };
+
+        var FINALE_LINE4_EN = {
+            explorer:   "— Now, a sound you've never heard begins to play.",
+            creator:    "— Now, your colors become a song.",
+            connector:  "— Now, all our voices become one.",
+            achiever:   "— Now, all those days become music.",
+            challenger: "— Now, your heartbeat starts to resound.",
+            thinker:    "— Now, softly, your sound begins to play."
+        };
+
+        function generateFinaleMessage(labelSums) {
+            var cat = getLifeCategory(labelSums);
+            var adult = getAdultChoice();
+            var travel = getTravelChoice();
+            var married = thirtiesHasMarriage ? "married" : "single";
+            var city = getCityFavorite();
+
+            var line1 = FINALE_LINE1[cat][adult];
+            var line2 = FINALE_LINE2[travel || "none"][married];
+            var line3 = city ? (FINALE_LINE3[city] || FINALE_LINE3["_default"]) : FINALE_LINE3["_default"];
+            var line4 = FINALE_LINE4[cat];
+
+            var line1en = FINALE_LINE1_EN[cat][adult];
+            var line2en = FINALE_LINE2_EN[travel || "none"][married];
+            var line3en = city ? (FINALE_LINE3_EN[city] || FINALE_LINE3_EN["_default"]) : FINALE_LINE3_EN["_default"];
+            var line4en = FINALE_LINE4_EN[cat];
+
+            return [
+                { ja: line1, en: line1en },
+                { ja: line2, en: line2en },
+                { ja: line3, en: line3en },
+                { ja: line4, en: line4en }
+            ];
+        }
+
+        function showFinaleMessage(lines, onStart) {
+            var overlay = document.createElement('div');
+            overlay.id = 'finale-message-overlay';
+            var box = document.createElement('div');
+            box.id = 'finale-message-box';
+            lines.forEach(function(line) {
+                var wrap = document.createElement('div');
+                wrap.style.opacity = '0';
+                wrap.style.transition = 'opacity 0.8s ease';
+                wrap.className = 'finale-msg-wrap';
+                var p = document.createElement('p');
+                p.className = 'finale-msg-line';
+                p.textContent = line.ja;
+                wrap.appendChild(p);
+                var pEn = document.createElement('p');
+                pEn.className = 'finale-msg-line-en';
+                pEn.textContent = line.en;
+                wrap.appendChild(pEn);
+                box.appendChild(wrap);
+            });
+
+            var btn = document.createElement('button');
+            btn.id = 'finale-proceed-btn';
+            btn.textContent = '— 聴く / Listen —';
+            box.appendChild(btn);
+
+            overlay.appendChild(box);
+            document.body.appendChild(overlay);
+
+            var wrapEls = box.querySelectorAll('.finale-msg-wrap');
+            wrapEls.forEach(function(el, i) {
+                setTimeout(function() { el.style.opacity = '1'; }, 600 + i * 800);
+            });
+
+            // Show button after all lines visible
+            var btnDelay = 600 + lines.length * 800 + 400;
+            setTimeout(function() { btn.style.opacity = '1'; }, btnDelay);
+
+            btn.addEventListener('click', function() {
+                btn.classList.add('waiting');
+                btn.innerHTML = '<span class="finale-spinner">♪</span> 準備中…';
+                // Delegate heavy work to caller; caller calls fadeOut when ready
+                onStart(function fadeOut() {
+                    overlay.style.opacity = '0';
+                    setTimeout(function() { overlay.remove(); }, 800);
+                });
+            });
+        }
+
+        function triggerFinale() {
+            if (finaleTriggered) return;
+            finaleTriggered = true;
+
+            // Pause music immediately so fade-out is silent
+            Tone.Transport.pause();
+            fadeScreenTo(1, 3000);
+
+            setTimeout(() => {
+                // Compute labelSums for message + lyrics
                 const labelSums = {};
                 selectedToys.forEach(t => {
                     if (t.labels) Object.entries(t.labels).forEach(([k,v]) => {
                         labelSums[k] = (labelSums[k] || 0) + v;
                     });
                 });
-                if (typeof TTLLyrics !== 'undefined' && leadAttacks) {
-                    finaleLyrics = TTLLyrics.generateLyrics(
-                        leadAttacks,
-                        baseRhythmInfo.kickPattern.length,
-                        labelSums
-                    );
-                    finaleVerseIndex = 0;
-                    finaleStepInPattern = 0;
-                    initVocalSynth();
-                    if (!vocalBuffersReady) {
-                        preRenderVocalBuffers();
+                var finaleLines = generateFinaleMessage(labelSums);
+
+                currentScene = SCENE.FINALE;
+                isTopDownScene = false;
+                fadeScreenTo(0, 1500);
+
+                // No heavy processing here — all deferred to after button click
+                showFinaleMessage(finaleLines, function(fadeOut) {
+                    // Button clicked — now do heavy audio work behind spinner
+                    if (typeof TTLLyrics !== 'undefined' && leadAttacks) {
+                        finaleLyrics = TTLLyrics.generateLyrics(
+                            leadAttacks,
+                            baseRhythmInfo.kickPattern.length,
+                            labelSums
+                        );
+                        finaleVerseIndex = 0;
+                        finaleStepInPattern = 0;
+                        finaleLoopCount = 0;
+                        initVocalSynth();
+                        preRenderVocalBuffers().then(function() {
+                            fadeOut();
+                            // Score HUD centered
+                            const scoreHud = document.getElementById('score-hud');
+                            if (scoreHud) {
+                                scoreHud.style.position = 'fixed';
+                                scoreHud.style.bottom = '';
+                                scoreHud.style.top = '50%';
+                                scoreHud.style.left = '50%';
+                                scoreHud.style.transform = 'translate(-50%, -50%)';
+                                scoreHud.style.width = '96vw';
+                                scoreHud.style.maxWidth = '96vw';
+                            }
+                            buildScoreHud();
+                            updateScoreToggleUi();
+                            // 1st loop: instruments only — vocals + karaoke start at loop 2
+                            Tone.Transport.start();
+                        });
+                    } else {
+                        fadeOut();
+                        Tone.Transport.start();
                     }
-                    initKaraokeDisplay();
-                    finaleVocalActive = true;
-                }
+                });
             }, 3000);
         }
 
@@ -15711,9 +16015,6 @@
             vocalGainNode = gain;
             vocalSynth = { _sampleBased: true };
             vocalEffects = [vibrato, gain];
-            if (!vocalBuffersReady) {
-                preRenderVocalBuffers();
-            }
         }
 
         var vocalCurrentEnvGain = null; // per-source envelope GainNode
@@ -24130,6 +24431,20 @@
                         }
                         if (drop.isHovered) drop.ripples.push({ t: 0, accent: isOpenAccent ? 1 : 0.7 });
                     });
+
+                    // Activate vocals at the start of the 2nd loop
+                    if (currentScene === SCENE.FINALE && !finaleVocalActive && finaleLyrics) {
+                        const patLen = baseRhythmInfo.kickPattern.length;
+                        if ((step + 1) % patLen === 0) {
+                            finaleLoopCount++;
+                            if (finaleLoopCount >= 1) {
+                                finaleVocalActive = true;
+                                finaleVerseIndex = 0;
+                                finaleStepInPattern = 0;
+                                initKaraokeDisplay();
+                            }
+                        }
+                    }
 
                     // Verse tracking (FINALE vocal)
                     if (finaleVocalActive && finaleLyrics) {
