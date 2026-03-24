@@ -279,7 +279,7 @@
             right: 20px;
             bottom: 14px;
             z-index: 30;
-            padding: 10px 12px 12px;
+            padding: 10px 12px 6px;
             border-radius: 14px;
             background:
                 radial-gradient(circle at 18% 20%, var(--score-bg-a), transparent 58%),
@@ -294,6 +294,8 @@
             display: flex;
             flex-direction: column;
             max-height: calc(100vh - 30px);
+            min-height: 80px;
+            overflow: hidden;
         }
         #score-hud.visible {
             opacity: 1;
@@ -305,6 +307,7 @@
             align-items: baseline;
             margin-bottom: 8px;
             color: rgba(55, 64, 90, 0.88);
+            flex-shrink: 0;
         }
         #score-title {
             font-size: 0.84rem;
@@ -323,9 +326,8 @@
             --bar-span: 25%;
             display: flex;
             flex-direction: column;
-            gap: 5px;
+            gap: var(--track-gap, 8px);
             padding: 2px 0;
-            overflow-y: auto;
             overflow-x: hidden;
             min-height: 0;
         }
@@ -339,10 +341,11 @@
             color: rgba(67, 83, 118, 0.96);
         }
         .score-label {
-            font-size: 0.74rem;
+            font-size: var(--label-fs, 0.74rem);
             font-weight: 700;
             color: rgba(66, 72, 93, 0.92);
             letter-spacing: 0.05em;
+            line-height: 1;
         }
         .score-grid {
             --steps: 64;
@@ -376,7 +379,7 @@
         .score-step {
             position: relative;
             z-index: 1;
-            height: 10px;
+            height: var(--step-h, 10px);
             border-radius: 2px;
             background: var(--score-step-off);
         }
@@ -453,6 +456,12 @@
         .score-step.on.sus-mid {
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.3), inset 0 -1px 0 rgba(255,255,255,0.3);
         }
+        .score-step.finale-inactive {
+            opacity: 0.18;
+        }
+        .score-step.finale-inactive.on {
+            opacity: 0.22;
+        }
         .score-step.playhead {
             outline: 2px solid var(--score-playhead);
             box-shadow: 0 0 0 1px rgba(24, 29, 45, 0.42), 0 0 14px var(--score-playhead);
@@ -500,12 +509,12 @@
             flex: 1;
         }
         .score-bar-label {
-            height: 16px;
+            height: var(--bar-label-h, 16px);
             border-radius: 3px;
             text-align: center;
-            font-size: 0.68rem;
+            font-size: var(--label-fs, 0.68rem);
             font-weight: 700;
-            line-height: 16px;
+            line-height: var(--bar-label-h, 16px);
             color: rgba(140, 130, 160, 0.85);
             background: rgba(255,255,255,0.04);
             transition: color 150ms ease, background 150ms ease;

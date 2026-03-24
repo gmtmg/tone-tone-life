@@ -325,6 +325,11 @@
         PHRASES[_p].type = _HEAD[PHRASES[_p].kana] ? 'h' : _SENT[PHRASES[_p].kana] ? 's' : 't';
     }
 
+    // Normalize mora counts from actual kana expansion (fixes hand-counted mismatches)
+    for (var _nm = 0; _nm < PHRASES.length; _nm++) {
+        PHRASES[_nm].mora = expandToMorae(PHRASES[_nm].kana).length;
+    }
+
     // ======== VERSE_PATTERNS ========
     var VERSE_PATTERNS = {
         refrain:    { name: "refrain",    score: function(ls) { return (ls.study || 0) * 2 + (ls.organized || 0) * 1.5; } },
@@ -363,58 +368,40 @@
         return morae;
     }
 
-    function extractPhrases(leadAttacksArr, patternLen) {
-        var rawPhrases = [];
-        var currentPhrase = null;
-        for (var s = 0; s < patternLen; s++) {
-            if (leadAttacksArr && leadAttacksArr[s]) {
-                if (!currentPhrase) {
-                    currentPhrase = { startStep: s, moraCount: 0, attackSteps: [] };
-                }
-                currentPhrase.moraCount++;
-                currentPhrase.attackSteps.push(s);
-            } else {
-                if (currentPhrase) {
-                    var nextAttack = -1;
-                    for (var ns = s; ns < patternLen; ns++) {
-                        if (leadAttacksArr && leadAttacksArr[ns]) { nextAttack = ns; break; }
-                    }
-                    if (nextAttack === -1 || nextAttack - currentPhrase.attackSteps[currentPhrase.attackSteps.length - 1] >= 4) {
-                        rawPhrases.push(currentPhrase);
-                        currentPhrase = null;
-                    }
+    function extractPhrases(leadAttacksArr, patternLen, stepsPerBar) {
+        if (!stepsPerBar) stepsPerBar = 16; // default: 4 beats × 4 steps
+        // Group 2 bars into one "line" so phrases are long enough
+        // for sentence-like selections (5-10 morae instead of 3-6)
+        var barsPerLine = 2;
+        var stepsPerLine = stepsPerBar * barsPerLine;
+        var numLines = Math.ceil(patternLen / stepsPerLine);
+        var phrases = [];
+
+        for (var line = 0; line < numLines; line++) {
+            var lineStart = line * stepsPerLine;
+            var lineEnd = Math.min(lineStart + stepsPerLine, patternLen);
+            var attackSteps = [];
+
+            for (var s = lineStart; s < lineEnd; s++) {
+                if (leadAttacksArr && leadAttacksArr[s]) {
+                    attackSteps.push(s);
                 }
             }
-        }
-        if (currentPhrase) rawPhrases.push(currentPhrase);
-        if (rawPhrases.length === 0) {
-            rawPhrases.push({ startStep: 0, moraCount: 8, attackSteps: [0,2,4,6,8,10,12,14] });
-        }
 
-        // Merge short phrases: ensure each has at least MIN_MORA morae
-        var MIN_MORA = 3;
-        var merged = [];
-        for (var i = 0; i < rawPhrases.length; i++) {
-            if (merged.length > 0 && merged[merged.length - 1].moraCount < MIN_MORA) {
-                var prev = merged[merged.length - 1];
-                prev.moraCount += rawPhrases[i].moraCount;
-                prev.attackSteps = prev.attackSteps.concat(rawPhrases[i].attackSteps);
-            } else {
-                merged.push({
-                    startStep: rawPhrases[i].startStep,
-                    moraCount: rawPhrases[i].moraCount,
-                    attackSteps: rawPhrases[i].attackSteps.slice()
+            if (attackSteps.length > 0) {
+                phrases.push({
+                    startStep: attackSteps[0],
+                    moraCount: attackSteps.length,
+                    attackSteps: attackSteps
                 });
             }
         }
-        // If last phrase is still too short, merge with previous
-        if (merged.length > 1 && merged[merged.length - 1].moraCount < MIN_MORA) {
-            var last = merged.pop();
-            merged[merged.length - 1].moraCount += last.moraCount;
-            merged[merged.length - 1].attackSteps = merged[merged.length - 1].attackSteps.concat(last.attackSteps);
+
+        if (phrases.length === 0) {
+            phrases.push({ startStep: 0, moraCount: 8, attackSteps: [0,2,4,6,8,10,12,14] });
         }
 
-        return merged;
+        return phrases;
     }
 
     function selectPattern(labelSums) {
@@ -642,9 +629,9 @@
      *   parallel:   similar structure, social/empathetic emphasis
      *   bookend:    A B C A (verse 4 = verse 1 reprise)
      */
-    function generateLyrics(leadAttacksArr, patternLen, labelSums) {
+    function generateLyrics(leadAttacksArr, patternLen, labelSums, stepsPerBar) {
         var pattern = selectPattern(labelSums);
-        var phrases = extractPhrases(leadAttacksArr, patternLen);
+        var phrases = extractPhrases(leadAttacksArr, patternLen, stepsPerBar);
         var verses = [];
         var usedSet = {};
 

@@ -96,12 +96,13 @@
         let leadSustainType = null;
         let carryLeadSynth = null;
         let carryLeadEffects = [];
-        let vocalBuffers = null;        // { a: AudioBuffer, i: AudioBuffer, ... }
+        let vocalBuffers = null;        // { a: { C3: AudioBuffer, C4: AudioBuffer, C5: AudioBuffer }, ... }
         let vocalVibrato = null;        // Tone.Vibrato (live chain)
         let vocalGainNode = null;       // Tone.Volume (live chain)
         let vocalCurrentSource = null;  // playing AudioBufferSourceNode
         let vocalBuffersReady = false;  // pre-render complete flag
         let finaleVerseIndex = 0, finaleLyrics = null, finaleVocalActive = false;
+        let consonantBuffers = null;    // { stop_velar: AudioBuffer, ... }
         let finaleStepInPattern = 0;
         let finaleLoopCount = 0;
         let finaleTriggered = false;
@@ -538,6 +539,8 @@
                 thirtiesKid.x = Math.max(80, Math.min(worldWidth - 80, thirtiesKid.x));
                 if (!isTopDownScene) thirtiesKid.y = height * ROOM_WALL_RATIO;
             }
+            // Re-fit score to new viewport height
+            try { fitScoreToFrame(); } catch(e) {}
         }
         window.addEventListener('resize', resize);
         resize();
@@ -8641,7 +8644,7 @@
                 inheritedKeys2Attacks = clickedDrop.keyboardAttacks ? clickedDrop.keyboardAttacks.slice() : null;
                 inheritedKeys2Durations = clickedDrop.keyboardDurations ? clickedDrop.keyboardDurations.slice() : null;
                 inheritedKeys2SustainType = clickedDrop.keyboardSustainType ? clickedDrop.keyboardSustainType.slice() : null;
-                inheritedKeys2SoundConfig = clickedDrop.activityId || null;
+                inheritedKeys2SoundConfig = clickedDrop.timbreName || clickedDrop.activityId || null;
             }
             // Visual ripple
             const sx = clickedDrop.x - cameraX;
@@ -11881,14 +11884,39 @@
                 density -= 0.15; longNoteBias += 0.1;
             }
 
+            // Room-specific overrides: set absolute values for strong differentiation
+            var baseOctave = 4;
+            var maxDuration = 4;
+            var gridStep = 2; // 1=16th, 2=8th, 4=quarter
+
             if (roomId === 'kitchen') {
-                density += 0.15; syncopation += 0.15;
+                // Percussive & rhythmic — fast 16th-note runs, staccato, syncopated
+                density = 0.85; syncopation = 0.5;
+                longNoteBias = 0.1; leapiness = 0.35;
+                octaveRange = 1.0;
+                maxDuration = 2; gridStep = 1;
+                baseOctave = 4;
+            } else if (roomId === 'living') {
+                // Warm & flowing — moderate 8th-notes, gentle leaps, wide range
+                density = 0.5; leapiness = 0.45;
+                octaveRange = 1.8; ascendBias = 0.6;
+                longNoteBias = 0.5;
+                maxDuration = 4; gridStep = 2;
+                baseOctave = 4;
             } else if (roomId === 'bedroom') {
-                density -= 0.15; longNoteBias += 0.15;
-                leapiness -= 0.1;
+                // Lullaby — slow quarter-notes, very sparse, narrow range, low register
+                density = 0.15; longNoteBias = 0.85;
+                leapiness = 0.05; octaveRange = 1.0;
+                syncopation = 0.0; ascendBias = 0.4;
+                maxDuration = 4; gridStep = 4;
+                baseOctave = 3;
             } else if (roomId === 'kidsroom') {
-                density += 0.05; leapiness += 0.05;
-                longNoteBias += 0.05;
+                // Playful & bouncy — wide leaps, bright register, short bouncy notes
+                density = 0.7; leapiness = 0.65;
+                octaveRange = 1.2; syncopation = 0.35;
+                ascendBias = 0.65; longNoteBias = 0.15;
+                maxDuration = 2; gridStep = 2;
+                baseOctave = 5;
             }
 
             return {
@@ -11897,11 +11925,14 @@
                 leapiness: Math.max(0.0, Math.min(0.8, leapiness)),
                 syncopation: Math.max(0.0, Math.min(0.7, syncopation)),
                 ascendBias: Math.max(0.2, Math.min(0.8, ascendBias)),
-                octaveRange: Math.max(1, Math.min(2.5, octaveRange))
+                octaveRange: Math.max(0.5, Math.min(2.5, octaveRange)),
+                baseOctave: baseOctave,
+                maxDuration: maxDuration,
+                gridStep: gridStep
             };
         }
 
-        function buildThirtiesMelody(baseInfo, chordProg, params) {
+        function buildThirtiesMelody(baseInfo, chordProg, params, motifPhrase) {
             const totalSteps = baseInfo.beatsPerBar * baseInfo.bars * STEPS_PER_BEAT;
             const barSteps = baseInfo.beatsPerBar * STEPS_PER_BEAT;
 
@@ -11936,7 +11967,7 @@
                 const R = chordRoots[bar % chordRoots.length];
                 const T = chordThirds[bar % chordThirds.length];
                 const F = chordFifths[bar % chordFifths.length];
-                const baseOct = 4;
+                const baseOct = params.baseOctave || 4;
                 const lo = Math.max(3, Math.round(baseOct - params.octaveRange / 2));
                 const hi = Math.min(6, Math.round(baseOct + params.octaveRange / 2));
 
@@ -11958,162 +11989,134 @@
                 return { chordPool, scalePool, R, T, F, baseOct };
             };
 
-            // === Generate bar events, storing per-bar for motif reuse ===
-            const barEvents = []; // barEvents[bar] = [{relStep, note, len}, ...]
+            // === Vocal-style phrase generation (2-bar phrases with contour) ===
             let prevMidi = null;
+            const phraseSteps = barSteps * 2; // 2 bars per phrase
+            const BREATH_REST = 3; // rest steps at end of each phrase
 
-            const generateBar = (bar) => {
-                const b = bar * barSteps;
-                const { chordPool, scalePool, R, T, F, baseOct } = buildNotePool(bar);
-
-                const maxNotesPerBar = Math.floor(baseInfo.beatsPerBar * 2);
-                const notesThisBar = Math.max(1,
-                    Math.round(1 + (maxNotesPerBar - 1) * params.density));
-
-                // Rest: when density < 0.35, chance to skip entire bar
-                if (params.density < 0.35 && Math.random() < (0.4 - params.density)) {
-                    return [];
-                }
-
-                // 8th-note grid
-                const eighthGrid = [];
-                for (let s = 0; s < barSteps; s += 2) eighthGrid.push(s);
-
-                const slots = [];
-                for (let n = 0; n < notesThisBar; n++) {
-                    let step;
-                    if (Math.random() < params.syncopation) {
-                        const offbeats = eighthGrid.filter(s => s % 4 !== 0);
-                        step = offbeats[Math.floor(Math.random() * offbeats.length)];
-                    } else {
-                        const raw = Math.round(n * barSteps / notesThisBar);
-                        step = Math.round(raw / 2) * 2;
-                    }
-                    if (step < barSteps) slots.push(step);
-                }
-                slots.sort((a2, b2) => a2 - b2);
-                const uniqueSlots = [...new Set(slots)];
-
-                // Per-note rest: when density < 0.5, randomly skip some notes
-                const filteredSlots = uniqueSlots.filter(() => {
-                    if (params.density < 0.5 && Math.random() < (0.3 - params.density * 0.4)) return false;
-                    return true;
-                });
-                if (filteredSlots.length === 0 && uniqueSlots.length > 0) {
-                    filteredSlots.push(uniqueSlots[0]); // keep at least one
-                }
-
-                // Enforce minimum 3 consecutive notes per group
-                // (prevents choppy 1-2 note vocal fragments in FINALE)
-                if (filteredSlots.length > 0) {
-                    const MIN_RUN = 3;
-                    const GAP_TH = 4; // gap >= this = separate phrase groups
-                    // Group consecutive slots
-                    const noteGroups = [];
-                    let curGrp = [filteredSlots[0]];
-                    for (let gi = 1; gi < filteredSlots.length; gi++) {
-                        if (filteredSlots[gi] - curGrp[curGrp.length - 1] < GAP_TH) {
-                            curGrp.push(filteredSlots[gi]);
-                        } else {
-                            noteGroups.push(curGrp);
-                            curGrp = [filteredSlots[gi]];
-                        }
-                    }
-                    noteGroups.push(curGrp);
-
-                    // Pad short groups by adding 8th-note grid neighbors
-                    const paddedSet = new Set();
-                    for (let gi = 0; gi < noteGroups.length; gi++) {
-                        const grp = noteGroups[gi].slice();
-                        // Extend forward on 8th-note grid
-                        while (grp.length < MIN_RUN) {
-                            const nxt = grp[grp.length - 1] + 2;
-                            if (nxt < barSteps) { grp.push(nxt); }
-                            else break;
-                        }
-                        // If still short, extend backward
-                        while (grp.length < MIN_RUN) {
-                            const prv = grp[0] - 2;
-                            if (prv >= 0) { grp.unshift(prv); }
-                            else break;
-                        }
-                        grp.forEach(s => paddedSet.add(s));
-                    }
-
-                    // Rebuild filteredSlots
-                    filteredSlots.length = 0;
-                    Array.from(paddedSet).sort((a2, b2) => a2 - b2)
-                        .forEach(s => filteredSlots.push(s));
-                }
-
-                const barEvs = [];
-                filteredSlots.forEach((relStep, idx) => {
-                    const maxLen = Math.round(2 + (barSteps / 2 - 2) * params.longNoteBias);
-                    const nextStep = idx < filteredSlots.length - 1
-                        ? filteredSlots[idx + 1] : barSteps;
-                    const len = Math.max(1, Math.min(maxLen, nextStep - relStep));
-
-                    let note;
-                    const chordTones = [R + baseOct, T + baseOct, F + baseOct];
-
-                    if (prevMidi === null || Math.random() < 0.25) {
-                        // Phrase start: chord tone
-                        note = chordTones[Math.floor(Math.random() * 3)];
-                    } else if (Math.random() < params.leapiness) {
-                        // Leap: chord tone from wider range
-                        note = chordPool[Math.floor(Math.random() * chordPool.length)];
-                    } else {
-                        // Stepwise: use full scale pool for smooth passing motion
-                        const sorted = scalePool.map(n => ({
-                            note: n,
-                            midi: noteNameToMidi(n),
-                            dist: Math.abs(noteNameToMidi(n) - prevMidi)
-                        })).filter(x => x.dist > 0 && x.dist <= 4)
-                          .sort((a2, b2) => a2.dist - b2.dist);
-
-                        if (sorted.length > 0) {
-                            const ascending = sorted.filter(x => x.midi > prevMidi);
-                            const descending = sorted.filter(x => x.midi < prevMidi);
-                            if (ascending.length > 0 && Math.random() < params.ascendBias) {
-                                note = ascending[0].note;
-                            } else if (descending.length > 0) {
-                                note = descending[0].note;
-                            } else {
-                                note = sorted[0].note;
-                            }
-                        } else {
-                            note = chordTones[Math.floor(Math.random() * 3)];
-                        }
-                    }
-
-                    barEvs.push({ relStep, note, len });
-                    prevMidi = noteNameToMidi(note);
-                });
-                return barEvs;
+            // Helper: find nearest scale tone with directional preference
+            const stepwiseNote = (scalePool, fromMidi, ascending) => {
+                const candidates = scalePool.map(n => ({
+                    note: n, midi: noteNameToMidi(n)
+                })).filter(x => {
+                    const d = Math.abs(x.midi - fromMidi);
+                    return d > 0 && d <= 5;
+                }).sort((a2, b2) => Math.abs(a2.midi - fromMidi) - Math.abs(b2.midi - fromMidi));
+                if (candidates.length === 0) return null;
+                const up = candidates.filter(x => x.midi > fromMidi);
+                const down = candidates.filter(x => x.midi < fromMidi);
+                if (ascending && up.length > 0) return up[0].note;
+                if (!ascending && down.length > 0) return down[0].note;
+                return candidates[0].note;
             };
 
-            // Motif variation: transpose a motif's intervals to fit a new bar's chord
-            const varyMotif = (sourceEvs, bar) => {
-                const { chordPool, scalePool, R, baseOct } = buildNotePool(bar);
-                if (sourceEvs.length === 0) return [];
+            // Generate a 2-bar vocal phrase (bar 1 = question/ascending, bar 2 = answer/descending)
+            const generatePhrase = (startBar) => {
+                const pool1 = buildNotePool(startBar);
+                const pool2 = buildNotePool(startBar + 1);
 
-                // Anchor: start from the new bar's root
-                const newRootMidi = noteNameToMidi(R + baseOct);
+                // Note counts: wider range for room differentiation
+                const notesBar1 = Math.max(2, Math.min(8, Math.round(2 + params.density * 6)));
+                const notesBar2 = Math.max(1, Math.min(5, Math.round(1 + params.density * 4)));
+                const gs = params.gridStep || 2; // grid resolution: 1=16th, 2=8th, 4=quarter
+
+                // Bar 1 slots: quantized to grid
+                const bar1Slots = [];
+                for (let n = 0; n < notesBar1; n++) {
+                    const raw = Math.round(n * barSteps / notesBar1);
+                    let step = Math.round(raw / gs) * gs;
+                    // Occasional syncopation: shift by one grid unit
+                    if (n > 0 && Math.random() < params.syncopation && step % (gs * 2) === 0 && step + gs < barSteps) {
+                        step += gs;
+                    }
+                    step = Math.max(0, Math.min(step, barSteps - gs));
+                    if (!bar1Slots.includes(step)) bar1Slots.push(step);
+                }
+                bar1Slots.sort((a2, b2) => a2 - b2);
+
+                // Bar 2 slots: quantized to grid, leave room for breath at end
+                const usableBar2 = barSteps - BREATH_REST;
+                const bar2Slots = [];
+                for (let n = 0; n < notesBar2; n++) {
+                    const raw = Math.round(n * usableBar2 / Math.max(1, notesBar2));
+                    let step = barSteps + Math.round(raw / gs) * gs;
+                    step = Math.min(step, barSteps + usableBar2 - gs);
+                    if (!bar2Slots.includes(step)) bar2Slots.push(step);
+                }
+                bar2Slots.sort((a2, b2) => a2 - b2);
+
+                const allSlots = [...bar1Slots, ...bar2Slots];
+                const phraseEvs = [];
+
+                allSlots.forEach((relStep, idx) => {
+                    const isBar2 = relStep >= barSteps;
+                    const isLast = idx === allSlots.length - 1;
+                    const pool = isBar2 ? pool2 : pool1;
+                    const chordTones = [pool.R + pool.baseOct, pool.T + pool.baseOct, pool.F + pool.baseOct];
+
+                    // Duration: capped by room's maxDuration
+                    const maxDur = params.maxDuration || 4;
+                    let len;
+                    if (isLast) {
+                        len = Math.min(maxDur, Math.max(1, phraseSteps - BREATH_REST - relStep));
+                    } else {
+                        const nextStep = allSlots[idx + 1];
+                        const gap = nextStep - relStep;
+                        len = Math.max(1, Math.min(gap, maxDur));
+                    }
+
+                    // Pitch selection with vocal contour
+                    let note;
+                    if (isLast) {
+                        // Phrase ending: resolve to root (2/3) or 5th (1/3)
+                        note = Math.random() < 0.67
+                            ? pool.R + pool.baseOct
+                            : pool.F + pool.baseOct;
+                    } else if (prevMidi === null || idx === 0) {
+                        // Phrase start: chord tone
+                        note = chordTones[Math.floor(Math.random() * chordTones.length)];
+                    } else if (Math.random() < params.leapiness * 0.4) {
+                        // Occasional leap to chord tone (rarer than instrumental)
+                        note = chordTones[Math.floor(Math.random() * chordTones.length)];
+                    } else {
+                        // Stepwise: ascending in bar 1, descending in bar 2
+                        const goUp = !isBar2;
+                        const bias = goUp ? 0.7 + params.ascendBias * 0.2 : 0.2;
+                        const sn = stepwiseNote(pool.scalePool, prevMidi, Math.random() < bias);
+                        note = sn || chordTones[Math.floor(Math.random() * chordTones.length)];
+                    }
+
+                    phraseEvs.push({ relStep, note, len });
+                    prevMidi = noteNameToMidi(note);
+                });
+
+                return phraseEvs;
+            };
+
+            // Vary a phrase: preserve rhythm, transpose pitches to fit new chords
+            const varyPhrase = (sourceEvs, startBar) => {
+                if (!sourceEvs || sourceEvs.length === 0) return [];
+                const pool1 = buildNotePool(startBar);
+                const pool2 = buildNotePool(startBar + 1);
+
                 const srcFirstMidi = noteNameToMidi(sourceEvs[0].note);
+                const newRootMidi = noteNameToMidi(pool1.R + pool1.baseOct);
                 const transpose = newRootMidi - srcFirstMidi;
 
                 return sourceEvs.map((ev, i) => {
+                    const isBar2 = ev.relStep >= barSteps;
+                    const pool = isBar2 ? pool2 : pool1;
                     const srcMidi = noteNameToMidi(ev.note);
                     let targetMidi = srcMidi + transpose;
 
-                    // Small random variation (occasionally shift a note by 1-2 semitones)
+                    // Small random variation (30% chance)
                     if (i > 0 && Math.random() < 0.3) {
                         targetMidi += (Math.random() < 0.5 ? 1 : -1) * (Math.random() < 0.5 ? 1 : 2);
                     }
 
                     // Snap to nearest scale tone
                     let bestDist = 99, bestMidi = targetMidi;
-                    scalePool.forEach(n => {
+                    pool.scalePool.forEach(n => {
                         const m = noteNameToMidi(n);
                         const d = Math.abs(m - targetMidi);
                         if (d < bestDist) { bestDist = d; bestMidi = m; }
@@ -12121,34 +12124,35 @@
 
                     // Slight length variation
                     let newLen = ev.len;
-                    if (Math.random() < 0.25) {
-                        newLen = Math.max(1, ev.len + (Math.random() < 0.5 ? 1 : -1));
+                    if (Math.random() < 0.2) {
+                        newLen = Math.max(2, ev.len + (Math.random() < 0.5 ? 1 : -1));
                     }
 
                     return { relStep: ev.relStep, note: midiToName(bestMidi), len: newLen };
                 });
             };
 
-            // === Build all bars with motif repetition ===
-            for (let bar = 0; bar < baseInfo.bars; bar++) {
-                // Motif repetition: bar 2 → variation of bar 0, bar 3 → variation of bar 1
-                // Strength controlled by focused/patient labels (via low leapiness)
-                const motifChance = Math.max(0.3, 1.0 - params.leapiness * 1.2);
-                let evs;
-                if (bar >= 2 && barEvents[bar - 2] && barEvents[bar - 2].length > 0
-                    && Math.random() < motifChance) {
-                    evs = varyMotif(barEvents[bar - 2], bar);
-                    // Update prevMidi for continuity
-                    if (evs.length > 0) prevMidi = noteNameToMidi(evs[evs.length - 1].note);
-                } else {
-                    evs = generateBar(bar);
-                }
-                barEvents.push(evs);
+            // === Build 2-bar phrases with song structure ===
+            const numPhrases = Math.max(1, Math.floor(baseInfo.bars / 2));
+            var _phraseA = null;
 
-                // Convert relative steps to absolute and add to events
-                const b = bar * barSteps;
-                evs.forEach(ev => {
-                    add(b + ev.relStep, [ev.note], ev.len);
+            // Phrase 0: always generate fresh
+            const phrase0 = generatePhrase(0);
+            _phraseA = phrase0;
+
+            // Add phrase 0 events
+            phrase0.forEach(ev => {
+                add(ev.relStep, [ev.note], ev.len);
+            });
+
+            // Phrase 1: variation of motifPhrase (A'') or phrase 0 (A')
+            if (numPhrases >= 2) {
+                const source = motifPhrase || phrase0;
+                const phrase1 = varyPhrase(source, 2);
+                if (phrase1.length > 0) prevMidi = noteNameToMidi(phrase1[phrase1.length - 1].note);
+                const offset1 = phraseSteps;
+                phrase1.forEach(ev => {
+                    add(offset1 + ev.relStep, [ev.note], ev.len);
                 });
             }
 
@@ -12197,7 +12201,7 @@
                 }
             });
 
-            return { pattern, notes, attacks, durations, sustainType };
+            return { pattern, notes, attacks, durations, sustainType, phraseA: _phraseA };
         }
 
         function concatPages(page1, page2) {
@@ -12214,8 +12218,10 @@
             const melodies = {};
             activities.forEach(act => {
                 const params = computeMelodyParams(labelSums, inheritedKeyboardSoundConfig, act.id);
+                // Page 1: phrases A + A' (variation)
                 const page1 = buildThirtiesMelody(baseInfo, chordProg, params);
-                const page2 = buildThirtiesMelody(baseInfo, chordProg, params);
+                // Page 2: phrases B + A'' (reuse phraseA from page1 as motif)
+                const page2 = buildThirtiesMelody(baseInfo, chordProg, params, page1.phraseA);
                 melodies[act.id] = concatPages(page1, page2);
             });
             return melodies;
@@ -15709,6 +15715,10 @@
 
             // Pause music immediately so fade-out is silent
             Tone.Transport.pause();
+            if (baseGroove && baseGroove.timer) {
+                clearTimeout(baseGroove.timer);
+                baseGroove.timer = null;
+            }
             fadeScreenTo(1, 3000);
 
             setTimeout(() => {
@@ -15732,29 +15742,34 @@
                         finaleLyrics = TTLLyrics.generateLyrics(
                             leadAttacks,
                             baseRhythmInfo.kickPattern.length,
-                            labelSums
+                            labelSums,
+                            baseRhythmInfo.beatsPerBar * STEPS_PER_BEAT
                         );
                         finaleVerseIndex = 0;
                         finaleStepInPattern = 0;
                         finaleLoopCount = 0;
                         initVocalSynth();
-                        preRenderVocalBuffers().then(function() {
+                        Promise.all([preRenderVocalBuffers(), preRenderConsonantBuffers()]).then(function() {
                             fadeOut();
                             // Score HUD centered
                             const scoreHud = document.getElementById('score-hud');
                             if (scoreHud) {
                                 scoreHud.style.position = 'fixed';
                                 scoreHud.style.bottom = '';
+                                scoreHud.style.right = '';
                                 scoreHud.style.top = '50%';
                                 scoreHud.style.left = '50%';
                                 scoreHud.style.transform = 'translate(-50%, -50%)';
                                 scoreHud.style.width = '96vw';
                                 scoreHud.style.maxWidth = '96vw';
+                                scoreHud.style.maxHeight = 'calc(100vh - 40px)';
+                                scoreHud.style.paddingBottom = '0';
                             }
                             buildScoreHud();
                             updateScoreToggleUi();
-                            // 1st loop: instruments only — vocals + karaoke start at loop 2
+                            // 1st loop: gradual buildup — vocals start at loop 3
                             Tone.Transport.start();
+                            startBaseGroove();
                         });
                     } else {
                         fadeOut();
@@ -15877,18 +15892,196 @@
         // Pre-renders vowel buffers via OfflineAudioContext, pitch-shifts on playback
         let vocalSynth = null, vocalEffects = [];
 
-        // Formant data: f=[F1,F2,F3,F4], bw=bandwidths, g=gains
-        // Anti-formant notches between F1-F2 to carve spectral valleys for vowel contrast
-        var VOWEL_FORMANTS = {
-            a: { f: [800, 1200, 2800, 3500], bw: [60, 70, 100, 120], g: [1.0, 0.7, 0.25, 0.15], notch: [1000], notchQ: [3] },
-            i: { f: [270, 2300, 3000, 3700], bw: [40, 70,  90, 120], g: [0.8, 1.0, 0.4,  0.2],  notch: [1200], notchQ: [4] },
-            u: { f: [300, 1000, 2300, 3400], bw: [50, 60, 100, 120], g: [1.0, 0.5, 0.2,  0.1],  notch: [650],  notchQ: [3] },
-            e: { f: [500, 1800, 2600, 3500], bw: [50, 70, 100, 120], g: [1.0, 0.8, 0.3,  0.15], notch: [1100], notchQ: [3] },
-            o: { f: [500, 1000, 2800, 3500], bw: [50, 60, 100, 120], g: [1.0, 0.5, 0.2,  0.1],  notch: [750],  notchQ: [3] },
-            n: { f: [300,  800, 2500, 3200], bw: [40, 50,  90, 100], g: [0.7, 0.2, 0.08, 0.05], notch: [550, 1500], notchQ: [5, 4] }
+        // --- Consonant burst system ---
+        // Kana character → consonant key mapping (hiragana + katakana)
+        var KANA_CONSONANT = {
+            'か':'k','き':'k','く':'k','け':'k','こ':'k',
+            'カ':'k','キ':'k','ク':'k','ケ':'k','コ':'k',
+            'さ':'s','す':'s','せ':'s','そ':'s',
+            'サ':'s','ス':'s','セ':'s','ソ':'s',
+            'し':'sh','シ':'sh',
+            'た':'t','て':'t','と':'t',
+            'タ':'t','テ':'t','ト':'t',
+            'ち':'ch','チ':'ch',
+            'つ':'ts','ツ':'ts',
+            'な':'n','に':'n','ぬ':'n','ね':'n','の':'n',
+            'ナ':'n','ニ':'n','ヌ':'n','ネ':'n','ノ':'n',
+            'は':'h','ひ':'h','へ':'h','ほ':'h',
+            'ハ':'h','ヒ':'h','ヘ':'h','ホ':'h',
+            'ふ':'f','フ':'f',
+            'ま':'m','み':'m','む':'m','め':'m','も':'m',
+            'マ':'m','ミ':'m','ム':'m','メ':'m','モ':'m',
+            'や':'y','ゆ':'y','よ':'y',
+            'ヤ':'y','ユ':'y','ヨ':'y',
+            'ら':'r','り':'r','る':'r','れ':'r','ろ':'r',
+            'ラ':'r','リ':'r','ル':'r','レ':'r','ロ':'r',
+            'わ':'w','を':'w',
+            'ワ':'w','ヲ':'w',
+            'が':'g','ぎ':'g','ぐ':'g','げ':'g','ご':'g',
+            'ガ':'g','ギ':'g','グ':'g','ゲ':'g','ゴ':'g',
+            'ざ':'z','ず':'z','ぜ':'z','ぞ':'z',
+            'ザ':'z','ズ':'z','ゼ':'z','ゾ':'z',
+            'じ':'j','ジ':'j',
+            'だ':'d','ぢ':'d','づ':'d','で':'d','ど':'d',
+            'ダ':'d','ヂ':'d','ヅ':'d','デ':'d','ド':'d',
+            'ば':'b','び':'b','ぶ':'b','べ':'b','ぼ':'b',
+            'バ':'b','ビ':'b','ブ':'b','ベ':'b','ボ':'b',
+            'ぱ':'p','ぴ':'p','ぷ':'p','ぺ':'p','ぽ':'p',
+            'パ':'p','ピ':'p','プ':'p','ペ':'p','ポ':'p'
         };
 
-        function renderVowelBuffer(vowelKey) {
+        // Consonant key → buffer category
+        var CONSONANT_BUFFER_KEY = {
+            'k': 'stop_velar', 'g': 'stop_velar',
+            't': 'stop_alveolar', 'd': 'stop_alveolar',
+            'p': 'stop_bilabial', 'b': 'stop_bilabial',
+            's': 'sibilant', 'z': 'sibilant',
+            'sh': 'palatal', 'j': 'palatal', 'ch': 'palatal',
+            'ts': 'affricate',
+            'h': 'breathy', 'f': 'breathy',
+            'm': 'nasal', 'n': 'nasal',
+            'r': 'tap'
+        };
+
+        // Buffer category specs: duration(ms), filter type, freq, Q
+        // Use bandpass instead of highpass for sibilant/affricate to avoid hi-hat sound
+        var CONSONANT_SPECS = {
+            stop_velar:    { dur: 12, type: 'bandpass', freq: 2000, Q: 1.5, atk: 1 },
+            stop_alveolar: { dur: 12, type: 'bandpass', freq: 3200, Q: 1.2, atk: 1 },
+            stop_bilabial: { dur: 12, type: 'lowpass',  freq: 1000, Q: 1.5, atk: 1 },
+            sibilant:      { dur: 28, type: 'bandpass', freq: 4500, Q: 2.0, atk: 8 },
+            palatal:       { dur: 22, type: 'bandpass', freq: 3000, Q: 2.5, atk: 6 },
+            affricate:     { dur: 16, type: 'bandpass', freq: 3800, Q: 2.0, atk: 2 },
+            breathy:       { dur: 40, type: 'bandpass', freq: 1500, Q: 0.3, atk: 25 },
+            nasal:         { dur: 20, type: 'lowpass',  freq: 350,  Q: 2.0, atk: 5 },
+            tap:           { dur: 8,  type: 'bandpass', freq: 1800, Q: 0.7, atk: 1 }
+        };
+
+        // Per-category consonant gains (lower for hat-like categories)
+        var CONSONANT_GAIN = {
+            stop_velar: 0.18, stop_alveolar: 0.16, stop_bilabial: 0.18,
+            sibilant: 0.15, palatal: 0.14, affricate: 0.14,
+            breathy: 0.08, nasal: 0.18, tap: 0.18
+        };
+
+        // Vowel delay per category (seconds) — offsets vowel onset for CV timing
+        var CONSONANT_VOWEL_DELAY = {
+            stop_velar: 0.008, stop_alveolar: 0.008, stop_bilabial: 0.008,
+            sibilant: 0.015, palatal: 0.013, affricate: 0.010,
+            breathy: 0.016, nasal: 0.012, tap: 0.004
+        };
+
+        // Consonant locus: formant starting points by place of articulation
+        var CONSONANT_LOCUS = {
+            'k':  { f1: 200, f2: 2200 },  // velar
+            'g':  { f1: 200, f2: 2100 },
+            't':  { f1: 200, f2: 1800 },  // alveolar
+            'd':  { f1: 200, f2: 1800 },
+            'ts': { f1: 200, f2: 1900 },
+            'p':  { f1: 200, f2: 1000 },  // bilabial
+            'b':  { f1: 200, f2: 1000 },
+            'm':  { f1: 250, f2: 1000 },  // nasal (bilabial)
+            'n':  { f1: 250, f2: 1700 },  // nasal (alveolar)
+            's':  { f1: 200, f2: 1900 },  // sibilant
+            'z':  { f1: 200, f2: 1900 },
+            'sh': { f1: 200, f2: 2200 },  // palatal
+            'j':  { f1: 200, f2: 2200 },
+            'ch': { f1: 200, f2: 2200 },
+            'h':  { f1: 200, f2: 1500 },  // glottal
+            'f':  { f1: 200, f2: 1100 },  // labiodental
+            'r':  { f1: 250, f2: 1600 },  // tap (alveolar)
+            'y':  { f1: 250, f2: 2200 },  // palatal approximant
+            'w':  { f1: 300, f2: 700 }    // bilabial approximant
+        };
+
+        // Formant transition duration per consonant category (ms)
+        var FORMANT_TRANSITION_MS = {
+            stop_velar: 25, stop_alveolar: 25, stop_bilabial: 25,
+            sibilant: 35, palatal: 30, affricate: 28,
+            breathy: 30, nasal: 35, tap: 15
+        };
+
+        function renderConsonantBuffer(category) {
+            var spec = CONSONANT_SPECS[category];
+            var sampleRate = 44100;
+            var duration = spec.dur / 1000;
+            var length = Math.ceil(sampleRate * duration);
+            var offline = new OfflineAudioContext(1, length, sampleRate);
+
+            // White noise source
+            var noiseBuf = offline.createBuffer(1, length, sampleRate);
+            var noiseData = noiseBuf.getChannelData(0);
+            for (var i = 0; i < length; i++) {
+                noiseData[i] = Math.random() * 2 - 1;
+            }
+            var noiseSrc = offline.createBufferSource();
+            noiseSrc.buffer = noiseBuf;
+
+            // Filter
+            var filter = offline.createBiquadFilter();
+            filter.type = spec.type;
+            filter.frequency.value = spec.freq;
+            filter.Q.value = spec.Q;
+
+            // Envelope: per-category attack → decay to 0
+            var env = offline.createGain();
+            var attack = spec.atk / 1000;
+            env.gain.setValueAtTime(0, 0);
+            env.gain.linearRampToValueAtTime(1.0, attack);
+            env.gain.linearRampToValueAtTime(0, duration);
+
+            noiseSrc.connect(filter);
+            filter.connect(env);
+            env.connect(offline.destination);
+
+            noiseSrc.start(0);
+            noiseSrc.stop(duration);
+
+            return offline.startRendering();
+        }
+
+        function preRenderConsonantBuffers() {
+            var categories = Object.keys(CONSONANT_SPECS);
+            return Promise.all(categories.map(function(cat) { return renderConsonantBuffer(cat); }))
+                .then(function(buffers) {
+                    consonantBuffers = {};
+                    for (var i = 0; i < categories.length; i++) {
+                        consonantBuffers[categories[i]] = buffers[i];
+                    }
+                    console.log('Consonant buffers pre-rendered');
+                })
+                .catch(function(err) {
+                    console.warn('Consonant buffer pre-render failed:', err);
+                });
+        }
+
+        // Formant data: f=[F1,F2,F3,F4], bw=bandwidths, g=gains
+        // Wider bandwidths (lower Q) for natural speech-like sound
+        // Gentle notch filters for subtle spectral valleys
+        var VOWEL_FORMANTS = {
+            a: { f: [800, 1300, 2800, 3500], bw: [110,  80, 130, 150], g: [1.0, 0.85, 0.18, 0.1],  notch: [1000], notchQ: [3.0] },
+            i: { f: [310, 2300, 3000, 3700], bw: [70,   80, 120, 150], g: [0.8, 1.0,  0.25, 0.12], notch: [1200], notchQ: [3.0] },
+            u: { f: [350, 1350, 2300, 3400], bw: [90,   90, 130, 150], g: [1.0, 0.8,  0.2,  0.1],  notch: [850],  notchQ: [3.0] },
+            e: { f: [500, 1900, 2600, 3500], bw: [90,   80, 130, 150], g: [1.0, 0.9,  0.2,  0.1],  notch: [1100], notchQ: [3.0] },
+            o: { f: [500,  850, 2800, 3500], bw: [90,   70, 130, 150], g: [1.0, 0.7,  0.15, 0.08], notch: [700],  notchQ: [3.0] },
+            n: { f: [300,  800, 2500, 3200], bw: [80,   80, 120, 140], g: [0.7, 0.2,  0.06, 0.04], notch: [550, 1500], notchQ: [4, 4] }
+        };
+
+        // Per-vowel gain compensation: boost quieter vowels to match 'a'/'i'/'e' loudness
+        var VOWEL_GAIN_COMP = { a: 1.0, i: 0.9, u: 1.1, e: 0.95, o: 1.1, n: 1.8 };
+
+        // 6 pitch tiers (every tritone) to reduce max playback rate deviation
+        // from 1.41x (41% formant shift) to 1.19x (19% formant shift)
+        var VOCAL_PITCH_TIERS = [
+            { key: 'C3',  freq: 130.81 },
+            { key: 'Fs3', freq: 185.00 },
+            { key: 'C4',  freq: 261.63 },
+            { key: 'Fs4', freq: 369.99 },
+            { key: 'C5',  freq: 523.25 },
+            { key: 'Fs5', freq: 739.99 }
+        ];
+
+        function renderVowelBuffer(vowelKey, baseFreq) {
             var vf = VOWEL_FORMANTS[vowelKey];
             var sampleRate = 44100;
             var duration = 1.5;
@@ -15897,8 +16090,8 @@
 
             // Glottal pulse source via PeriodicWave
             // 1/n decay (-12dB/oct) for richer upper harmonics reaching F2-F4
-            var baseFreq = 261.63; // C4
-            var numHarmonics = 48;
+            baseFreq = baseFreq || 261.63;
+            var numHarmonics = Math.min(48, Math.floor(sampleRate * 0.5 / baseFreq) - 1);
             var real = new Float32Array(numHarmonics + 1);
             var imag = new Float32Array(numHarmonics + 1);
             real[0] = 0; imag[0] = 0;
@@ -15954,7 +16147,7 @@
             noiseBp.frequency.value = (vf.f[1] + vf.f[2]) * 0.5;
             noiseBp.Q.value = 0.8;
             var noiseGain = offline.createGain();
-            noiseGain.gain.value = vowelKey === 'n' ? 0.02 : 0.05;
+            noiseGain.gain.value = vowelKey === 'n' ? 0.008 : 0.015;
             noiseSrc.connect(noiseBp);
             noiseBp.connect(noiseGain);
             noiseGain.connect(postNotch);
@@ -15977,20 +16170,8 @@
         }
 
         function preRenderVocalBuffers() {
-            if (vocalBuffersReady) return Promise.resolve();
-            var keys = ['a', 'i', 'u', 'e', 'o', 'n'];
-            return Promise.all(keys.map(function(k) { return renderVowelBuffer(k); }))
-                .then(function(buffers) {
-                    vocalBuffers = {};
-                    for (var bi = 0; bi < keys.length; bi++) {
-                        vocalBuffers[keys[bi]] = buffers[bi];
-                    }
-                    vocalBuffersReady = true;
-                    console.log('Vocal buffers pre-rendered');
-                })
-                .catch(function(err) {
-                    console.warn('Vocal buffer pre-render failed:', err);
-                });
+            vocalBuffersReady = true;
+            return Promise.resolve();
         }
 
         var vocalInputGain = null; // native GainNode as entry point for sources
@@ -15998,7 +16179,7 @@
         function initVocalSynth() {
             disposeVocalSynth();
             var vibrato = new Tone.Vibrato({ frequency: 5.5, depth: 0.08 });
-            var gain = new Tone.Volume(-6);
+            var gain = new Tone.Volume(-14);
             vibrato.chain(gain, Tone.Destination);
 
             // Create a native GainNode as entry point for AudioBufferSourceNodes
@@ -16018,31 +16199,36 @@
         }
 
         var vocalCurrentEnvGain = null; // per-source envelope GainNode
+        var vocalCurrentNodes = null;  // all stoppable nodes for current mora
 
-        function triggerVocalMora(note, vowel, duration) {
+        function triggerVocalMora(note, vowel, duration, moraChar) {
             if (!vocalSynth) return;
             if (vowel === null) return; // silence (っ)
-            if (!vocalBuffers || !vocalInputGain) return;
-            var buf = vocalBuffers[vowel] || vocalBuffers['a'];
-            if (!buf) return;
+            if (!vocalInputGain) return;
 
+            var vf = VOWEL_FORMANTS[vowel] || VOWEL_FORMANTS['a'];
             var rawCtx = Tone.context.rawContext || Tone.context._context || Tone.context;
-            // Use Tone.now() to match Tone.js lookahead scheduling (same as lead synth)
             var now = Tone.now();
-            var fadeOut = 0.01; // 10ms fade-out to avoid click
+            var fadeOut = 0.015;
 
-            // Fade out previous source smoothly instead of abrupt stop
-            if (vocalCurrentSource && vocalCurrentEnvGain) {
+            // Fade out previous nodes smoothly
+            if (vocalCurrentNodes && vocalCurrentEnvGain) {
                 try {
                     var prevGain = vocalCurrentEnvGain;
-                    var prevSrc = vocalCurrentSource;
+                    var prevNodes = vocalCurrentNodes;
                     prevGain.gain.cancelScheduledValues(now);
                     prevGain.gain.setValueAtTime(prevGain.gain.value, now);
                     prevGain.gain.linearRampToValueAtTime(0, now + fadeOut);
-                    prevSrc.stop(now + fadeOut + 0.01);
+                    setTimeout(function() {
+                        for (var si = 0; si < prevNodes.length; si++) {
+                            try { prevNodes[si].stop(); } catch(e2){}
+                            try { prevNodes[si].disconnect(); } catch(e2){}
+                        }
+                    }, (fadeOut + 0.03) * 1000);
                 } catch(e){}
-                vocalCurrentSource = null;
+                vocalCurrentNodes = null;
                 vocalCurrentEnvGain = null;
+                vocalCurrentSource = null;
             }
 
             // Unwrap note array (leadNotes stores ["F#4"])
@@ -16050,41 +16236,199 @@
             if (!n) return;
 
             try {
-                // Clamp vocal pitch: shift up by octaves until >= C4 (261.63Hz)
-                // This keeps formants in their natural range for intelligibility
+                // --- Consonant burst ---
+                var vowelDelay = 0;
+                var cKey = null;
+                var category = null;
+                if (moraChar && consonantBuffers) {
+                    cKey = KANA_CONSONANT[moraChar];
+                    if (cKey) {
+                        category = CONSONANT_BUFFER_KEY[cKey];
+                        if (category && consonantBuffers[category]) {
+                            var cSource = rawCtx.createBufferSource();
+                            cSource.buffer = consonantBuffers[category];
+                            var cGain = rawCtx.createGain();
+                            cGain.gain.value = CONSONANT_GAIN[category] || 0.18;
+                            cSource.connect(cGain);
+                            cGain.connect(vocalInputGain);
+                            cSource.start(now);
+                            vowelDelay = CONSONANT_VOWEL_DELAY[category] || 0;
+                        }
+                    }
+                }
+
+                // Exact pitch frequency (no playback rate shifting)
                 var freq = Tone.Frequency(n).toFrequency();
-                var minFreq = 261.63; // C4 — buffer base pitch
+                var minFreq = 130.81; // C3
                 while (freq < minFreq) freq *= 2;
 
-                var source = rawCtx.createBufferSource();
-                source.buffer = buf;
-                source.playbackRate.value = freq / 261.63;
+                var vowelStart = now + vowelDelay;
+                var durSec = (typeof duration === 'string') ? Tone.Time(duration).toSeconds() : (duration || 0.25);
+                var vowelDur = durSec - vowelDelay;
+                if (vowelDur < 0.06) vowelDur = 0.06;
+                var endTime = vowelStart + vowelDur;
 
-                // Per-source envelope gain for click-free start/stop
+                var stoppableNodes = [];
+
+                // --- Glottal pulse oscillator at exact pitch ---
+                var sampleRate = rawCtx.sampleRate || 44100;
+                var numHarmonics = Math.min(48, Math.floor(sampleRate * 0.5 / freq) - 1);
+                if (numHarmonics < 1) numHarmonics = 1;
+                var real = new Float32Array(numHarmonics + 1);
+                var imag = new Float32Array(numHarmonics + 1);
+                real[0] = 0; imag[0] = 0;
+                for (var h = 1; h <= numHarmonics; h++) {
+                    real[h] = 0;
+                    imag[h] = 1.0 / Math.pow(h, 1.2);
+                }
+                var wave = rawCtx.createPeriodicWave(real, imag, { disableNormalization: false });
+                var osc = rawCtx.createOscillator();
+                osc.setPeriodicWave(wave);
+                osc.frequency.setValueAtTime(freq, vowelStart);
+                stoppableNodes.push(osc);
+
+                // --- Pitch jitter LFO (5-8Hz, depth 0.4%) ---
+                var jitterRate = 5 + Math.random() * 3;
+                var jitterDepth = freq * 0.004;
+                var jitterLfo = rawCtx.createOscillator();
+                jitterLfo.type = 'sine';
+                jitterLfo.frequency.value = jitterRate;
+                var jitterGain = rawCtx.createGain();
+                jitterGain.gain.value = jitterDepth;
+                jitterLfo.connect(jitterGain);
+                jitterGain.connect(osc.frequency);
+                stoppableNodes.push(jitterLfo);
+
+                // --- 4 formant bandpass filters (parallel) ---
+                var merger = rawCtx.createGain();
+                merger.gain.value = 1.0;
+                var formantFilters = [];
+                for (var fi = 0; fi < vf.f.length; fi++) {
+                    var bp = rawCtx.createBiquadFilter();
+                    bp.type = 'bandpass';
+                    bp.frequency.value = vf.f[fi];
+                    bp.Q.value = vf.f[fi] / vf.bw[fi];
+                    var gn = rawCtx.createGain();
+                    gn.gain.value = vf.g[fi];
+                    osc.connect(bp);
+                    bp.connect(gn);
+                    gn.connect(merger);
+                    formantFilters.push(bp);
+                }
+
+                // --- Anti-formant notch filters ---
+                var postNotch = merger;
+                if (vf.notch) {
+                    for (var ni2 = 0; ni2 < vf.notch.length; ni2++) {
+                        var notch = rawCtx.createBiquadFilter();
+                        notch.type = 'notch';
+                        notch.frequency.value = vf.notch[ni2];
+                        notch.Q.value = vf.notchQ[ni2];
+                        postNotch.connect(notch);
+                        postNotch = notch;
+                    }
+                }
+
+                // --- Shimmer LFO (7-12Hz, depth 6%) ---
+                var shimmerRate = 7 + Math.random() * 5;
+                var shimmerLfo = rawCtx.createOscillator();
+                shimmerLfo.type = 'sine';
+                shimmerLfo.frequency.value = shimmerRate;
+                var shimmerGain = rawCtx.createGain();
+                shimmerGain.gain.value = 0.06;
+                shimmerLfo.connect(shimmerGain);
+                shimmerGain.connect(merger.gain);
+                stoppableNodes.push(shimmerLfo);
+
+                // --- Breath noise through F2+F3 bands ---
+                var noiseDur = vowelDur + 0.1;
+                var noiseLen = Math.ceil(sampleRate * noiseDur);
+                var noiseBuf = rawCtx.createBuffer(1, noiseLen, sampleRate);
+                var noiseData = noiseBuf.getChannelData(0);
+                for (var ni = 0; ni < noiseLen; ni++) {
+                    noiseData[ni] = (Math.random() * 2 - 1);
+                }
+                var noiseSrc = rawCtx.createBufferSource();
+                noiseSrc.buffer = noiseBuf;
+                var noiseBp = rawCtx.createBiquadFilter();
+                noiseBp.type = 'bandpass';
+                noiseBp.frequency.value = (vf.f[1] + vf.f[2]) * 0.5;
+                noiseBp.Q.value = 0.8;
+                var noiseGn = rawCtx.createGain();
+                noiseGn.gain.value = vowel === 'n' ? 0.008 : 0.015;
+                noiseSrc.connect(noiseBp);
+                noiseBp.connect(noiseGn);
+                noiseGn.connect(postNotch);
+                stoppableNodes.push(noiseSrc);
+
+                // --- Consonant → Vowel formant transition ---
+                if (cKey && CONSONANT_LOCUS[cKey] && category) {
+                    var locus = CONSONANT_LOCUS[cKey];
+                    var transMs = (FORMANT_TRANSITION_MS[category] || 25) / 1000;
+                    if (formantFilters[0]) {
+                        formantFilters[0].frequency.setValueAtTime(locus.f1, vowelStart);
+                        formantFilters[0].frequency.linearRampToValueAtTime(vf.f[0], vowelStart + transMs);
+                    }
+                    if (formantFilters[1]) {
+                        formantFilters[1].frequency.setValueAtTime(locus.f2, vowelStart);
+                        formantFilters[1].frequency.linearRampToValueAtTime(vf.f[1], vowelStart + transMs);
+                    }
+                }
+
+                // --- Envelope with per-vowel loudness compensation ---
                 var envGain = rawCtx.createGain();
-                var fadeIn = 0.005; // 5ms fade-in (minimal for click prevention)
-                envGain.gain.setValueAtTime(0, now);
-                envGain.gain.linearRampToValueAtTime(1.0, now + fadeIn);
-
-                source.connect(envGain);
+                var vComp = VOWEL_GAIN_COMP[vowel] || 1.0;
+                // Pre-roll: start oscillators early so bandpass filters settle before gain opens
+                var preRoll = cKey ? 0 : 0.015; // 15ms pre-roll for pure vowels
+                var oscStart = vowelStart - preRoll;
+                envGain.gain.setValueAtTime(0.001, oscStart); // near-silent during pre-roll
+                if (cKey) {
+                    // Consonant+vowel: short linear attack (consonant burst provides onset)
+                    envGain.gain.setValueAtTime(0.001, vowelStart);
+                    envGain.gain.linearRampToValueAtTime(vComp, vowelStart + 0.005);
+                } else {
+                    // Pure vowel: smooth exponential rise (no plosive, but clear onset)
+                    envGain.gain.setValueAtTime(0.001, vowelStart);
+                    envGain.gain.setTargetAtTime(vComp, vowelStart, 0.008);
+                }
+                envGain.gain.setValueAtTime(vComp, endTime - 0.015);
+                envGain.gain.linearRampToValueAtTime(0, endTime);
+                // Per-vowel spectral tilt: compensate harmonic energy loss at high F2
+                var VOWEL_TILT_DB = { a: 0, i: 3, u: -1, e: 2, o: -1, n: -2 };
+                var tiltFilter = rawCtx.createBiquadFilter();
+                tiltFilter.type = 'highshelf';
+                tiltFilter.frequency.value = 1500;
+                tiltFilter.gain.value = VOWEL_TILT_DB[vowel] || 0;
+                postNotch.connect(tiltFilter);
+                tiltFilter.connect(envGain);
                 envGain.connect(vocalInputGain);
 
-                var durSec = (typeof duration === 'string') ? Tone.Time(duration).toSeconds() : (duration || 0.25);
-                var endTime = now + durSec;
-                // Fade out at end
-                envGain.gain.setValueAtTime(1.0, endTime - 0.01);
-                envGain.gain.linearRampToValueAtTime(0, endTime);
-                source.start(now);
-                source.stop(endTime + 0.02);
+                // Start all oscillators and noise (with pre-roll offset for pure vowels)
+                osc.start(oscStart);
+                osc.stop(endTime + 0.05);
+                jitterLfo.start(oscStart);
+                jitterLfo.stop(endTime + 0.05);
+                shimmerLfo.start(oscStart);
+                shimmerLfo.stop(endTime + 0.05);
+                noiseSrc.start(oscStart);
+                noiseSrc.stop(endTime + 0.05);
 
-                vocalCurrentSource = source;
+                vocalCurrentSource = osc;
                 vocalCurrentEnvGain = envGain;
+                vocalCurrentNodes = stoppableNodes;
             } catch (e) {
                 console.warn('triggerVocalMora error:', e);
             }
         }
 
         function disposeVocalSynth() {
+            if (vocalCurrentNodes) {
+                for (var i = 0; i < vocalCurrentNodes.length; i++) {
+                    try { vocalCurrentNodes[i].stop(); } catch(e){}
+                    try { vocalCurrentNodes[i].disconnect(); } catch(e){}
+                }
+                vocalCurrentNodes = null;
+            }
             if (vocalCurrentSource) { try { vocalCurrentSource.stop(); vocalCurrentSource.disconnect(); } catch(e){} vocalCurrentSource = null; }
             if (vocalCurrentEnvGain) { try { vocalCurrentEnvGain.disconnect(); } catch(e){} vocalCurrentEnvGain = null; }
             if (vocalInputGain) { try { vocalInputGain.disconnect(); } catch(e){} vocalInputGain = null; }
@@ -19820,27 +20164,26 @@
                 return;
             }
 
-            // Otherwise use university facility mapping
+            // Check if the sound config is a UNIVERSITY timbre name directly (e.g., "bells", "flute", "glass-pad")
+            const uniCfg = UNIVERSITY_TIMBRES[inheritedKeys2SoundConfig];
+            if (uniCfg) {
+                const kb = createUniversitySynth(inheritedKeys2SoundConfig);
+                carryKeys2Synth = kb.synth;
+                carryKeys2Effects = kb.effects;
+                if (carryKeys2Synth) carryKeys2Synth.volume.value = -22;
+                return;
+            }
+
+            // Otherwise use university facility mapping (legacy fallback)
             const styleMap = {
                 "gate": "bells", "field": "xylophone", "building": "piano-gentle",
                 "gym": "marimba", "art_hall": "glass-pad"
             };
             const timbreName = styleMap[inheritedKeys2SoundConfig] || "piano-gentle";
-            const cfg = UNIVERSITY_TIMBRES[timbreName] || KEYBOARD_TIMBRES[timbreName];
-            if (!cfg) return;
-            const synth = new Tone.PolySynth(Tone.Synth, {
-                oscillator: { type: cfg.wave },
-                envelope: { attack: cfg.attack, decay: cfg.decay, sustain: cfg.sustain, release: cfg.release }
-            });
-            synth.volume.value = -24;
-            if (cfg.filterType) {
-                const filter = new Tone.Filter({ type: cfg.filterType, frequency: cfg.filterFreq, Q: 1.5 });
-                carryKeys2Effects.push(filter);
-                synth.chain(filter, Tone.Destination);
-            } else {
-                synth.toDestination();
-            }
-            carryKeys2Synth = synth;
+            const kb2 = createUniversitySynth(timbreName);
+            carryKeys2Synth = kb2.synth;
+            carryKeys2Effects = kb2.effects;
+            if (carryKeys2Synth) carryKeys2Synth.volume.value = -22;
         }
 
         function drawUniversityBuildings(wallH) {
@@ -24172,11 +24515,18 @@
                 const now = performance.now();
                 while (baseGroove.nextTick <= now + 4) {
                     const step = baseGroove.step;
+                    // FINALE loop 1: gradual instrument buildup
+                    var finaleGateBar = -1; // -1 = no gating (all play)
+                    if (currentScene === SCENE.FINALE && finaleLoopCount === 0) {
+                        var _stepsPerBar = baseRhythmInfo.beatsPerBar * STEPS_PER_BEAT;
+                        finaleGateBar = Math.floor(step / _stepsPerBar);
+                    }
                     if (baseRhythmInfo.kickPattern[step]) {
                         try { baseGroove.kickSynth.triggerAttackRelease("C1", "8n"); } catch (e) { /* timing */ }
                     }
                     if (
                         (currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY || currentScene === SCENE.FINALE) &&
+                        (finaleGateBar < 0 || finaleGateBar >= 1) &&
                         carryHatSynth &&
                         carryHatFilter &&
                         inheritedHatPattern &&
@@ -24187,6 +24537,7 @@
                     }
                     if (
                         (currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY || currentScene === SCENE.FINALE) &&
+                        (finaleGateBar < 0 || finaleGateBar >= 2) &&
                         carrySnareSynth &&
                         carrySnareFilter &&
                         inheritedSnarePattern &&
@@ -24201,6 +24552,7 @@
                     }
                     if (
                         (currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY || currentScene === SCENE.FINALE) &&
+                        (finaleGateBar < 0 || finaleGateBar >= 3) &&
                         carryCymbalSynth &&
                         inheritedCymbalPattern &&
                         inheritedCymbalPattern[step]
@@ -24211,6 +24563,7 @@
                     // Carry bass playback (ADULT+: play inherited bass line)
                     if (
                         (currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY || currentScene === SCENE.FINALE) &&
+                        (finaleGateBar < 0 || finaleGateBar >= 4) &&
                         carryBassSynth &&
                         inheritedBassAttacks &&
                         inheritedBassAttacks[step]
@@ -24224,6 +24577,7 @@
                     // Carry keyboard playback (UNIVERSITY+: play inherited keyboard line)
                     if (
                         (currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY || currentScene === SCENE.FINALE) &&
+                        (finaleGateBar < 0 || finaleGateBar >= 5) &&
                         carryKeyboardSynth &&
                         inheritedKeyboardAttacks &&
                         inheritedKeyboardAttacks[step]
@@ -24238,6 +24592,7 @@
                     // Carry Keys2 playback (PART_TIME onwards)
                     if (
                         (currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.ENTERTAINMENT || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY || currentScene === SCENE.FINALE) &&
+                        (finaleGateBar < 0 || finaleGateBar >= 5) &&
                         carryKeys2Synth &&
                         inheritedKeys2Attacks &&
                         inheritedKeys2Attacks[step]
@@ -24249,9 +24604,10 @@
                             try { carryKeys2Synth.triggerAttackRelease(k2Note, k2Dur); } catch (e) { /* ignore */ }
                         }
                     }
-                    // Carry Lead playback (THIRTIES)
+                    // Carry Lead playback (THIRTIES+; FINALE: loop 2+)
                     if (
                         (currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY || currentScene === SCENE.FINALE) &&
+                        (currentScene !== SCENE.FINALE || finaleLoopCount >= 1) &&
                         carryLeadSynth &&
                         leadAttacks &&
                         leadAttacks[step]
@@ -24273,14 +24629,14 @@
                                 const lNote = leadNotes ? leadNotes[step] : null;
                                 if (lNote) {
                                     const lDur = leadDurations ? leadDurations[step] : "8n";
-                                    triggerVocalMora(lNote, moraInfo.vowel, lDur);
+                                    triggerVocalMora(lNote, moraInfo.vowel, lDur, moraInfo.char);
                                 }
                                 updateKaraokeHighlight(moraInfo.displayIndex);
                             }
                         }
                     }
                     // Carry Texture playback (CITY — accumulated texture slots)
-                    if (currentScene === SCENE.CITY || currentScene === SCENE.FINALE) {
+                    if ((currentScene === SCENE.CITY || currentScene === SCENE.FINALE) && (finaleGateBar < 0 || finaleGateBar >= 6)) {
                         cityTextureSlots.forEach((slot, si) => {
                             if (slot.synth && slot.attacks && slot.attacks[step]) {
                                 const tNote = slot.notes ? slot.notes[step] : null;
@@ -24432,12 +24788,16 @@
                         if (drop.isHovered) drop.ripples.push({ t: 0, accent: isOpenAccent ? 1 : 0.7 });
                     });
 
-                    // Activate vocals at the start of the 2nd loop
+                    // FINALE loop transitions: loop1=buildup, loop2=full+lead, loop3+=vocal
                     if (currentScene === SCENE.FINALE && !finaleVocalActive && finaleLyrics) {
                         const patLen = baseRhythmInfo.kickPattern.length;
                         if ((step + 1) % patLen === 0) {
                             finaleLoopCount++;
-                            if (finaleLoopCount >= 1) {
+                            if (finaleLoopCount >= 1 && finaleLoopCount < 2) {
+                                // Loop 2: rebuild score to remove opacity
+                                buildScoreHud();
+                            }
+                            if (finaleLoopCount >= 2) {
                                 finaleVocalActive = true;
                                 finaleVerseIndex = 0;
                                 finaleStepInPattern = 0;
@@ -25246,7 +25606,7 @@
                     break;
                 case 'vocal':
                     if (vocalSynth && vocalGainNode) {
-                        var vdb = vol === 0 ? -100 : -6 + (vol - 100) * 0.5;
+                        var vdb = vol === 0 ? -100 : -14 + (vol - 100) * 0.5;
                         vocalGainNode.volume.value = vdb;
                     }
                     break;
@@ -25478,6 +25838,21 @@
             scoreTracks.style.setProperty('--beat-span', `${beatSpan}%`);
             scoreTracks.style.setProperty('--bar-span', `${barSpan}%`);
 
+            // --- Responsive sizing: shrink steps/labels/gaps to fit viewport ---
+            var _visRows = finaleDoublePage ? (rows.length * 2) : rows.length;
+            var _fixedH = 0;
+            if (finaleDoublePage) {
+                _fixedH += 50; // 2 page labels
+                if (inheritedChordProgression) _fixedH += 40; // 2 bar-label rows
+            } else {
+                if (chordRow) _fixedH += 22;
+                if ((isChild2 || isAdult || isPostAdult) && inheritedChordProgression) _fixedH += 20;
+            }
+            if (usePagination) _fixedH += 25;
+            scoreHudState._visRows = _visRows;
+            scoreHudState._fixedH = _fixedH;
+            fitScoreToFrame();
+
             if (finaleDoublePage) {
                 // FINALE: render 2 page blocks side by side vertically
                 for (let pageIdx = 0; pageIdx < 2; pageIdx++) {
@@ -25536,6 +25911,15 @@
                             }
                             if (row.sustainType && row.sustainType[dataIdx]) {
                                 stepEl.classList.add('sus-' + row.sustainType[dataIdx]);
+                            }
+                            if (isFinale && finaleLoopCount === 0) {
+                                var activateBar = getFinaleActivateBar(row.label);
+                                var stepsPerBar = baseRhythmInfo.beatsPerBar * STEPS_PER_BEAT;
+                                var globalStep = pOffset + i;
+                                var barIdx = Math.floor(globalStep / stepsPerBar);
+                                if (barIdx < activateBar) {
+                                    stepEl.classList.add('finale-inactive');
+                                }
                             }
                             stepEls.push(stepEl);
                             gridEl.appendChild(stepEl);
@@ -25636,6 +26020,14 @@
                     if (row.sustainType && row.sustainType[i]) {
                         stepEl.classList.add('sus-' + row.sustainType[i]);
                     }
+                    if (isFinale && finaleLoopCount === 0) {
+                        var activateBar = getFinaleActivateBar(row.label);
+                        var stepsPerBar = baseRhythmInfo.beatsPerBar * STEPS_PER_BEAT;
+                        var barIdx = Math.floor(i / stepsPerBar);
+                        if (barIdx < activateBar) {
+                            stepEl.classList.add('finale-inactive');
+                        }
+                    }
                     stepEls.push(stepEl);
                     gridEl.appendChild(stepEl);
                 }
@@ -25723,8 +26115,60 @@
             }
             } // end else (non-finaleDoublePage)
 
+            // FINALE: lock score height after DOM is built (content-based, viewport-independent)
+            if (isFinale) {
+                scoreHud.style.maxHeight = 'none';
+                scoreHud.style.height = scoreHud.scrollHeight + 'px';
+            }
+
             if (baseGroove) {
                 updateScoreHudPlayhead(baseGroove.step % scoreHudState.totalSteps);
+            }
+        }
+
+        // Dynamically size score steps/gaps/labels so content always fits the frame
+        function fitScoreToFrame() {
+            if (!scoreTracks || !scoreHudState._visRows) return;
+            var isFinaleNow = currentScene === SCENE.FINALE;
+
+            // FINALE: fixed height — always use default sizes, never resize
+            if (isFinaleNow) {
+                scoreTracks.style.setProperty('--step-h', '10px');
+                scoreTracks.style.setProperty('--track-gap', '10px');
+                scoreTracks.style.setProperty('--label-fs', '0.74rem');
+                scoreTracks.style.setProperty('--bar-label-h', '16px');
+                return;
+            }
+
+            var rowCount = scoreHudState._visRows;
+            var fixedH = scoreHudState._fixedH || 0;
+            var vh = window.innerHeight;
+            var frameMaxH = Math.max(vh - 30, 80);
+            var headH = 42;   // #score-head approximate (title + margin)
+            var padH = 26;    // #score-hud padding + #score-tracks padding
+            var budget = frameMaxH - headH - padH - fixedH;
+            if (budget < 30) budget = 30;
+
+            // Default row height: label ~12px (0.74rem × 1 line-height) + gap 8 = 20px
+            var perRow = budget / rowCount;
+            if (perRow >= 20) {
+                // Fits at default sizes
+                scoreTracks.style.setProperty('--step-h', '10px');
+                scoreTracks.style.setProperty('--track-gap', '8px');
+                scoreTracks.style.setProperty('--label-fs', '0.74rem');
+                scoreTracks.style.setProperty('--bar-label-h', '16px');
+            } else {
+                // Shrink proportionally
+                var gap = Math.max(1, Math.round(perRow * 0.12));
+                var rowH = perRow - gap;
+                var step = Math.max(3, Math.min(10, Math.round(rowH)));
+                // Label font-size: keep ≤ step height so label doesn't dominate row
+                var labelFs = Math.max(6, Math.min(11.84, step));
+                var barLabelH = Math.max(8, Math.min(16, step + 2));
+                scoreTracks.style.setProperty('--step-h', step + 'px');
+                scoreTracks.style.setProperty('--track-gap', gap + 'px');
+                scoreTracks.style.setProperty('--label-fs', labelFs + 'px');
+                scoreTracks.style.setProperty('--bar-label-h', barLabelH + 'px');
             }
         }
 
@@ -25742,6 +26186,18 @@
             if (scoreHudState.previewDropIndex === nextPreview) return;
             scoreHudState.previewDropIndex = nextPreview;
             renderScoreRows(nextPreview);
+        }
+
+        function getFinaleActivateBar(label) {
+            if (label === 'Kick') return 0;
+            if (label === 'Hat') return 1;
+            if (label === 'Snare') return 2;
+            if (label === 'Cymbal') return 3;
+            if (label === 'Bass') return 4;
+            if (label === 'Keys' || label === 'Keys2') return 5;
+            if (label === 'Lead') return 8; // Loop 1 では鳴らない
+            if (label.startsWith('Texture')) return 6;
+            return 0;
         }
 
         function buildScoreHud() {
