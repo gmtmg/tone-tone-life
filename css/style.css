@@ -1034,13 +1034,58 @@
             transform: scale(0.97);
         }
 
+        /* --- CITY intro message overlay (same design as thirties) --- */
+        #city-intro-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 100;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(30, 25, 18, 0.35);
+            backdrop-filter: blur(2px);
+            transition: opacity 0.6s;
+            cursor: default;
+        }
+        #city-intro-overlay.hidden {
+            opacity: 0; pointer-events: none;
+        }
+        #city-intro {
+            background:
+                radial-gradient(circle at 30% 20%, rgba(255,230,190,0.85), rgba(255,230,190,0)),
+                radial-gradient(circle at 70% 80%, rgba(255,240,210,0.6), rgba(255,240,210,0)),
+                linear-gradient(150deg, rgba(255,252,245,0.92), rgba(255,248,235,0.7));
+            border-radius: 20px;
+            padding: 32px 40px 28px;
+            text-align: center;
+            box-shadow: 0 14px 44px rgba(80,60,30,0.22);
+            max-width: min(400px, 84vw);
+            animation: modalIn 0.6s ease-out;
+        }
+        #city-intro-btn {
+            font-family: 'Zen Maru Gothic', sans-serif;
+            font-size: 0.92rem; font-weight: 700;
+            color: #fff;
+            background: linear-gradient(135deg, #e0b870, #c89048);
+            border: none; border-radius: 24px;
+            padding: 9px 34px;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(160,100,40,0.28);
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        #city-intro-btn:hover {
+            transform: scale(1.04);
+            box-shadow: 0 6px 18px rgba(160,100,40,0.38);
+        }
+        #city-intro-btn:active {
+            transform: scale(0.97);
+        }
+
         /* --- FINALE intro message overlay --- */
         #finale-message-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             z-index: 100;
             display: flex; align-items: center; justify-content: center;
-            background: rgba(252, 250, 248, 0.97);
-            transition: opacity 0.8s ease;
+            background: rgba(252, 250, 248, 0.82);
+            opacity: 0;
+            transition: opacity 1.8s ease;
             cursor: default;
         }
         #finale-message-box {
@@ -1109,12 +1154,13 @@
             left: 50%;
             transform: translateX(-50%);
             z-index: 35;
-            padding: 12px 28px;
+            padding: 20px 28px 12px;
             border-radius: 12px;
             background: rgba(30,28,38,0.72);
             backdrop-filter: blur(6px);
             pointer-events: none;
             transition: opacity 0.6s;
+            overflow: visible;
         }
         #karaoke-display.hidden {
             opacity: 0;
@@ -1135,5 +1181,405 @@
             color: #fff;
             transform: scale(1.08);
             text-shadow: 0 0 12px rgba(255,220,160,0.8);
+        }
+        #karaoke-line ruby {
+            ruby-align: center;
+            ruby-position: over;
+        }
+        #karaoke-line rt {
+            font-size: 0.5em;
+            font-weight: 400;
+            color: rgba(255,255,255,0.5);
+            letter-spacing: 0.02em;
+            text-shadow: none;
+        }
+        #karaoke-line .mora.sung rt {
+            color: rgba(255,255,255,0.75);
+        }
+
+        /* --- あゆみ (Life Report Card) --- */
+        #ayumi-logo-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 120;
+            display: flex; align-items: flex-start; justify-content: center;
+            padding-top: 18vh;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 2s ease;
+        }
+        .ayumi-logo-text {
+            font-family: 'Zen Maru Gothic', sans-serif;
+            font-weight: 700;
+            font-size: clamp(2.4rem, 8vw, 5rem);
+            color: #5a4a3e;
+            letter-spacing: 0.06em;
+            text-shadow: 0 3px 0 rgba(255,255,255,0.7), 0 8px 20px rgba(110,88,62,0.15);
+        }
+        #ayumi-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 110;
+            background: rgba(248,245,240,0.96);
+            overflow-y: auto;
+            opacity: 0;
+            transition: opacity 1.2s ease;
+            cursor: default;
+        }
+        #ayumi-overlay.visible {
+            opacity: 1;
+        }
+        #ayumi-container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 48px 28px 80px;
+            transform: translateY(100vh);
+        }
+        .ayumi-title {
+            font-size: clamp(1.4rem, 4vw, 2rem);
+            font-weight: 700;
+            color: #5a4a3e;
+            text-align: center;
+            margin: 0 0 36px;
+            letter-spacing: 0.08em;
+        }
+        .ayumi-top-section {
+            display: flex;
+            flex-direction: row;
+            gap: 32px;
+            align-items: flex-start;
+            margin-bottom: 40px;
+        }
+        .ayumi-pentagon-wrap {
+            flex-shrink: 0;
+        }
+        #ayumi-pentagon-canvas {
+            display: block;
+            width: 280px;
+            height: 280px;
+        }
+        .ayumi-stats-row {
+            display: flex;
+            justify-content: center;
+            gap: 28px;
+            margin-bottom: 32px;
+        }
+        .ayumi-stat-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(90,74,62,0.06);
+            padding: 6px 16px;
+            border-radius: 20px;
+        }
+        .ayumi-stat-icon {
+            font-size: 1rem;
+        }
+        .ayumi-stat-label {
+            font-size: 0.72rem;
+            color: rgba(90,74,62,0.6);
+            font-weight: 500;
+        }
+        .ayumi-stat-value {
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: #5a4a3e;
+        }
+        .ayumi-labels-list {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .ayumi-label-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 3px 8px 3px 10px;
+            border-left: 3px solid #999;
+            background: rgba(255,255,255,0.5);
+            border-radius: 0 4px 4px 0;
+        }
+        .ayumi-label-name {
+            font-size: 0.74rem;
+            color: #5a4a3e;
+            font-weight: 500;
+        }
+        .ayumi-label-val {
+            font-size: 0.76rem;
+            font-weight: 700;
+            color: #5a4a3e;
+            min-width: 22px;
+            text-align: right;
+        }
+        .ayumi-timeline {
+            margin-top: 12px;
+        }
+        .ayumi-timeline h3 {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #5a4a3e;
+            margin: 0 0 18px;
+            letter-spacing: 0.08em;
+        }
+        .ayumi-phase {
+            display: flex;
+            flex-direction: row;
+            align-items: flex-start;
+            gap: 14px;
+            margin-bottom: 14px;
+        }
+        .ayumi-phase-age {
+            flex-shrink: 0;
+            width: 80px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            color: rgba(90,74,62,0.7);
+            padding-top: 4px;
+        }
+        .ayumi-phase-items {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .ayumi-item-tag {
+            display: inline-flex;
+            flex-direction: column;
+            padding: 5px 12px;
+            border-radius: 12px;
+            background: rgba(90,74,62,0.10);
+            color: #5a4a3e;
+            font-size: 0.82rem;
+            font-weight: 500;
+        }
+        .ayumi-item-desc {
+            font-size: 0.7rem;
+            font-weight: 400;
+            color: rgba(90,74,62,0.55);
+            margin-top: 1px;
+        }
+        @media (max-width: 700px) {
+            .ayumi-stats-row {
+                gap: 14px;
+            }
+            .ayumi-stat-item {
+                padding: 5px 12px;
+            }
+            .ayumi-top-section {
+                flex-direction: column;
+                align-items: center;
+            }
+            #ayumi-pentagon-canvas {
+                width: 240px;
+                height: 240px;
+            }
+            .ayumi-labels-list {
+                width: 100%;
+            }
+            .ayumi-phase {
+                flex-direction: column;
+                gap: 6px;
+            }
+            .ayumi-phase-age {
+                width: auto;
+            }
+        }
+
+        /* --- Lyrics section (Ayumi report card) --- */
+        .ayumi-lyrics {
+            margin-top: 24px;
+            padding: 16px 20px;
+            background: rgba(90,74,62,0.05);
+            border-radius: 12px;
+        }
+        .ayumi-lyrics h3 {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #5a4a3e;
+            margin: 0 0 12px;
+            letter-spacing: 0.06em;
+        }
+        .ayumi-verse {
+            font-size: 0.88rem;
+            color: rgba(90,74,62,0.75);
+            line-height: 1.7;
+            margin: 0 0 6px;
+            font-family: 'Zen Maru Gothic', sans-serif;
+        }
+
+        /* --- 歌を聴く button (Ayumi report card) --- */
+        #ayumi-listen-btn {
+            display: block;
+            margin: 32px auto 0;
+            font-family: 'Zen Maru Gothic', sans-serif;
+            font-size: 0.92rem; font-weight: 700;
+            color: #fff;
+            background: linear-gradient(135deg, #9b7ed8, #6a4db8);
+            border: none; border-radius: 24px;
+            padding: 9px 34px;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(90,60,160,0.32);
+            transition: transform 0.15s, box-shadow 0.15s, opacity 0.4s ease;
+        }
+        #ayumi-listen-btn:hover {
+            transform: scale(1.04);
+            box-shadow: 0 6px 18px rgba(90,60,160,0.42);
+        }
+        #ayumi-listen-btn:active {
+            transform: scale(0.97);
+        }
+
+        /* --- Finale Ending Screen --- */
+        #finale-ending-screen {
+            position: fixed; inset: 0;
+            z-index: 130;
+            background: rgba(248,245,240,0.98);
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0;
+            transition: opacity 1s ease;
+        }
+        #finale-ending-screen.visible {
+            opacity: 1;
+        }
+        #finale-ending-ornaments {
+            position: absolute; inset: 0; pointer-events: none;
+            opacity: 0;
+            transition: opacity 2s ease 1.5s;
+        }
+        #finale-ending-screen.visible #finale-ending-ornaments {
+            opacity: 1;
+        }
+        #finale-ending-ornaments .orb-a {
+            right: 12%; top: 15%;
+            width: 160px; height: 160px;
+        }
+        #finale-ending-ornaments .orb-b {
+            left: 10%; bottom: 18%;
+            width: 200px; height: 200px;
+        }
+        #finale-ending-content {
+            text-align: center;
+            transform: translateY(40px);
+            opacity: 0;
+            transition: transform 1.5s cubic-bezier(0.22, 1, 0.36, 1) 0.5s,
+                        opacity 1.5s ease 0.5s;
+        }
+        #finale-ending-screen.visible #finale-ending-content {
+            transform: translateY(0);
+            opacity: 1;
+        }
+        .finale-thanks-msg {
+            font-size: clamp(1.2rem, 3.5vw, 1.8rem);
+            color: #5a4a3e;
+            letter-spacing: 0.1em;
+            font-weight: 600;
+            margin: 0 0 40px;
+            font-family: 'Zen Maru Gothic', sans-serif;
+        }
+        #finale-ending-buttons {
+            display: flex; gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+            opacity: 0;
+            transition: opacity 1s ease 2.5s;
+        }
+        #finale-ending-screen.visible #finale-ending-buttons {
+            opacity: 1;
+        }
+        #finale-save-btn,
+        #finale-title-btn {
+            font-family: 'Zen Maru Gothic', sans-serif;
+            font-size: 0.92rem; font-weight: 700;
+            color: #fff;
+            border: none; border-radius: 24px;
+            padding: 10px 32px;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        #finale-save-btn {
+            background: linear-gradient(135deg, #9b7ed8, #6a4db8);
+            box-shadow: 0 4px 12px rgba(90,60,160,0.32);
+        }
+        #finale-title-btn {
+            background: linear-gradient(135deg, #d8a07e, #b8784d);
+            box-shadow: 0 4px 12px rgba(160,100,60,0.32);
+        }
+        #finale-save-btn:hover,
+        #finale-title-btn:hover {
+            transform: scale(1.04);
+        }
+        #finale-save-btn:active,
+        #finale-title-btn:active {
+            transform: scale(0.97);
+        }
+
+        /* --- Unlock Overlay (周回解放通知) --- */
+        #unlock-overlay {
+            position: fixed; inset: 0;
+            z-index: 140;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(30, 22, 16, 0.72);
+            backdrop-filter: blur(6px);
+        }
+        #unlock-card {
+            background:
+                radial-gradient(circle at 20% 20%, rgba(255, 236, 210, 0.9), rgba(255, 236, 210, 0)),
+                radial-gradient(circle at 80% 80%, rgba(255, 244, 220, 0.7), rgba(255, 244, 220, 0)),
+                linear-gradient(145deg, rgba(255,255,255,0.92), rgba(255,248,235,0.88));
+            border-radius: 24px;
+            padding: 40px 48px 36px;
+            text-align: center;
+            box-shadow: 0 20px 52px rgba(80, 60, 40, 0.3);
+            max-width: min(440px, 88vw);
+            animation: modalIn 0.5s ease-out;
+        }
+        .unlock-icon {
+            font-size: 2.6rem;
+            margin-bottom: 10px;
+        }
+        .unlock-title {
+            font-family: 'Zen Maru Gothic', sans-serif;
+            font-size: 1.3rem; font-weight: 700;
+            color: #5a4a3e;
+            margin: 0 0 14px;
+        }
+        .unlock-body {
+            font-family: 'Zen Maru Gothic', sans-serif;
+            font-size: 0.95rem; font-weight: 500;
+            color: #6a5a4e;
+            margin: 0 0 8px;
+            line-height: 1.6;
+        }
+        .unlock-body-en {
+            font-family: 'Zen Maru Gothic', sans-serif;
+            font-size: 0.82rem; font-weight: 400;
+            color: #8a7a6e;
+            margin: 0 0 18px;
+            line-height: 1.5;
+        }
+        .unlock-img {
+            display: block;
+            max-width: 320px;
+            width: 80%;
+            margin: 0 auto 18px;
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(80, 60, 40, 0.18);
+        }
+        #unlock-ok-btn {
+            font-family: 'Zen Maru Gothic', sans-serif;
+            font-size: 0.95rem; font-weight: 700;
+            color: #fff;
+            border: none; border-radius: 24px;
+            padding: 10px 40px;
+            background: linear-gradient(135deg, #d8a07e, #b8784d);
+            box-shadow: 0 4px 14px rgba(160, 100, 60, 0.32);
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        #unlock-ok-btn:hover {
+            transform: scale(1.04);
+        }
+        #unlock-ok-btn:active {
+            transform: scale(0.97);
         }
 

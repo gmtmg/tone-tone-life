@@ -102,10 +102,22 @@
         let vocalCurrentSource = null;  // playing AudioBufferSourceNode
         let vocalBuffersReady = false;  // pre-render complete flag
         let finaleVerseIndex = 0, finaleLyrics = null, finaleVocalActive = false;
+        let finaleRecorder = null, finaleRecordedBlob = null;
+        let finaleEndingTriggered = false;
+        let playCount = parseInt(localStorage.getItem('ttl_playCount') || '0', 10) || 0;
         let consonantBuffers = null;    // { stop_velar: AudioBuffer, ... }
         let finaleStepInPattern = 0;
         let finaleLoopCount = 0;
         let finaleTriggered = false;
+        let ayumiTriggered = false;
+        let finaleWalkToCenter = false;
+        let finaleLabelSums = null;
+        let finaleMusicStarted = false;
+        let finaleBgDarkness = 0;
+        let finaleDarkTarget = 0;
+        let gameStartTime = 0;
+        let totalWalkSteps = 0;
+        let prevWalkCycle = null;
         let universityNpcs = null;
         let universityBuildingSeeds = [];
         let adultTransitionLock = false;
@@ -138,6 +150,24 @@
             organized:   { ja: "整理力",   en: "Organized" },
             empathetic:  { ja: "共感力",   en: "Empathetic" },
             lucky:       { ja: "運",       en: "Lucky" },
+            relaxed:     { ja: "穏やか",   en: "Relaxed" },
+            reflective:  { ja: "内省的",   en: "Reflective" },
+            independent: { ja: "自立心",   en: "Independent" },
+        };
+        const PENTAGON_AXES = [
+            { key: 'health',        ja: '健康',    en: 'Health',        color: 'hsl(140,50%,55%)', labels: ['active','resilient','adventurous'] },
+            { key: 'wealth',        ja: '資産',    en: 'Wealth',        color: 'hsl(45,60%,55%)',  labels: ['focused','organized','study'] },
+            { key: 'happiness',     ja: '幸福',    en: 'Happiness',     color: 'hsl(35,70%,60%)',  labels: ['optimistic','creative','expressive'] },
+            { key: 'knowledge',     ja: '知識',    en: 'Knowledge',     color: 'hsl(210,55%,58%)', labels: ['curious','cautious'] },
+            { key: 'relationships', ja: '人間関係', en: 'Relationships', color: 'hsl(330,45%,60%)', labels: ['social','empathetic','patient'] },
+        ];
+        const LABEL_PRIMARY_AXIS = {
+            active:'health', resilient:'health', adventurous:'health',
+            focused:'wealth', organized:'wealth', independent:'wealth',
+            study:'knowledge', curious:'knowledge', cautious:'knowledge', reflective:'knowledge',
+            optimistic:'happiness', creative:'happiness', expressive:'happiness',
+            calm:'happiness', lucky:'happiness', relaxed:'happiness',
+            social:'relationships', empathetic:'relationships', patient:'relationships',
         };
         function labelDisplay(key) {
             const n = LABEL_NAMES[key];
@@ -290,6 +320,7 @@
         };
 
         let titleBgmPlayer = null;
+        let ayumiBgmPlayer = null;
 
         // Volume management
         const volumeState = {};  // { trackId: { volume: 0-100, muted: false, el: DOMrow } }
@@ -319,62 +350,62 @@
 
         // 12 facility types for CHILD1 scene
         const CHILD_FACILITIES = [
-            { id: "kindergarten", name: "ようちえん", chordMode: "major",
+            { id: "kindergarten", name: "ようちえん", nameEn: "Kindergarten", chordMode: "major",
               color: "hsl(210, 60%, 65%)", oscType: "triangle4",
               affinity: { social: 3, optimistic: 2, expressive: 1 },
               buildingColor: "#f5e6b8", roofColor: "#d45b5b",
               sizeW: 1.3, sizeH: 0.55 },
-            { id: "home", name: "おうち", chordMode: "minor",
+            { id: "home", name: "おうち", nameEn: "Home", chordMode: "minor",
               color: "hsl(25, 70%, 62%)", oscType: "sine4",
               affinity: { cautious: 3, patient: 2, empathetic: 1 },
               buildingColor: "#e8d8c4", roofColor: "#6a5040",
               sizeW: 0.85, sizeH: 0.48 },
-            { id: "atelier", name: "アトリエ", chordMode: "major",
+            { id: "atelier", name: "アトリエ", nameEn: "Atelier", chordMode: "major",
               color: "hsl(320, 55%, 65%)", oscType: "triangle4",
               affinity: { creative: 3, expressive: 2, curious: 1 },
               buildingColor: "#f0dce8", roofColor: "#b86090",
               sizeW: 0.9, sizeH: 0.42 },
-            { id: "swimming", name: "スイミング", chordMode: "major",
+            { id: "swimming", name: "スイミング", nameEn: "Swimming", chordMode: "major",
               color: "hsl(195, 60%, 58%)", oscType: "sine4",
               affinity: { active: 3, resilient: 2, focused: 1 },
               buildingColor: "#d0e8f0", roofColor: "#4898b0",
               sizeW: 1.4, sizeH: 0.38 },
-            { id: "baseball", name: "やきゅう場", chordMode: "major",
+            { id: "baseball", name: "やきゅう場", nameEn: "Baseball Field", chordMode: "major",
               color: "hsl(120, 45%, 55%)", oscType: "triangle4",
               affinity: { active: 3, social: 2, resilient: 1 },
               buildingColor: "#d8e8c8", roofColor: "#5a8838",
               sizeW: 1.5, sizeH: 0.52 },
-            { id: "english", name: "えいご教室", chordMode: "minor",
+            { id: "english", name: "えいご教室", nameEn: "English Class", chordMode: "minor",
               color: "hsl(270, 50%, 68%)", oscType: "sine4",
               affinity: { study: 3, social: 2, curious: 1 },
               buildingColor: "#e0d8f0", roofColor: "#7858a0",
               sizeW: 0.8, sizeH: 0.50 },
-            { id: "library", name: "としょかん", chordMode: "minor",
+            { id: "library", name: "としょかん", nameEn: "Library", chordMode: "minor",
               color: "hsl(45, 55%, 60%)", oscType: "sine4",
               affinity: { study: 3, focused: 2, patient: 1 },
               buildingColor: "#f0e8d0", roofColor: "#a08850",
               sizeW: 1.1, sizeH: 0.58 },
-            { id: "piano", name: "ピアノ教室", chordMode: "major",
+            { id: "piano", name: "ピアノ教室", nameEn: "Piano Class", chordMode: "major",
               color: "hsl(345, 55%, 65%)", oscType: "triangle4",
               affinity: { creative: 2, focused: 3, expressive: 1 },
               buildingColor: "#f0e0e0", roofColor: "#c06878",
               sizeW: 0.75, sizeH: 0.45 },
-            { id: "park", name: "こうえん", chordMode: "major",
+            { id: "park", name: "こうえん", nameEn: "Park", chordMode: "major",
               color: "hsl(150, 50%, 55%)", oscType: "triangle4",
               affinity: { adventurous: 3, optimistic: 2, active: 1 },
               buildingColor: "#c8e8c0", roofColor: "#489040",
               sizeW: 1.35, sizeH: 0.40 },
-            { id: "soccer", name: "サッカー場", chordMode: "major",
+            { id: "soccer", name: "サッカー場", nameEn: "Soccer Field", chordMode: "major",
               color: "hsl(160, 55%, 50%)", oscType: "triangle4",
               affinity: { active: 2, social: 3, adventurous: 1 },
               buildingColor: "#c0e0c8", roofColor: "#388848",
               sizeW: 1.45, sizeH: 0.48 },
-            { id: "dance", name: "ダンス教室", chordMode: "major",
+            { id: "dance", name: "ダンス教室", nameEn: "Dance Class", chordMode: "major",
               color: "hsl(290, 50%, 62%)", oscType: "triangle4",
               affinity: { expressive: 3, active: 2, social: 1 },
               buildingColor: "#e8d0f0", roofColor: "#9058a8",
               sizeW: 0.95, sizeH: 0.52 },
-            { id: "science", name: "かがく教室", chordMode: "minor",
+            { id: "science", name: "かがく教室", nameEn: "Science Class", chordMode: "minor",
               color: "hsl(200, 55%, 58%)", oscType: "sine4",
               affinity: { curious: 3, study: 2, organized: 1 },
               buildingColor: "#d0e0f0", roofColor: "#4878a8",
@@ -383,25 +414,25 @@
 
         // 7 school break-time activities for CHILD2 scene (baseline selection)
         const SCHOOL_ACTIVITIES = [
-            { id: "sports_field", name: "運動場", bassStyle: "energetic",
+            { id: "sports_field", name: "運動場", nameEn: "Sports Field", bassStyle: "energetic",
               color: "hsl(15, 65%, 58%)", worldFraction: [0.02, 0.12],
               labels: { active: 3, resilient: 2, social: 1 } },
-            { id: "library", name: "図書館", bassStyle: "soft",
+            { id: "library", name: "図書館", nameEn: "Library", bassStyle: "soft",
               color: "hsl(45, 50%, 62%)", worldFraction: [0.16, 0.28],
               labels: { study: 3, focused: 2, patient: 1 } },
-            { id: "science_room", name: "理科室", bassStyle: "quirky",
+            { id: "science_room", name: "理科室", nameEn: "Science Room", bassStyle: "quirky",
               color: "hsl(180, 50%, 55%)", worldFraction: [0.34, 0.48],
               labels: { curious: 3, study: 2, creative: 1 } },
-            { id: "reading", name: "読書", bassStyle: "contemplative",
+            { id: "reading", name: "読書", nameEn: "Reading", bassStyle: "contemplative",
               color: "hsl(210, 45%, 65%)", worldFraction: [0.63, 0.71],
               labels: { study: 2, focused: 3, patient: 1 } },
-            { id: "chatting", name: "おしゃべり", bassStyle: "groovy",
+            { id: "chatting", name: "おしゃべり", nameEn: "Chatting", bassStyle: "groovy",
               color: "hsl(330, 55%, 62%)", worldFraction: [0.72, 0.80],
               labels: { social: 3, expressive: 2, optimistic: 1 } },
-            { id: "doodle", name: "落書き", bassStyle: "playful",
+            { id: "doodle", name: "落書き", nameEn: "Doodle", bassStyle: "playful",
               color: "hsl(280, 50%, 62%)", worldFraction: [0.81, 0.89],
               labels: { creative: 3, expressive: 2, adventurous: 1 } },
-            { id: "organ", name: "オルガン", bassStyle: "melodic",
+            { id: "organ", name: "オルガン", nameEn: "Organ", bassStyle: "melodic",
               color: "hsl(350, 55%, 60%)", worldFraction: [0.90, 0.98],
               labels: { creative: 2, expressive: 3, focused: 1 } }
         ];
@@ -579,13 +610,14 @@
             btnLeft.classList.remove('orb-hover');
             btnMiddle.classList.remove('orb-hover');
             btnRight.classList.remove('orb-hover');
-            btnFast.classList.remove('orb-hover');
+            if (playCount >= 1) btnFast.classList.remove('orb-hover');
 
             const list = [];
             if (currentScene === SCENE.TITLE) {
                 list.push({ id: 'start', el: startBtn });
             } else if (currentScene === SCENE.CHOICE) {
-                list.push({ id: 'left', el: btnLeft }, { id: 'middle', el: btnMiddle }, { id: 'right', el: btnRight }, { id: 'fast', el: btnFast });
+                list.push({ id: 'left', el: btnLeft }, { id: 'middle', el: btnMiddle }, { id: 'right', el: btnRight });
+                if (playCount >= 1) list.push({ id: 'fast', el: btnFast });
             }
             for (const c of list) {
                 const r = c.el.getBoundingClientRect();
@@ -736,7 +768,12 @@
                 if (adultConfirmation.yesRect && rx >= adultConfirmation.yesRect.x && rx <= adultConfirmation.yesRect.x + adultConfirmation.yesRect.w && ry >= adultConfirmation.yesRect.y && ry <= adultConfirmation.yesRect.y + adultConfirmation.yesRect.h) {
                     const chosen = adultConfirmation.drop;
                     adultConfirmation.active = false; adultConfirmation.drop = null;
-                    if (currentScene === SCENE.ADULT) handleAdultChoice(chosen);
+                    if (currentScene === SCENE.CRAWL) transitionToLevel2(chosen);
+                    else if (currentScene === SCENE.CRAWL2) transitionToToddler1(chosen);
+                    else if (currentScene === SCENE.TODDLE1) transitionToChild1(chosen);
+                    else if (currentScene === SCENE.CHILD1) handleChildChoice(chosen);
+                    else if (currentScene === SCENE.CHILD2) handleChild2Choice(chosen);
+                    else if (currentScene === SCENE.ADULT) handleAdultChoice(chosen);
                     else if (currentScene === SCENE.UNIVERSITY) handleUniversityChoice(chosen);
                     else if (currentScene === SCENE.PART_TIME) handlePartTimeChoice(chosen);
                     else if (currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) handleJobHuntChoice(chosen);
@@ -755,18 +792,8 @@
             const picked = getToneDropAtScreenPoint(screenX, screenY);
             if (!picked) return;
 
-            if (currentScene === SCENE.CRAWL) {
-                transitionToLevel2(picked);
-            } else if (currentScene === SCENE.CRAWL2) {
-                transitionToToddler1(picked);
-            } else if (currentScene === SCENE.TODDLE1) {
-                transitionToChild1(picked);
-            } else if (currentScene === SCENE.CHILD1) {
-                handleChildChoice(picked);
-            } else if (currentScene === SCENE.CHILD2) {
-                handleChild2Choice(picked);
-            } else if (currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY) {
-                // Enter confirmation mode for later stages
+            if (currentScene >= SCENE.CRAWL) {
+                // All phases use confirmation dialog
                 adultConfirmation.active = true;
                 adultConfirmation.drop = picked;
                 adultConfirmation.fade = 0;
@@ -6677,6 +6704,18 @@
                 ctx.textAlign = "center"; ctx.textBaseline = "middle";
                 ctx.fillText(fac.name, cx, groundY - bH - 13);
 
+                // Hover glow border when corresponding tone drop is hovered
+                const hovDrop = toneDrops.find(d => d.activityId === fac.id && d.isHovered);
+                if (hovDrop) {
+                    const pulse = 0.6 + Math.sin(performance.now() * 0.005 * 4) * 0.25;
+                    ctx.shadowColor = fac.color;
+                    ctx.shadowBlur = 18 + pulse * 14;
+                    ctx.strokeStyle = fac.color.replace(')', `, ${0.7 * pulse})`).replace('hsl(', 'hsla(');
+                    ctx.lineWidth = 3;
+                    ctx.beginPath(); ctx.roundRect(bX - 2, bY - 2, bW + 4, bH + 4, 8); ctx.stroke();
+                    ctx.shadowBlur = 0;
+                }
+
                 ctx.restore();
             }
 
@@ -7654,6 +7693,11 @@
               labels: { adventurous: 3, optimistic: 2, active: 1 } }
         ];
 
+        function getVisibleAdultActivities() {
+            if (playCount >= 2) return ADULT_ACTIVITIES;
+            return ADULT_ACTIVITIES.filter(function(a) { return a.id !== 'entertainment'; });
+        }
+
         // ======== THIRTIES PHASE (30代フェーズ — 家の中の間取り) ========
         const THIRTIES_ACTIVITIES = [
             { id: "kitchen", name: "キッチン", nameEn: "Kitchen",
@@ -7720,7 +7764,7 @@
 
             // Generate building seeds for consistent cityscape (avoid activity zones)
             adultBuildingSeeds = [];
-            const actZones = ADULT_ACTIVITIES.map(a => [(a.worldFraction[0] + a.worldFraction[1]) / 2 - (a.worldFraction[1] - a.worldFraction[0]) * 0.42,
+            const actZones = getVisibleAdultActivities().map(a => [(a.worldFraction[0] + a.worldFraction[1]) / 2 - (a.worldFraction[1] - a.worldFraction[0]) * 0.42,
                                                          (a.worldFraction[0] + a.worldFraction[1]) / 2 + (a.worldFraction[1] - a.worldFraction[0]) * 0.42]);
             for (let i = 0; i < 40; i++) {
                 const xf = i / 40 + (Math.random() - 0.5) * 0.01;
@@ -7758,8 +7802,9 @@
 
             const floorY = height * ROOM_WALL_RATIO + TONE_FLOOR_OFFSET;
 
-            for (let i = 0; i < ADULT_ACTIVITIES.length; i++) {
-                const act = ADULT_ACTIVITIES[i];
+            var visibleAdult = getVisibleAdultActivities();
+            for (let i = 0; i < visibleAdult.length; i++) {
+                const act = visibleAdult[i];
                 const variant = randInt(0, 1);
                 const kbBundle = buildKeyboardLine(baseRhythmInfo, act.keyboardStyle, inheritedChordProgression, variant);
                 const kb = createKeyboardSynth(act.keyboardStyle);
@@ -8039,8 +8084,9 @@
         }
 
         function drawActivityBuildings(wallH) {
-            for (let i = 0; i < ADULT_ACTIVITIES.length; i++) {
-                const act = ADULT_ACTIVITIES[i];
+            var visAdult = getVisibleAdultActivities();
+            for (let i = 0; i < visAdult.length; i++) {
+                const act = visAdult[i];
                 const cx = worldWidth * (act.worldFraction[0] + act.worldFraction[1]) / 2;
                 const zoneW = worldWidth * (act.worldFraction[1] - act.worldFraction[0]);
                 const bw = zoneW * 0.80;
@@ -8399,6 +8445,21 @@
                         ctx.fillRect(lx, wallH - 2, 2, 1.5);
                     }
                 }
+
+                // Hover glow border when corresponding tone drop is hovered
+                const hovDrop = toneDrops.find(d => d.activityId === act.id && d.isHovered);
+                if (hovDrop) {
+                    const bh = wallH * (act.id === "university" ? 0.55 : act.id === "entertainment" ? 0.55 : 0.50);
+                    const by2 = wallH - bh;
+                    const pulse = 0.6 + Math.sin(performance.now() * 0.005 * 4) * 0.25;
+                    ctx.save();
+                    ctx.shadowColor = act.color;
+                    ctx.shadowBlur = 18 + pulse * 14;
+                    ctx.strokeStyle = act.color.replace(')', `, ${0.7 * pulse})`).replace('hsl(', 'hsla(');
+                    ctx.lineWidth = 3;
+                    ctx.beginPath(); ctx.roundRect(bx - 2, by2 - 2, bw + 4, bh + 4, 8); ctx.stroke();
+                    ctx.restore();
+                }
             }
         }
 
@@ -8594,8 +8655,9 @@
             }
 
             // === Activity signs ===
-            for (let i = 0; i < ADULT_ACTIVITIES.length; i++) {
-                const act = ADULT_ACTIVITIES[i];
+            var visAdultSigns = getVisibleAdultActivities();
+            for (let i = 0; i < visAdultSigns.length; i++) {
+                const act = visAdultSigns[i];
                 const signX = worldWidth * (act.worldFraction[0] + act.worldFraction[1]) / 2;
                 const signY = groundY - 30;
                 const signW = 70;
@@ -13584,6 +13646,31 @@
             orbWorldX = baby.x;
             orbWorldY = baby.y;
             fadeScreenTo(0, 1300);
+
+            // Show city intro message
+            setTimeout(() => showCityIntro(), 900);
+        }
+
+        function showCityIntro() {
+            const overlay = document.createElement('div');
+            overlay.id = 'city-intro-overlay';
+            overlay.innerHTML = `<div id="city-intro">` +
+                `<div class="thirties-intro-icon">\u266B</div>` +
+                `<p class="thirties-intro-body">` +
+                    `街に出ました。<br>` +
+                    `ここにはたくさんのtoneがあります。<br>` +
+                    `好きなだけ選んで、あなたの音楽を彩りましょう。</p>` +
+                `<p class="thirties-intro-en">` +
+                    `You've arrived in the city.<br>` +
+                    `There are many tones here.<br>` +
+                    `Pick as many as you like to color your music.</p>` +
+                `<button id="city-intro-btn">\u2014\u00a0 はじめる / Begin \u00a0\u2014</button>` +
+            `</div>`;
+            document.body.appendChild(overlay);
+            document.getElementById('city-intro-btn').addEventListener('click', () => {
+                overlay.classList.add('hidden');
+                setTimeout(() => overlay.remove(), 600);
+            });
         }
 
         // --- Season color interpolation ---
@@ -15442,6 +15529,945 @@
             return best;
         }
 
+        // ======== あゆみ (Life Report Card) ========
+
+        function computePentagonScores() {
+            const labelSums = {};
+            selectedToys.forEach(t => {
+                if (!t.labels) return;
+                Object.entries(t.labels).forEach(([k, v]) => {
+                    labelSums[k] = (labelSums[k] || 0) + v;
+                });
+            });
+            const axisRaw = PENTAGON_AXES.map(axis => {
+                let sum = 0;
+                axis.labels.forEach(l => { sum += Math.max(0, labelSums[l] || 0); });
+                return sum;
+            });
+            const maxVal = Math.max(...axisRaw, 1);
+            const scores = axisRaw.map(v => v / maxVal);
+            return { scores, labelSums, axisRaw };
+        }
+
+        const TIMELINE_DESCRIPTIONS = {
+            // === おもちゃ — 初めて (toy_first) ===
+            toy_first: [
+                { text: '小さな手で初めてつかんだ。世界に触れた最初の瞬間だった。 / Tiny fingers grasped it for the first time — a first touch of the world.', axis: 'knowledge' },
+                { text: 'それは初めての宝物。何度も抱きしめて眠った。 / A very first treasure, clutched tight through every nap.', axis: 'happiness' },
+                { text: '誰かがそっと手渡してくれた、初めてのおもちゃ。 / Someone gently placed it in waiting hands — a first gift.', axis: 'relationships' },
+            ],
+            // === おもちゃ — 汎用 (toy_) ===
+            toy_: [
+                { text: 'お気に入りのおもちゃに夢中で、時間を忘れた。 / Lost track of time, absorbed in a favorite toy.', axis: 'happiness' },
+                { text: '遊びながら手先がどんどん器用になっていった。 / Little hands grew more skillful with every play session.', axis: 'health' },
+                { text: '何度もくり返し遊ぶうちに、仕組みがわかってきた。 / Through endless repetition, the workings became clear.', axis: 'knowledge' },
+            ],
+            // === 施設 (CHILD1) ===
+            kindergarten: [
+                { text: 'みんなで手をつないで歌った。あの輪の温かさを覚えている。 / Held hands and sang together — the warmth of that circle remains.', axis: 'relationships' },
+                { text: '毎日走り回って、泥だらけで笑った。 / Ran around every day, laughing and covered in mud.', axis: 'health' },
+                { text: '初めての集団生活。ルールと仲間を同時に学んだ。 / A first taste of community — learning rules and friendship at once.', axis: 'knowledge' },
+            ],
+            home: [
+                { text: '家族の声が聞こえる場所。いつもそこに帰れた。 / A place where family voices echoed — always there to return to.', axis: 'relationships' },
+                { text: '安心できる場所で、のびのびと過ごした日々。 / Days spent freely in a place of comfort and safety.', axis: 'happiness' },
+                { text: '静かな部屋で絵本を広げ、想像の旅に出た。 / Opened picture books in a quiet room, setting off on imaginary journeys.', axis: 'knowledge' },
+            ],
+            atelier: [
+                { text: '思いのままに色を重ねた。完成よりも過程が楽しかった。 / Layered colors freely — the process mattered more than the result.', axis: 'happiness' },
+                { text: '友達の絵を見て驚き、自分の絵を見せて誇らしかった。 / Marveled at friends\' art, and felt proud showing off the work.', axis: 'relationships' },
+                { text: '混色の法則を発見した日、世界の見え方が変わった。 / The day color mixing clicked, the world looked different.', axis: 'knowledge' },
+            ],
+            swimming: [
+                { text: '最初は怖かった水が、いつしか友達になった。 / Water was scary at first, but eventually became a friend.', axis: 'health' },
+                { text: 'プールの底にタッチできた日の達成感を忘れない。 / Never forgot the thrill of touching the bottom of the pool.', axis: 'happiness' },
+                { text: '息つぎのコツを覚えてから、泳ぐのが好きになった。 / After learning to breathe properly, swimming became a joy.', axis: 'knowledge' },
+            ],
+            baseball: [
+                { text: 'バットを振り続けた。当たった瞬間の手応えが忘れられない。 / Kept swinging the bat — the feeling of contact was unforgettable.', axis: 'health' },
+                { text: 'チームメイトと声を掛け合い、ひとつになれた瞬間があった。 / There were moments when teammates became one through shared calls.', axis: 'relationships' },
+                { text: '勝っても負けても、全力で走ったあとの空が綺麗だった。 / Win or lose, the sky after running full-out was always beautiful.', axis: 'happiness' },
+            ],
+            english: [
+                { text: '知らない言葉が音になり、やがて意味を持ち始めた。 / Unknown words became sounds, then slowly took on meaning.', axis: 'knowledge' },
+                { text: '「Hello」と言えた日、世界が少し広がった気がした。 / The day "Hello" came out right, the world felt a little bigger.', axis: 'happiness' },
+                { text: '外国の絵本を読んでもらい、遠い国の暮らしを想像した。 / Listened to foreign picture books and imagined life in distant lands.', axis: 'relationships' },
+            ],
+            library: [
+                { text: '本棚の間に座り込み、物語の海に溺れた。 / Sat between the shelves and drowned in a sea of stories.', axis: 'knowledge' },
+                { text: '好きなシリーズを見つけ、続きが待ち遠しかった。 / Found a favorite series, and couldn\'t wait for the next volume.', axis: 'happiness' },
+                { text: '同じ本が好きな子と出会い、放課後の約束が始まった。 / Met someone who loved the same book — after-school plans were born.', axis: 'relationships' },
+            ],
+            piano: [
+                { text: '何度も間違えながら、一曲弾けた時の喜びは格別だった。 / After countless mistakes, the joy of playing one piece through was special.', axis: 'happiness' },
+                { text: '指が鍵盤を覚え、やがて音楽が身体の一部になった。 / Fingers memorized the keys, and music became part of the body.', axis: 'health' },
+                { text: '楽譜の記号を読み解くのが、暗号解読のようで面白かった。 / Reading musical notation felt like cracking a secret code.', axis: 'knowledge' },
+            ],
+            park: [
+                { text: '風を切って走り、夕焼けまで遊び尽くした。 / Ran through the wind, playing until the sunset.', axis: 'health' },
+                { text: '滑り台の上から見た景色が、世界の全てに見えた。 / From the top of the slide, the view looked like the whole world.', axis: 'happiness' },
+                { text: '知らない子とも、遊びを通じてすぐに友達になれた。 / Through play, even strangers quickly became friends.', axis: 'relationships' },
+            ],
+            soccer: [
+                { text: 'ゴールを決めた瞬間、チーム全員が駆け寄ってきた。 / The moment of scoring — the whole team came running.', axis: 'relationships' },
+                { text: '毎日ボールを蹴り、足がどんどん強くなった。 / Kicked the ball every day, legs growing stronger.', axis: 'health' },
+                { text: 'パスの角度やタイミングを考えるのが、パズルのようだった。 / Calculating pass angles and timing was like solving a puzzle.', axis: 'knowledge' },
+            ],
+            dance: [
+                { text: '音楽に合わせて体が動く喜びを知った。 / Discovered the joy of moving the body to music.', axis: 'happiness' },
+                { text: 'みんなで振りを合わせた時、ひとつの作品になった。 / When everyone synced their moves, it became one piece of art.', axis: 'relationships' },
+                { text: 'リズム感と柔軟性が、踊るたびに磨かれていった。 / Rhythm and flexibility were polished with every dance.', axis: 'health' },
+            ],
+            science: [
+                { text: '「なぜ？」が止まらなかった。実験ノートは好奇心でいっぱいだった。 / The "why"s never stopped — the lab notebook overflowed with curiosity.', axis: 'knowledge' },
+                { text: '薬品が色を変えた瞬間、魔法を見たような気持ちだった。 / When the solution changed color, it felt like witnessing magic.', axis: 'happiness' },
+                { text: '実験の安全ルールを学び、慎重さの大切さを知った。 / Learned lab safety rules, and understood the value of caution.', axis: 'health' },
+            ],
+            // === 休み時間 (CHILD2) — 活動 ===
+            sports_field: [
+                { text: '鬼ごっこもドッジボールも、全力だった。 / Tag and dodgeball — everything was all-out.', axis: 'health' },
+                { text: 'チャイムが鳴るまで駆け回り、教室に戻ると息が切れていた。 / Ran until the bell rang, returning to class out of breath.', axis: 'happiness' },
+                { text: 'いつも誰かが「一緒にやろう」と声をかけてくれた。 / Someone always called out, "Come play with us."', axis: 'relationships' },
+            ],
+            science_room: [
+                { text: '顕微鏡を覗くと、知らない世界が広がっていた。 / Peering through the microscope revealed an unknown world.', axis: 'knowledge' },
+                { text: '実験が成功した時、思わずガッツポーズした。 / When the experiment worked, a fist pump was irresistible.', axis: 'happiness' },
+                { text: '班のメンバーと役割を分担し、協力して進めた。 / Divided roles among group members and worked together.', axis: 'relationships' },
+            ],
+            reading: [
+                { text: '休み時間も本を手放せなかった。物語が呼んでいた。 / Couldn\'t put the book down even at recess — the story was calling.', axis: 'knowledge' },
+                { text: '静かな時間が好きだった。本の中は自分だけの世界。 / Loved the quiet moments — inside a book was a private world.', axis: 'happiness' },
+                { text: '読んだ感想を友達と語り合うのが楽しかった。 / Sharing thoughts on books with friends was a delight.', axis: 'relationships' },
+            ],
+            chatting: [
+                { text: '他愛ない話が、かけがえのない思い出になった。 / Idle chatter became irreplaceable memories.', axis: 'relationships' },
+                { text: 'くだらない話で笑い転げた。あの教室が恋しい。 / Doubled over laughing at silly jokes — that classroom is missed.', axis: 'happiness' },
+                { text: '友達の話を聞くうちに、色々な考え方があると知った。 / Listening to friends revealed the many ways of thinking.', axis: 'knowledge' },
+            ],
+            doodle: [
+                { text: 'ノートの隅が小さな美術館になっていた。 / The margins of the notebook became a tiny art gallery.', axis: 'happiness' },
+                { text: '描いた絵を見せ合い、みんなで笑った。 / Showed doodles to each other and shared laughs.', axis: 'relationships' },
+                { text: '何度も描き直すうちに、少しずつ上手くなった。 / Redrawing again and again, slowly getting better.', axis: 'knowledge' },
+            ],
+            organ: [
+                { text: '放課後の音楽室で、一人きりのコンサートを開いた。 / Held a solo concert in the music room after school.', axis: 'happiness' },
+                { text: '足のペダルと手の鍵盤を同時に操る難しさに挑んだ。 / Took on the challenge of coordinating pedals and keys at once.', axis: 'knowledge' },
+                { text: '友達と連弾して、息を合わせる楽しさを知った。 / Played duets with friends, discovering the fun of being in sync.', axis: 'relationships' },
+            ],
+            // === 休み時間 — ミニゲーム結果 ===
+            library_victory: [
+                { text: '誰よりも多くのページをめくった。本の虫の勲章だ。 / Turned more pages than anyone — a badge of honor for a bookworm.', axis: 'knowledge' },
+                { text: '読書チャンピオンの称号に、胸が高鳴った。 / The title of reading champion made the heart race.', axis: 'happiness' },
+                { text: '勝利を分かち合える仲間がいて、嬉しかった。 / Having friends to share the victory with was a joy.', axis: 'relationships' },
+            ],
+            library_draw: [
+                { text: '互いに譲らず、実力が拮抗していた。 / Neither would give in — evenly matched.', axis: 'knowledge' },
+                { text: '引き分けでも、読み切った達成感はあった。 / Even a draw came with the satisfaction of finishing.', axis: 'happiness' },
+                { text: 'いい勝負ができる相手がいること自体が幸せだった。 / Having a worthy rival was a happiness in itself.', axis: 'relationships' },
+            ],
+            library_fail: [
+                { text: '集中できなかったが、次こそはと心に誓った。 / Couldn\'t focus, but vowed to do better next time.', axis: 'knowledge' },
+                { text: '悔しさが、次の読書への原動力になった。 / The frustration became fuel for the next reading session.', axis: 'happiness' },
+                { text: '隣の席の子が「大丈夫だよ」と声をかけてくれた。 / A classmate next door said, "It\'s okay."', axis: 'relationships' },
+            ],
+            soccer_victory: [
+                { text: '仲間と勝ち取った勝利。ハイタッチの音が響いた。 / A victory won together — high-fives echoing across the field.', axis: 'relationships' },
+                { text: '全力で走り抜いた脚が、勝利を実感させた。 / Legs that ran full-out made the victory feel real.', axis: 'health' },
+                { text: '勝った瞬間の歓声は、何年経っても耳に残っている。 / The cheers at the moment of victory still echo after all these years.', axis: 'happiness' },
+            ],
+            soccer_draw: [
+                { text: '決着はつかなかったが、いい試合だった。 / No winner, but it was a good match.', axis: 'health' },
+                { text: '引き分けの悔しさが、次の練習のモチベーションになった。 / The frustration of a draw fueled the next practice.', axis: 'happiness' },
+                { text: '相手チームとも「いい試合だったね」と握手した。 / Shook hands with the other team: "Good game."', axis: 'relationships' },
+            ],
+            soccer_loss: [
+                { text: '負けた悔しさをバネに、翌日から練習量を増やした。 / Used the sting of defeat to train harder the next day.', axis: 'health' },
+                { text: '涙が出たけど、次は絶対に勝つと思った。 / Tears came, but the resolve to win next time was strong.', axis: 'happiness' },
+                { text: '負けた後、チームメイトと肩を組んで帰った。 / After the loss, walked home with arms around teammates.', axis: 'relationships' },
+            ],
+            soccer_abandon: [
+                { text: '体調を優先して、途中で切り上げた。 / Prioritized health and called it quits early.', axis: 'health' },
+                { text: '教室に戻り、静かに気持ちを整えた。 / Returned to the classroom and quietly settled down.', axis: 'happiness' },
+                { text: '先生が「無理しなくていいよ」と言ってくれた。 / The teacher said, "You don\'t have to push yourself."', axis: 'relationships' },
+            ],
+            science_victory: [
+                { text: '仮説通りの結果が出た。科学の力を信じた瞬間。 / Results matched the hypothesis — a moment of faith in science.', axis: 'knowledge' },
+                { text: '実験成功の瞬間、思わず歓声を上げた。 / Couldn\'t help cheering when the experiment succeeded.', axis: 'happiness' },
+                { text: '班のみんなで喜びを分かち合った。 / Shared the joy with every member of the group.', axis: 'relationships' },
+            ],
+            science_draw: [
+                { text: '結果は曖昧だったが、考察に学びがあった。 / Results were ambiguous, but the analysis taught something.', axis: 'knowledge' },
+                { text: 'まあまあの結果でも、やり切った満足感はあった。 / Even a so-so result came with the satisfaction of seeing it through.', axis: 'happiness' },
+                { text: '班で結果について議論し、次の仮説を立てた。 / Discussed the results as a group and formed the next hypothesis.', axis: 'relationships' },
+            ],
+            science_abandon: [
+                { text: '途中でやめる判断も、大切な経験だった。 / Knowing when to stop was an important lesson too.', axis: 'knowledge' },
+                { text: '教室に戻り、ノートに思いついたことを書き留めた。 / Returned to class and jotted down ideas in a notebook.', axis: 'happiness' },
+                { text: '先生に相談して、次の実験計画を考えた。 / Consulted the teacher and planned the next experiment.', axis: 'relationships' },
+            ],
+            reading_victory: [
+                { text: '最後の一行まで読み切った。物語と一緒に成長した気がした。 / Read to the very last line — felt like growing alongside the story.', axis: 'knowledge' },
+                { text: '読了の達成感に包まれ、しばらく余韻に浸った。 / Wrapped in the satisfaction of finishing, lingering in the afterglow.', axis: 'happiness' },
+                { text: '感動を誰かに伝えたくて、友達に本を勧めた。 / Wanted to share the emotion, and recommended the book to a friend.', axis: 'relationships' },
+            ],
+            reading_abandon: [
+                { text: '今日は読む気分ではなかった。それもまた一日。 / Didn\'t feel like reading today — that\'s just how some days go.', axis: 'happiness' },
+                { text: '本を閉じて、窓の外の雲をぼんやり眺めた。 / Closed the book and gazed absently at clouds outside the window.', axis: 'knowledge' },
+                { text: '教室に戻ると、友達が手を振って迎えてくれた。 / Returning to class, a friend waved hello.', axis: 'relationships' },
+            ],
+            reading_fail: [
+                { text: 'ページが進まなかった。でも、また挑戦すればいい。 / The pages wouldn\'t turn. But there\'s always next time.', axis: 'knowledge' },
+                { text: '集中が途切れて悔しかったが、好きな本はまだある。 / Lost focus and felt frustrated, but there are still favorite books ahead.', axis: 'happiness' },
+                { text: '隣の子が「一緒に読もう」と誘ってくれた。 / The kid next door said, "Let\'s read together."', axis: 'relationships' },
+            ],
+            chatting_victory: [
+                { text: '話が弾んで、チャイムの音さえ聞こえなかった。 / The conversation was so lively, even the bell went unheard.', axis: 'relationships' },
+                { text: '笑いすぎてお腹が痛くなった。最高の休み時間だった。 / Laughed until it hurt — the best recess ever.', axis: 'happiness' },
+                { text: '友達の意外な一面を知って、もっと好きになった。 / Discovered an unexpected side of a friend, and liked them even more.', axis: 'knowledge' },
+            ],
+            chatting_fail: [
+                { text: '言葉がうまく出てこなかった。伝えたい気持ちはあったのに。 / The words wouldn\'t come, even though the feelings were there.', axis: 'relationships' },
+                { text: '少し落ち込んだけど、次はもっとうまく話せるはず。 / Felt a little down, but next time will be better.', axis: 'happiness' },
+                { text: 'うまく話せなかった経験から、聞く力の大切さを学んだ。 / From the struggle to speak, learned the value of listening.', axis: 'knowledge' },
+            ],
+            doodle_victory: [
+                { text: '描き上げた瞬間、自分でも驚くほどの出来だった。 / The finished piece was a surprise even to the artist.', axis: 'happiness' },
+                { text: 'みんなが「すごい！」と集まってきた。嬉しかった。 / Everyone gathered around saying "Amazing!" — it felt wonderful.', axis: 'relationships' },
+                { text: '構図と色使いが噛み合った。直感が冴えた日。 / Composition and color clicked — a day of sharp intuition.', axis: 'knowledge' },
+            ],
+            doodle_abandon: [
+                { text: 'うまく描けなくて途中でやめた。でも、それも創作の一部。 / Gave up midway — but that\'s part of the creative process too.', axis: 'knowledge' },
+                { text: '教室に戻り、次に描きたいものを頭の中でスケッチした。 / Back in class, mentally sketched the next piece to draw.', axis: 'happiness' },
+                { text: '友達が「見せて」と言ってくれて、少し救われた。 / A friend asked to see it — that was a small comfort.', axis: 'relationships' },
+            ],
+            // === 大学 (UNIVERSITY) ===
+            gate: [
+                { text: '正門をくぐった時、新しい人生の幕開けを感じた。 / Passing through the gate, a new chapter of life began.', axis: 'happiness' },
+                { text: '掲示板に目を通し、学びの選択肢の多さに胸が躍った。 / Scanning the bulletin board, the wealth of options was thrilling.', axis: 'knowledge' },
+                { text: '同じ門をくぐる仲間たちと、これから過ごす日々を想像した。 / Imagined the days ahead with fellow students passing the same gate.', axis: 'relationships' },
+            ],
+            field: [
+                { text: '汗を流しながら走った。体が求める限界に挑んだ。 / Ran drenched in sweat, pushing the body to its limits.', axis: 'health' },
+                { text: '部活の仲間と競い合い、互いを高め合った。 / Competed with club members, lifting each other up.', axis: 'relationships' },
+                { text: 'グラウンドの土の匂いと青空。青春そのものだった。 / The smell of dirt and blue sky — youth itself.', axis: 'happiness' },
+            ],
+            building: [
+                { text: '教授の一言が、ものの見方を根本から変えた。 / A single remark from a professor changed the way of seeing things entirely.', axis: 'knowledge' },
+                { text: '難解な講義の後、友人とカフェで議論した時間が宝物だった。 / After a difficult lecture, debating with friends at a cafe was priceless.', axis: 'relationships' },
+                { text: '単位のためだけでなく、知る喜びのために学んだ。 / Studied not just for credits, but for the joy of knowing.', axis: 'happiness' },
+            ],
+            gym: [
+                { text: '体育館の床を蹴り、全力でプレーした。 / Kicked off the gym floor, playing with all-out effort.', axis: 'health' },
+                { text: '汗だくの仲間と笑い合った放課後が懐かしい。 / Miss those after-class laughs with sweat-soaked friends.', axis: 'relationships' },
+                { text: '体を動かした後の爽快感が、次の活力になった。 / The rush after a workout fueled the next push forward.', axis: 'happiness' },
+            ],
+            art_hall: [
+                { text: '没頭するうちに、時間の流れを忘れた。創作の魔法。 / Lost all sense of time while creating — the magic of art.', axis: 'happiness' },
+                { text: '作品に込めた想いが、見る人に伝わった時の感動。 / The emotion when a viewer understood the feelings in the work.', axis: 'relationships' },
+                { text: '技法を研究し、表現の幅を広げた。 / Studied techniques and expanded the range of expression.', axis: 'knowledge' },
+            ],
+            // === 大人 (ADULT) ===
+            university: [
+                { text: '学び続ける道を選んだ。知識の深さに終わりはなかった。 / Chose the path of continued learning — knowledge had no end.', axis: 'knowledge' },
+                { text: 'キャンパスの四季を何度も見届けた。学生生活を満喫した。 / Watched the seasons change on campus again and again — student life savored.', axis: 'happiness' },
+                { text: '研究室の仲間は、一生の友になった。 / Lab mates became lifelong friends.', axis: 'relationships' },
+            ],
+            parttime: [
+                { text: '初めての給料日、自分の力で稼ぐ実感が湧いた。 / On the first payday, the reality of earning hit home.', axis: 'wealth' },
+                { text: 'お客さんの「ありがとう」が、仕事の原動力だった。 / A customer\'s "thank you" was the driving force behind the work.', axis: 'relationships' },
+                { text: '接客を通じて、社会の仕組みを肌で学んだ。 / Through customer service, learned how society works firsthand.', axis: 'knowledge' },
+            ],
+            jobhunt: [
+                { text: '何度断られても立ち上がった。折れない心が育った。 / Stood back up after every rejection — an unbreakable spirit grew.', axis: 'health' },
+                { text: '自分の強みと向き合い、将来の道筋を描いた。 / Faced personal strengths and mapped out a future path.', axis: 'knowledge' },
+                { text: '面接を重ねるうちに、人に想いを伝える力がついた。 / Through rounds of interviews, the ability to convey feelings grew.', axis: 'relationships' },
+            ],
+            travel: [
+                { text: '知らない場所へ踏み出す。その一歩が人生を広げた。 / Stepping into the unknown — that single step expanded life.', axis: 'happiness' },
+                { text: '旅先で出会った人々の暮らしが、価値観を揺さぶった。 / The lives of people met on the road shook old assumptions.', axis: 'knowledge' },
+                { text: '旅の疲れさえ心地よかった。体が世界を覚えていく。 / Even the fatigue of travel felt good — the body was learning the world.', axis: 'health' },
+            ],
+            entertainment: [
+                { text: '日常を忘れて楽しんだ。遊ぶ時間も人生の栄養だ。 / Forgot the everyday and had fun — playtime is life\'s nourishment too.', axis: 'happiness' },
+                { text: '娯楽に使ったお金の価値を、後から実感した。 / Later realized the true value of money spent on entertainment.', axis: 'wealth' },
+                { text: '一緒に楽しんだ仲間との時間が、一番の娯楽だった。 / Time spent having fun with friends was the greatest entertainment.', axis: 'relationships' },
+            ],
+            // === 旅 (TRAVEL) ===
+            sea_end: [
+                { text: '波の音に耳を澄ませた。心が洗われるようだった。 / Listened to the waves — it was as though the heart was cleansed.', axis: 'happiness' },
+                { text: '潮風を浴びて歩いた。海が体にエネルギーをくれた。 / Walked in the sea breeze — the ocean gave the body energy.', axis: 'health' },
+                { text: '水平線の向こうにある世界を想像した。 / Imagined the world beyond the horizon.', axis: 'knowledge' },
+            ],
+            mtn_end: [
+                { text: '山頂からの景色に、言葉を失った。 / The view from the summit left no words.', axis: 'happiness' },
+                { text: '一歩一歩、登り切った達成感が体を満たした。 / Step by step, the sense of accomplishment from reaching the top filled the body.', axis: 'health' },
+                { text: '山の生態系を観察し、自然の精巧さに驚いた。 / Observed the mountain ecosystem and marveled at nature\'s precision.', axis: 'knowledge' },
+            ],
+            // === 娯楽 ===
+            entertainment_slot: [
+                { text: '回るリールに目が釘付けだった。運命の数秒間。 / Eyes glued to the spinning reels — a few seconds of fate.', axis: 'happiness' },
+                { text: 'ここぞという勝負勘を、遊びの中で磨いた。 / Sharpened the instinct for big moments through play.', axis: 'wealth' },
+                { text: '運試しの結果に一喜一憂する自分を、客観的に見つめた。 / Watched the self swing between joy and dismay at the outcome.', axis: 'knowledge' },
+            ],
+            // === 30代 (THIRTIES) ===
+            kitchen: [
+                { text: '毎朝キッチンに立ち、家族のために腕を振るった。食卓の笑顔が何よりの報酬だった。 / Stood in the kitchen every morning, cooking for the family — smiles at the table were the greatest reward.', axis: 'relationships' },
+                { text: '新しいレシピに挑み続けた。料理は創造の実験室だった。 / Kept trying new recipes — the kitchen was a laboratory of creation.', axis: 'happiness' },
+                { text: '手際よく段取りを組み、栄養バランスまで計算した。 / Organized the workflow efficiently, even calculating nutritional balance.', axis: 'knowledge' },
+            ],
+            living: [
+                { text: '家族が集まるリビング。笑い声が絶えなかった。 / The living room where family gathered — laughter never stopped.', axis: 'relationships' },
+                { text: 'ソファに沈み込み、好きな音楽に耳を傾けた。至福の時間。 / Sank into the sofa, listening to favorite music — blissful hours.', axis: 'happiness' },
+                { text: 'テレビのドキュメンタリーに見入り、知識の幅を広げた。 / Watched documentaries on TV, expanding the breadth of knowledge.', axis: 'knowledge' },
+            ],
+            bedroom: [
+                { text: '一日の疲れを枕に預けた。明日への充電時間。 / Entrusted the day\'s fatigue to the pillow — recharging for tomorrow.', axis: 'health' },
+                { text: '眠る前の読書が日課だった。枕元に本が積まれていた。 / Bedtime reading was a ritual — books piled up on the nightstand.', axis: 'knowledge' },
+                { text: '静かな寝室で、今日あった小さな幸せを振り返った。 / In the quiet bedroom, reflected on the day\'s small joys.', axis: 'happiness' },
+            ],
+            kidsroom: [
+                { text: '子どもと一緒に積み木を並べた。笑い声が響く部屋。 / Lined up blocks with the kids — a room echoing with laughter.', axis: 'relationships' },
+                { text: '散らかったおもちゃの中に、成長の足跡が見えた。 / Among the scattered toys, traces of growth were visible.', axis: 'happiness' },
+                { text: '子どもの「なんで？」に答えるたび、自分も学び直していた。 / Every time the child asked "Why?", it was a chance to relearn.', axis: 'knowledge' },
+            ],
+            // === 街 (CITY) ===
+            bench: [
+                { text: '木漏れ日の下で目を閉じた。穏やかな時間が流れた。 / Closed eyes under dappled light — a gentle moment passed.', axis: 'happiness' },
+                { text: '隣に座った知らない人と、ぽつりぽつり話した。 / Exchanged quiet words with a stranger on the bench.', axis: 'relationships' },
+                { text: '深呼吸をして、体と心のバランスを取り戻した。 / Took a deep breath and restored the balance of body and mind.', axis: 'health' },
+            ],
+            corner: [
+                { text: '角を曲がるたび、見慣れた街に新しい表情を見つけた。 / With each turn of a corner, found a new face of a familiar town.', axis: 'knowledge' },
+                { text: '夕暮れの街角を歩く。それだけで心が満たされた。 / Walking the streets at dusk — that alone filled the heart.', axis: 'happiness' },
+                { text: '歩くことが日課になった。足腰が確かになっていく。 / Walking became a daily habit — legs and back grew sure.', axis: 'health' },
+            ],
+            vending: [
+                { text: '冷たい缶を握りしめ、ほっと一息。小さな贅沢。 / Gripping a cold can, a sigh of relief — a small luxury.', axis: 'happiness' },
+                { text: '小銭を入れる音が、日常のリズムを刻んでいた。 / The clink of coins marked the rhythm of daily life.', axis: 'wealth' },
+                { text: '同じ自販機の前で、顔見知りに会釈した。 / Exchanged nods with a familiar face at the same vending machine.', axis: 'relationships' },
+            ],
+            flowerbed: [
+                { text: '季節ごとに咲く花が、時の流れを教えてくれた。 / Flowers blooming each season told the passage of time.', axis: 'knowledge' },
+                { text: '色とりどりの花に見とれた。自然の美しさに癒された。 / Captivated by colorful flowers — healed by nature\'s beauty.', axis: 'happiness' },
+                { text: '花の世話をしていたお年寄りと、言葉を交わした。 / Exchanged words with an elder tending the flowers.', axis: 'relationships' },
+            ],
+            cafe: [
+                { text: '珈琲の香りに包まれ、ゆったりとした時間を過ごした。 / Wrapped in the aroma of coffee, spent a leisurely hour.', axis: 'happiness' },
+                { text: '窓際の席で本を開いた。カフェは第二の書斎だった。 / Opened a book by the window — the cafe was a second study.', axis: 'knowledge' },
+                { text: '常連同士の挨拶が生まれ、小さな居場所ができた。 / Greetings between regulars took root — a small place of belonging formed.', axis: 'relationships' },
+            ],
+            station: [
+                { text: '行き交う人波を眺めた。それぞれの人生が交差する場所。 / Watched the crowds pass — a place where lives intersect.', axis: 'knowledge' },
+                { text: '毎日通った駅。日常の始まりと終わりの記号だった。 / The station traveled through daily — a marker of life\'s routines.', axis: 'happiness' },
+                { text: '改札で「お先にどうぞ」と譲り合う、小さな優しさがあった。 / Small kindnesses at the gate — "After you" exchanged with a nod.', axis: 'relationships' },
+            ],
+            garden: [
+                { text: '四季折々の庭を歩いた。自然は最高の教師だった。 / Walked through the garden in every season — nature was the finest teacher.', axis: 'knowledge' },
+                { text: '緑の中を歩くと、心の澱が溶けていくようだった。 / Walking among the green, it felt as though the heart\'s sediment dissolved.', axis: 'health' },
+                { text: '庭園のベンチで隣り合った人と、季節の話をした。 / Chatted about the seasons with someone on a garden bench.', axis: 'relationships' },
+            ],
+            evening: [
+                { text: '茜色に染まる空を見上げた。一日の終わりが美しかった。 / Looked up at the crimson sky — the end of the day was beautiful.', axis: 'happiness' },
+                { text: '夕暮れの広場で、今日の自分を振り返った。 / In the evening square, reflected on the day\'s self.', axis: 'knowledge' },
+                { text: '夕焼けを一緒に眺めた人がいた。それだけで十分だった。 / There was someone to watch the sunset with — that was enough.', axis: 'relationships' },
+            ],
+            bridge: [
+                { text: '橋の上から川面を見つめた。水は止まらず流れていく。 / Gazed at the river from the bridge — water never stops flowing.', axis: 'knowledge' },
+                { text: '風を受けながら橋を渡る。体が軽くなる気がした。 / Crossing the bridge in the wind — the body felt lighter.', axis: 'health' },
+                { text: '橋の向こうに広がる景色が、いつも心を躍らせた。 / The scenery beyond the bridge always set the heart dancing.', axis: 'happiness' },
+            ],
+            mailbox: [
+                { text: '手紙を出す瞬間、届く相手の笑顔を想像した。 / Posting a letter, imagined the smile of the one who\'d receive it.', axis: 'relationships' },
+                { text: 'ポストの赤い色が、街の風景に温かみを添えていた。 / The red mailbox added warmth to the streetscape.', axis: 'happiness' },
+                { text: '手紙を書く習慣が、言葉を選ぶ力を磨いてくれた。 / The habit of writing letters honed the ability to choose words.', axis: 'knowledge' },
+            ],
+            playground: [
+                { text: '子どもたちの歓声に混ざって、自分も思い切り遊んだ。 / Mingled with children\'s cheers and played with all one\'s might.', axis: 'health' },
+                { text: '遊び場のブランコに揺られ、子ども時代を思い出した。 / Swayed on a playground swing, remembering childhood.', axis: 'happiness' },
+                { text: '近所の子どもたちと顔なじみになった。 / Became familiar faces with the neighborhood children.', axis: 'relationships' },
+            ],
+            busstop: [
+                { text: 'バスを待つ間、通り過ぎる雲を眺めた。 / While waiting for the bus, watched the clouds drift by.', axis: 'happiness' },
+                { text: '時刻表を確認し、効率の良いルートを考えた。 / Checked the timetable and planned an efficient route.', axis: 'wealth' },
+                { text: 'いつも同じ時間にいるおばあさんと挨拶を交わした。 / Exchanged greetings with a grandmother always there at the same time.', axis: 'relationships' },
+            ],
+            city_home: [
+                { text: '長い一日を終えて、玄関の灯りにほっとした。 / After a long day, the light at the entrance brought relief.', axis: 'happiness' },
+                { text: '家に着くと、体の緊張がすっと解けた。 / Arriving home, the body\'s tension melted away.', axis: 'health' },
+                { text: '「おかえり」の声が聞こえる。帰る場所がある幸せ。 / Hearing "Welcome home" — the happiness of having a place to return to.', axis: 'relationships' },
+            ],
+        };
+
+        function buildLifeTimeline(axisScores) {
+            const phases = [];
+            const childFacIds = CHILD_FACILITIES.map(f => f.id);
+            const schoolActIds = SCHOOL_ACTIVITIES.map(a => a.id);
+            const uniFacIds = UNIVERSITY_FACILITIES.map(f => f.id);
+            const adultActIds = ADULT_ACTIVITIES.map(a => a.id);
+            const thirtiesActIds = ['kitchen','living','bedroom','kidsroom'];
+            const cityDropIds = CITY_DROPS.map(d => d.id);
+            const minigameIds = [
+                'library_victory','library_draw','library_fail',
+                'soccer_victory','soccer_draw','soccer_loss','soccer_abandon',
+                'science_victory','science_draw','science_abandon',
+                'reading_victory','reading_abandon','reading_fail',
+                'chatting_victory','chatting_fail',
+                'doodle_victory','doodle_abandon',
+            ];
+
+            function descFor(id, axisScores) {
+                let variants = TIMELINE_DESCRIPTIONS[id];
+                if (!variants && id && id.startsWith('toy_')) variants = TIMELINE_DESCRIPTIONS['toy_'];
+                if (!variants) return '';
+                let best = variants[0], bestScore = -1;
+                for (const v of variants) {
+                    const s = (axisScores && axisScores[v.axis]) || 0;
+                    if (s > bestScore) { bestScore = s; best = v; }
+                }
+                return best.text;
+            }
+
+            const toyCount = { crawl: 0, toddle: 0 };
+            selectedToys.forEach(t => {
+                const id = t.id;
+                const displayName = t.nameJa || t.name || id;
+                // Resolve description ID: toy_first for 1st toy, city_home for CITY home
+                let descId = id;
+                if (id && id.startsWith('toy_')) {
+                    toyCount.crawl++;
+                    descId = (toyCount.crawl === 1) ? 'toy_first' : 'toy_';
+                } else if (cityDropIds.includes(id) && id === 'home') {
+                    descId = 'city_home';
+                }
+                const desc = descFor(descId, axisScores);
+                if (id && id.startsWith('toy_')) {
+                    if (toyCount.crawl <= 2) {
+                        let ph = phases.find(p => p.phase === 'CRAWL');
+                        if (!ph) { ph = { phase: 'CRAWL', age: '0〜1歳', items: [] }; phases.push(ph); }
+                        ph.items.push({ name: displayName, desc: desc });
+                    } else if (toyCount.crawl === 3) {
+                        let ph = phases.find(p => p.phase === 'TODDLE');
+                        if (!ph) { ph = { phase: 'TODDLE', age: '1〜2歳', items: [] }; phases.push(ph); }
+                        ph.items.push({ name: displayName, desc: desc });
+                    }
+                } else if (childFacIds.includes(id)) {
+                    let ph = phases.find(p => p.phase === 'CHILD1');
+                    if (!ph) { ph = { phase: 'CHILD1', age: '3〜9歳', items: [] }; phases.push(ph); }
+                    ph.items.push({ name: displayName, desc: desc });
+                } else if (schoolActIds.includes(id) || minigameIds.includes(id)) {
+                    let ph = phases.find(p => p.phase === 'CHILD2');
+                    if (!ph) { ph = { phase: 'CHILD2', age: '10〜11歳', items: [] }; phases.push(ph); }
+                    ph.items.push({ name: displayName, desc: desc });
+                } else if (uniFacIds.includes(id)) {
+                    let ph = phases.find(p => p.phase === 'UNIVERSITY');
+                    if (!ph) { ph = { phase: 'UNIVERSITY', age: '18〜21歳', items: [] }; phases.push(ph); }
+                    ph.items.push({ name: displayName, desc: desc });
+                } else if (adultActIds.includes(id)) {
+                    let ph = phases.find(p => p.phase === 'ADULT');
+                    if (!ph) { ph = { phase: 'ADULT', age: '22〜29歳', items: [] }; phases.push(ph); }
+                    ph.items.push({ name: displayName, desc: desc });
+                } else if (id === 'sea_end' || id === 'mtn_end') {
+                    let ph = phases.find(p => p.phase === 'TRAVEL');
+                    if (!ph) { ph = { phase: 'TRAVEL', age: '20代', items: [] }; phases.push(ph); }
+                    ph.items.push({ name: displayName, desc: desc });
+                } else if (id === 'entertainment_slot') {
+                    let ph = phases.find(p => p.phase === 'ENTERTAINMENT');
+                    if (!ph) { ph = { phase: 'ENTERTAINMENT', age: '20代', items: [] }; phases.push(ph); }
+                    ph.items.push({ name: displayName, desc: desc });
+                } else if (thirtiesActIds.includes(id)) {
+                    let ph = phases.find(p => p.phase === 'THIRTIES');
+                    if (!ph) { ph = { phase: 'THIRTIES', age: '30〜39歳', items: [] }; phases.push(ph); }
+                    ph.items.push({ name: displayName, desc: desc });
+                } else if (cityDropIds.includes(id)) {
+                    let ph = phases.find(p => p.phase === 'CITY');
+                    if (!ph) { ph = { phase: 'CITY', age: '40〜65歳', items: [] }; phases.push(ph); }
+                    ph.items.push({ name: displayName, desc: desc });
+                }
+            });
+            return phases;
+        }
+
+        function drawPentagonChart(canvasEl, scores, progress) {
+            const ctx2 = canvasEl.getContext('2d');
+            const W = canvasEl.width, H = canvasEl.height;
+            const cx = W / 2, cy = H / 2;
+            const R = Math.min(W, H) * 0.38;
+            ctx2.clearRect(0, 0, W, H);
+            const n = PENTAGON_AXES.length;
+            const angleOffset = -Math.PI / 2;
+
+            function vertex(i, r) {
+                const a = angleOffset + (2 * Math.PI * i) / n;
+                return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+            }
+
+            // Grid rings
+            for (let ring = 1; ring <= 5; ring++) {
+                ctx2.beginPath();
+                for (let i = 0; i <= n; i++) {
+                    const [px, py] = vertex(i % n, R * ring / 5);
+                    i === 0 ? ctx2.moveTo(px, py) : ctx2.lineTo(px, py);
+                }
+                ctx2.strokeStyle = 'rgba(120,115,105,0.18)';
+                ctx2.lineWidth = 1;
+                ctx2.stroke();
+            }
+
+            // Axis lines
+            for (let i = 0; i < n; i++) {
+                const [px, py] = vertex(i, R);
+                ctx2.beginPath();
+                ctx2.moveTo(cx, cy);
+                ctx2.lineTo(px, py);
+                ctx2.strokeStyle = 'rgba(120,115,105,0.22)';
+                ctx2.lineWidth = 1;
+                ctx2.stroke();
+            }
+
+            // Data polygon
+            const p = typeof progress === 'number' ? progress : 1;
+            ctx2.beginPath();
+            for (let i = 0; i <= n; i++) {
+                const s = scores[i % n] * p;
+                const r = R * (0.08 + s * 0.92);
+                const [px, py] = vertex(i % n, r);
+                i === 0 ? ctx2.moveTo(px, py) : ctx2.lineTo(px, py);
+            }
+            ctx2.fillStyle = 'rgba(90,74,62,0.12)';
+            ctx2.fill();
+            ctx2.strokeStyle = 'rgba(90,74,62,0.6)';
+            ctx2.lineWidth = 2;
+            ctx2.stroke();
+
+            // Vertex dots + labels
+            for (let i = 0; i < n; i++) {
+                const s = scores[i] * p;
+                const r = R * (0.08 + s * 0.92);
+                const [dx, dy] = vertex(i, r);
+                ctx2.beginPath();
+                ctx2.arc(dx, dy, 4, 0, Math.PI * 2);
+                ctx2.fillStyle = PENTAGON_AXES[i].color;
+                ctx2.fill();
+
+                // Label
+                const [lx, ly] = vertex(i, R + 22);
+                ctx2.font = '700 13px "Zen Maru Gothic", sans-serif';
+                ctx2.fillStyle = '#5a4a3e';
+                ctx2.textAlign = 'center';
+                ctx2.textBaseline = 'middle';
+                ctx2.fillText(PENTAGON_AXES[i].ja, lx, ly);
+            }
+        }
+
+        function animatePentagonChart(canvasEl, targetScores) {
+            const dur = 1500;
+            const start = performance.now();
+            function ease(t) { return 1 - Math.pow(1 - t, 3); }
+            function frame(now) {
+                const t = Math.min((now - start) / dur, 1);
+                drawPentagonChart(canvasEl, targetScores, ease(t));
+                if (t < 1) requestAnimationFrame(frame);
+            }
+            requestAnimationFrame(frame);
+        }
+
+        function startAyumiSequence() {
+            // Hide settings button and cursor orb
+            const settingsBtn = document.getElementById('settings-btn');
+            if (settingsBtn) settingsBtn.style.display = 'none';
+            const orbCanvas = document.getElementById('main-canvas');
+            if (orbCanvas) orbCanvas.style.cursor = 'default';
+
+            // t=1000ms: Show logo (no HUD slide needed — HUD not visible yet)
+            setTimeout(() => {
+                const logoOv = document.createElement('div');
+                logoOv.id = 'ayumi-logo-overlay';
+                const logoTxt = document.createElement('div');
+                logoTxt.className = 'ayumi-logo-text';
+                logoTxt.textContent = 'Tone.Tone.Life.';
+                logoOv.appendChild(logoTxt);
+                document.body.appendChild(logoOv);
+                requestAnimationFrame(() => { logoOv.style.opacity = '1'; });
+
+                // Start ayumi BGM immediately at full volume (synced with logo reveal)
+                ayumiBgmPlayer = new Audio('sounds/Atokata-1(Fast).mp3');
+                ayumiBgmPlayer.loop = true;
+                ayumiBgmPlayer.volume = 0.35;
+                ayumiBgmPlayer.play().catch(() => {});
+
+                // Hold logo for 2.5s, then credits-scroll up
+                setTimeout(() => {
+                    showAyumiReportCard();
+                    // Slide logo up at the same speed as ayumi scroll
+                    logoOv.style.transition = 'none';
+                    const scrollDuration = 4000;
+                    const startScroll = performance.now();
+                    function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+                    function logoSlide(now) {
+                        const t = Math.min((now - startScroll) / scrollDuration, 1);
+                        logoOv.style.transform = `translateY(${-easeOut(t) * 100}vh)`;
+                        if (t < 1) requestAnimationFrame(logoSlide);
+                        else logoOv.remove();
+                    }
+                    requestAnimationFrame(logoSlide);
+                }, 2500);
+            }, 1000);
+        }
+
+        function showAyumiReportCard() {
+            const { scores, labelSums, axisRaw } = computePentagonScores();
+            const axisScores = {};
+            PENTAGON_AXES.forEach((axis, i) => { axisScores[axis.key] = axisRaw[i]; });
+            const timeline = buildLifeTimeline(axisScores);
+
+            // Create overlay
+            const overlay = document.createElement('div');
+            overlay.id = 'ayumi-overlay';
+
+            const container = document.createElement('div');
+            container.id = 'ayumi-container';
+
+            // Title
+            const title = document.createElement('h2');
+            title.className = 'ayumi-title';
+            title.textContent = '人生のあゆみ — Life Report Card';
+            container.appendChild(title);
+
+            // Stats row (play time + steps)
+            const statsRow = document.createElement('div');
+            statsRow.className = 'ayumi-stats-row';
+            const elapsedMs = gameStartTime ? (Date.now() - gameStartTime) : 0;
+            const mins = Math.floor(elapsedMs / 60000);
+            const secs = Math.floor((elapsedMs % 60000) / 1000);
+            const timeStr = mins > 0 ? `${mins}分${secs}秒` : `${secs}秒`;
+            const stepsNum = Math.round(totalWalkSteps);
+            const statsData = [
+                { icon: '\u23F1', label: 'プレイ時間', value: timeStr },
+                { icon: '\uD83D\uDC63', label: 'あゆんだ歩数', value: `${stepsNum.toLocaleString()} 歩` },
+            ];
+            statsData.forEach(s => {
+                const item = document.createElement('div');
+                item.className = 'ayumi-stat-item';
+                item.innerHTML = `<span class="ayumi-stat-icon">${s.icon}</span><span class="ayumi-stat-label">${s.label}</span><span class="ayumi-stat-value">${s.value}</span>`;
+                statsRow.appendChild(item);
+            });
+            container.appendChild(statsRow);
+
+            // Top section: pentagon + labels
+            const topSection = document.createElement('div');
+            topSection.className = 'ayumi-top-section';
+
+            // Pentagon canvas
+            const pentWrap = document.createElement('div');
+            pentWrap.className = 'ayumi-pentagon-wrap';
+            const canvasEl = document.createElement('canvas');
+            canvasEl.id = 'ayumi-pentagon-canvas';
+            canvasEl.width = 320;
+            canvasEl.height = 320;
+            pentWrap.appendChild(canvasEl);
+            topSection.appendChild(pentWrap);
+
+            // Labels list
+            const labelsList = document.createElement('div');
+            labelsList.className = 'ayumi-labels-list';
+            const sortedLabels = Object.entries(labelSums)
+                .filter(([, v]) => v > 0)
+                .sort((a, b) => b[1] - a[1]);
+            sortedLabels.forEach(([key, val]) => {
+                const row = document.createElement('div');
+                row.className = 'ayumi-label-row';
+                const axisKey = LABEL_PRIMARY_AXIS[key];
+                const axisInfo = PENTAGON_AXES.find(a => a.key === axisKey);
+                const axisColor = axisInfo ? axisInfo.color : '#999';
+                row.style.borderLeftColor = axisColor;
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'ayumi-label-name';
+                const n = LABEL_NAMES[key];
+                nameSpan.textContent = n ? `${n.ja} / ${n.en}` : key;
+                const valSpan = document.createElement('span');
+                valSpan.className = 'ayumi-label-val';
+                valSpan.textContent = val;
+                row.appendChild(nameSpan);
+                row.appendChild(valSpan);
+                labelsList.appendChild(row);
+            });
+            topSection.appendChild(labelsList);
+            container.appendChild(topSection);
+
+            // Timeline
+            const tlSection = document.createElement('div');
+            tlSection.className = 'ayumi-timeline';
+            const tlTitle = document.createElement('h3');
+            tlTitle.textContent = '人生のあゆみ';
+            tlSection.appendChild(tlTitle);
+            timeline.forEach(ph => {
+                const phDiv = document.createElement('div');
+                phDiv.className = 'ayumi-phase';
+                const ageSpan = document.createElement('span');
+                ageSpan.className = 'ayumi-phase-age';
+                ageSpan.textContent = ph.age;
+                phDiv.appendChild(ageSpan);
+                const itemsWrap = document.createElement('div');
+                itemsWrap.className = 'ayumi-phase-items';
+                ph.items.forEach(item => {
+                    const tag = document.createElement('span');
+                    tag.className = 'ayumi-item-tag';
+                    const nameSpan = document.createElement('span');
+                    nameSpan.className = 'ayumi-item-name';
+                    nameSpan.textContent = item.name;
+                    tag.appendChild(nameSpan);
+                    if (item.desc) {
+                        const descSpan = document.createElement('span');
+                        descSpan.className = 'ayumi-item-desc';
+                        descSpan.textContent = item.desc;
+                        tag.appendChild(descSpan);
+                    }
+                    itemsWrap.appendChild(tag);
+                });
+                phDiv.appendChild(itemsWrap);
+                tlSection.appendChild(phDiv);
+            });
+            container.appendChild(tlSection);
+
+            // Pre-generate lyrics for display and later playback
+            const ls = finaleLabelSums || labelSums;
+            if (typeof TTLLyrics !== 'undefined' && leadAttacks) {
+                finaleLyrics = TTLLyrics.generateLyrics(
+                    leadAttacks,
+                    baseRhythmInfo.kickPattern.length,
+                    ls,
+                    baseRhythmInfo.beatsPerBar * STEPS_PER_BEAT
+                );
+            }
+
+            // Lyrics section
+            if (finaleLyrics && finaleLyrics.verses && finaleLyrics.verses.length > 0) {
+                const lyricsDiv = document.createElement('div');
+                lyricsDiv.className = 'ayumi-lyrics';
+                const lyricsTitle = document.createElement('h3');
+                lyricsTitle.textContent = 'あなたの歌 — Your Song';
+                lyricsDiv.appendChild(lyricsTitle);
+                finaleLyrics.verses.forEach(verse => {
+                    if (verse && verse.text) {
+                        const p = document.createElement('p');
+                        p.className = 'ayumi-verse';
+                        p.textContent = verse.text;
+                        lyricsDiv.appendChild(p);
+                    }
+                });
+                container.appendChild(lyricsDiv);
+            }
+
+            // "歌を聴く" button
+            const listenBtn = document.createElement('button');
+            listenBtn.id = 'ayumi-listen-btn';
+            listenBtn.textContent = '— 歌を聴く / Listen to the Song —';
+            listenBtn.addEventListener('click', function() {
+                listenBtn.textContent = '\u266A 準備中…';
+                listenBtn.style.pointerEvents = 'none';
+                listenBtn.style.opacity = '0.7';
+
+                function afterBgmFade() {
+                    if (typeof TTLLyrics !== 'undefined' && leadAttacks) {
+                        if (!finaleLyrics) {
+                            finaleLyrics = TTLLyrics.generateLyrics(
+                                leadAttacks,
+                                baseRhythmInfo.kickPattern.length,
+                                ls,
+                                baseRhythmInfo.beatsPerBar * STEPS_PER_BEAT
+                            );
+                        }
+                        finaleVerseIndex = 0;
+                        finaleStepInPattern = 0;
+                        finaleLoopCount = 0;
+                        finaleBgDarkness = 0;
+                        finaleDarkTarget = 0;
+                        initVocalSynth();
+                        Promise.all([preRenderVocalBuffers(), preRenderConsonantBuffers()]).then(function() {
+                            // Hide character for music playback
+                            baby = null;
+
+                            // --- Scroll transition: ayumi out, score HUD in ---
+
+                            // 1. Freeze overlay scroll position and switch to transform-based movement
+                            var scrollY = overlay.scrollTop;
+                            overlay.style.overflow = 'hidden';
+                            container.style.marginTop = -scrollY + 'px';
+
+                            // 2. Set up score HUD centered but starting below viewport
+                            var scoreHud = document.getElementById('score-hud');
+                            if (scoreHud) {
+                                scoreHud.style.transition = 'none';
+                                scoreHud.style.position = 'fixed';
+                                scoreHud.style.bottom = '';
+                                scoreHud.style.right = '';
+                                scoreHud.style.left = '50%';
+                                scoreHud.style.top = '50%';
+                                scoreHud.style.transform = 'translate(-50%, calc(-50% + 100vh))';
+                                scoreHud.style.width = '96vw';
+                                scoreHud.style.maxWidth = '96vw';
+                                scoreHud.style.maxHeight = 'calc(100vh - 40px)';
+                                scoreHud.style.padding = '20px 22px 18px';
+                                scoreHud.style.zIndex = '120';
+                                scoreHud.style.backdropFilter = 'blur(12px) saturate(1.4)';
+                                scoreHud.style.WebkitBackdropFilter = 'blur(12px) saturate(1.4)';
+                                scoreHud.style.boxShadow = '0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.12)';
+                                scoreHud.style.borderRadius = '18px';
+                                scoreHud.style.borderTop = '1px solid rgba(255,255,255,0.45)';
+                                scoreHud.style.borderLeft = '1px solid rgba(255,255,255,0.2)';
+                                scoreHud.style.borderRight = '1px solid rgba(255,255,255,0.2)';
+                                scoreHud.style.borderBottom = '1px solid rgba(255,255,255,0.08)';
+                                scoreHud.style.background = 'radial-gradient(ellipse 120% 60% at 50% 0%, rgba(255,255,255,0.10) 0%, transparent 70%), linear-gradient(180deg, rgba(30,28,36,0.82) 0%, rgba(22,20,28,0.88) 50%, rgba(16,14,22,0.92) 100%)';
+                                scoreHud.style.opacity = '1';
+                                scoreHud.style.pointerEvents = 'auto';
+                                scoreHud.classList.add('visible');
+                            }
+
+                            // 3. Build score content before animation (needed to measure HUD height)
+                            finaleMusicStarted = true;
+                            finaleDarkTarget = 1;
+                            buildScoreHud();
+                            updateScoreToggleUi();
+
+                            // 3b. Style score header elements for FINALE
+                            var scoreHead = document.getElementById('score-head');
+                            if (scoreHead) {
+                                scoreHead.style.marginBottom = '14px';
+                                scoreHead.style.paddingBottom = '12px';
+                                scoreHead.style.borderBottom = '1px solid rgba(120,130,160,0.15)';
+                            }
+                            var scoreTitle = document.getElementById('score-title');
+                            if (scoreTitle) {
+                                scoreTitle.style.fontSize = '0.92rem';
+                                scoreTitle.style.letterSpacing = '0.18em';
+                                scoreTitle.style.color = 'rgba(210,205,220,0.95)';
+                                scoreTitle.style.textShadow = '0 1px 0 rgba(255,255,255,0.08), 0 -1px 0 rgba(0,0,0,0.3)';
+                            }
+                            var scoreMeta = document.getElementById('score-meta');
+                            if (scoreMeta) {
+                                scoreMeta.style.fontSize = '0.68rem';
+                                scoreMeta.style.color = 'rgba(180,175,190,0.65)';
+                            }
+                            // 4. Create logo element above score HUD, positioned based on actual HUD height
+                            var hudHalfH = scoreHud ? scoreHud.getBoundingClientRect().height / 2 : 0;
+                            var logoGap = hudHalfH + 28; // 28px gap above HUD top edge
+                            var logo = document.createElement('div');
+                            logo.id = 'finale-score-logo';
+                            logo.textContent = 'Tone.Tone.Life.';
+                            logo.style.cssText = 'position:fixed;left:50%;top:calc(50% - ' + logoGap + 'px);transform:translate(-50%,calc(-100% + 100vh));z-index:121;font-size:0.82rem;letter-spacing:0.22em;font-weight:700;color:rgba(90,74,62,0.5);text-transform:uppercase;white-space:nowrap;pointer-events:none;';
+                            document.body.appendChild(logo);
+
+                            // 5. Animate: ayumi scrolls up, score HUD slides up from below
+                            var animDur = 1500;
+                            var animStart = performance.now();
+                            function animStep(now) {
+                                var t = Math.min((now - animStart) / animDur, 1);
+                                var e = easeOut(t);
+                                // Ayumi container scrolls up
+                                overlay.style.transform = 'translateY(' + (-e * 100) + 'vh)';
+                                // Score HUD slides from below to center
+                                if (scoreHud) {
+                                    scoreHud.style.transform = 'translate(-50%, calc(-50% + ' + ((1 - e) * 100) + 'vh))';
+                                }
+                                // Logo follows score HUD
+                                logo.style.transform = 'translate(-50%, calc(-100% + ' + ((1 - e) * 100) + 'vh))';
+                                if (t < 1) {
+                                    requestAnimationFrame(animStep);
+                                } else {
+                                    // 6. Cleanup: remove overlay, restore z-index
+                                    overlay.remove();
+                                    if (scoreHud) {
+                                        scoreHud.style.zIndex = '';
+                                    }
+                                    // 7. Wait 2 seconds then start music
+                                    setTimeout(function() {
+                                        // Set up Tone.Recorder to capture finale audio
+                                        try {
+                                            finaleRecorder = new Tone.Recorder();
+                                            Tone.getDestination().connect(finaleRecorder);
+                                            finaleRecorder.start();
+                                        } catch(e) {
+                                            finaleRecorder = null;
+                                        }
+                                        Tone.Transport.start();
+                                        startBaseGroove();
+                                    }, 2000);
+                                }
+                            }
+                            requestAnimationFrame(animStep);
+                        });
+                    } else {
+                        // No lyrics: scroll out ayumi overlay then start transport
+                        baby = null;
+                        var scrollY = overlay.scrollTop;
+                        overlay.style.overflow = 'hidden';
+                        container.style.marginTop = -scrollY + 'px';
+                        var animDur = 1500;
+                        var animStart = performance.now();
+                        function animStepNoLyrics(now) {
+                            var t = Math.min((now - animStart) / animDur, 1);
+                            var e = easeOut(t);
+                            overlay.style.transform = 'translateY(' + (-e * 100) + 'vh)';
+                            if (t < 1) {
+                                requestAnimationFrame(animStepNoLyrics);
+                            } else {
+                                overlay.remove();
+                                setTimeout(function() {
+                                    Tone.Transport.start();
+                                }, 2000);
+                            }
+                        }
+                        requestAnimationFrame(animStepNoLyrics);
+                    }
+                }
+
+                // Fade out ayumi BGM first, then start vocal music
+                if (ayumiBgmPlayer && !ayumiBgmPlayer.paused) {
+                    const bgm = ayumiBgmPlayer;
+                    const startVol = bgm.volume;
+                    const fadeStart = Date.now();
+                    const fadeDur = 2000;
+                    const fadeStep = () => {
+                        const elapsed = Date.now() - fadeStart;
+                        if (elapsed >= fadeDur) {
+                            bgm.pause();
+                            bgm.src = '';
+                            ayumiBgmPlayer = null;
+                            afterBgmFade();
+                            return;
+                        }
+                        bgm.volume = startVol * (1 - elapsed / fadeDur);
+                        requestAnimationFrame(fadeStep);
+                    };
+                    fadeStep();
+                } else {
+                    afterBgmFade();
+                }
+            });
+            container.appendChild(listenBtn);
+
+            overlay.appendChild(container);
+            // Make overlay visible immediately (logo overlay is on top during transition)
+            overlay.style.transition = 'none';
+            overlay.style.opacity = '1';
+            document.body.appendChild(overlay);
+
+            // Start credits scroll immediately (synced with logo slide)
+            const scrollDuration = 4000;
+            const startScroll = performance.now();
+            function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+            function scrollStep(now) {
+                const t = Math.min((now - startScroll) / scrollDuration, 1);
+                container.style.transform = `translateY(${(1 - easeOut(t)) * 100}vh)`;
+                if (t < 1) requestAnimationFrame(scrollStep);
+            }
+            requestAnimationFrame(scrollStep);
+            // Animate pentagon chart partway through the scroll
+            setTimeout(() => {
+                animatePentagonChart(canvasEl, scores);
+            }, 1500);
+        }
+
         function getAdultChoice() {
             var adultIds = ["university","parttime","jobhunt","travel","entertainment"];
             var found = selectedToys.find(function(t) { return adultIds.includes(t.id); });
@@ -15683,29 +16709,35 @@
 
             var btn = document.createElement('button');
             btn.id = 'finale-proceed-btn';
-            btn.textContent = '— 聴く / Listen —';
+            btn.textContent = '— 振り返る / Look Back —';
             box.appendChild(btn);
 
             overlay.appendChild(box);
             document.body.appendChild(overlay);
 
+            // Fade in the overlay itself first
+            requestAnimationFrame(function() {
+                requestAnimationFrame(function() {
+                    overlay.style.opacity = '1';
+                });
+            });
+
+            // Fade in each poem line after overlay is visible
+            var baseDelay = 1800; // wait for overlay fade-in
             var wrapEls = box.querySelectorAll('.finale-msg-wrap');
             wrapEls.forEach(function(el, i) {
-                setTimeout(function() { el.style.opacity = '1'; }, 600 + i * 800);
+                setTimeout(function() { el.style.opacity = '1'; }, baseDelay + i * 800);
             });
 
             // Show button after all lines visible
-            var btnDelay = 600 + lines.length * 800 + 400;
+            var btnDelay = baseDelay + lines.length * 800 + 400;
             setTimeout(function() { btn.style.opacity = '1'; }, btnDelay);
 
             btn.addEventListener('click', function() {
-                btn.classList.add('waiting');
-                btn.innerHTML = '<span class="finale-spinner">♪</span> 準備中…';
-                // Delegate heavy work to caller; caller calls fadeOut when ready
-                onStart(function fadeOut() {
-                    overlay.style.opacity = '0';
-                    setTimeout(function() { overlay.remove(); }, 800);
-                });
+                // Immediate fade out — no spinner needed
+                overlay.style.opacity = '0';
+                setTimeout(function() { overlay.remove(); }, 1800);
+                onStart();
             });
         }
 
@@ -15729,53 +16761,29 @@
                         labelSums[k] = (labelSums[k] || 0) + v;
                     });
                 });
+                finaleLabelSums = labelSums;
                 var finaleLines = generateFinaleMessage(labelSums);
 
                 currentScene = SCENE.FINALE;
                 isTopDownScene = false;
+
+                // Place baby at left edge for walk animation
+                if (baby) {
+                    baby.x = -60;
+                    baby.y = height * 0.75;
+                    baby.direction = 1;
+                    baby.isTopDown = false;
+                }
+                finaleWalkToCenter = true;
+
                 fadeScreenTo(0, 1500);
 
-                // No heavy processing here — all deferred to after button click
-                showFinaleMessage(finaleLines, function(fadeOut) {
-                    // Button clicked — now do heavy audio work behind spinner
-                    if (typeof TTLLyrics !== 'undefined' && leadAttacks) {
-                        finaleLyrics = TTLLyrics.generateLyrics(
-                            leadAttacks,
-                            baseRhythmInfo.kickPattern.length,
-                            labelSums,
-                            baseRhythmInfo.beatsPerBar * STEPS_PER_BEAT
-                        );
-                        finaleVerseIndex = 0;
-                        finaleStepInPattern = 0;
-                        finaleLoopCount = 0;
-                        initVocalSynth();
-                        Promise.all([preRenderVocalBuffers(), preRenderConsonantBuffers()]).then(function() {
-                            fadeOut();
-                            // Score HUD centered
-                            const scoreHud = document.getElementById('score-hud');
-                            if (scoreHud) {
-                                scoreHud.style.position = 'fixed';
-                                scoreHud.style.bottom = '';
-                                scoreHud.style.right = '';
-                                scoreHud.style.top = '50%';
-                                scoreHud.style.left = '50%';
-                                scoreHud.style.transform = 'translate(-50%, -50%)';
-                                scoreHud.style.width = '96vw';
-                                scoreHud.style.maxWidth = '96vw';
-                                scoreHud.style.maxHeight = 'calc(100vh - 40px)';
-                                scoreHud.style.paddingBottom = '0';
-                            }
-                            buildScoreHud();
-                            updateScoreToggleUi();
-                            // 1st loop: gradual buildup — vocals start at loop 3
-                            Tone.Transport.start();
-                            startBaseGroove();
-                        });
-                    } else {
-                        fadeOut();
-                        Tone.Transport.start();
-                    }
-                });
+                // Walk reaches center → showFinaleMessage is called from render loop
+                // Store finaleLines for later use
+                triggerFinale._pendingLines = finaleLines;
+                triggerFinale._onFinaleButton = function() {
+                    startAyumiSequence();
+                };
             }, 3000);
         }
 
@@ -16465,8 +17473,21 @@
                 }
                 var span = document.createElement('span');
                 span.className = 'mora';
-                span.textContent = words[i].text;
                 span.setAttribute('data-first', String(words[i].firstDisplayIndex));
+                // Use <ruby> for furigana if kana reading differs from kanji display
+                var frag = verse.words[words[i].fragIndex];
+                var kanji = words[i].text;
+                var kana = frag ? frag.kana : '';
+                if (kana && kana !== kanji) {
+                    var ruby = document.createElement('ruby');
+                    ruby.textContent = kanji;
+                    var rt = document.createElement('rt');
+                    rt.textContent = kana;
+                    ruby.appendChild(rt);
+                    span.appendChild(ruby);
+                } else {
+                    span.textContent = kanji;
+                }
                 line.appendChild(span);
             }
         }
@@ -21808,7 +22829,16 @@
                 const toneColor = dropColor(drop);
                 if (drop.toy && toySystem.drawToy) {
                     const toyScale = (currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2) ? 1.5 : 1.84;
-                    toySystem.drawToy(ctx, drop.toy, drop.x, drop.y - 92, toyScale, drop.toySeed);
+                    if (drop.isHovered) {
+                        ctx.save();
+                        const pulse = 0.6 + Math.sin(performance.now() * 0.005 * 5) * 0.4;
+                        ctx.shadowColor = drop.dropColor || 'rgba(255,220,160,0.8)';
+                        ctx.shadowBlur = 14 + pulse * 12;
+                        toySystem.drawToy(ctx, drop.toy, drop.x, drop.y - 92, toyScale, drop.toySeed);
+                        ctx.restore();
+                    } else {
+                        toySystem.drawToy(ctx, drop.toy, drop.x, drop.y - 92, toyScale, drop.toySeed);
+                    }
                 }
                 if (drop.toy && drop.overlapAlpha > 0.01) {
                     const a = Math.min(1, drop.overlapAlpha);
@@ -24038,6 +25068,7 @@
                     bassVariant,
                     activityId: act.id,
                     activityName: act.name,
+                    activityNameEn: act.nameEn,
                     dropColor: act.color,
                     activityLabels: act.labels,
                     ripples: []
@@ -24788,35 +25819,33 @@
                         if (drop.isHovered) drop.ripples.push({ t: 0, accent: isOpenAccent ? 1 : 0.7 });
                     });
 
-                    // FINALE loop transitions: loop1=buildup, loop2=full+lead, loop3+=vocal
-                    if (currentScene === SCENE.FINALE && !finaleVocalActive && finaleLyrics) {
+                    // FINALE loop transitions + verse tracking
+                    if (currentScene === SCENE.FINALE && finaleLyrics) {
                         const patLen = baseRhythmInfo.kickPattern.length;
                         if ((step + 1) % patLen === 0) {
-                            finaleLoopCount++;
-                            if (finaleLoopCount >= 1 && finaleLoopCount < 2) {
-                                // Loop 2: rebuild score to remove opacity
-                                buildScoreHud();
-                            }
-                            if (finaleLoopCount >= 2) {
-                                finaleVocalActive = true;
-                                finaleVerseIndex = 0;
-                                finaleStepInPattern = 0;
-                                initKaraokeDisplay();
-                            }
-                        }
-                    }
-
-                    // Verse tracking (FINALE vocal)
-                    if (finaleVocalActive && finaleLyrics) {
-                        const patLen = baseRhythmInfo.kickPattern.length;
-                        if ((step + 1) % patLen === 0) {
-                            finaleVerseIndex++;
-                            if (finaleVerseIndex < finaleLyrics.verses.length) {
-                                updateKaraokeVerse(finaleVerseIndex);
+                            if (!finaleVocalActive) {
+                                // Loop buildup: loop1=buildup, loop2=full+lead, loop3+=vocal
+                                finaleLoopCount++;
+                                if (finaleLoopCount >= 1 && finaleLoopCount < 2) {
+                                    buildScoreHud();
+                                }
+                                if (finaleLoopCount >= 2) {
+                                    finaleVocalActive = true;
+                                    finaleVerseIndex = 0;
+                                    finaleStepInPattern = 0;
+                                    initKaraokeDisplay();
+                                }
                             } else {
-                                finaleVocalActive = false;
-                                disposeVocalSynth();
-                                hideKaraokeDisplay();
+                                // Verse tracking (vocal active)
+                                finaleVerseIndex++;
+                                if (finaleVerseIndex < finaleLyrics.verses.length) {
+                                    updateKaraokeVerse(finaleVerseIndex);
+                                } else {
+                                    finaleVocalActive = false;
+                                    disposeVocalSynth();
+                                    hideKaraokeDisplay();
+                                    triggerFinaleEnding();
+                                }
                             }
                         }
                     }
@@ -24827,6 +25856,214 @@
                 baseGroove.timer = setTimeout(tick, 20);
             };
             tick();
+        }
+
+        // ==========================================
+        // Finale Ending Sequence
+        // ==========================================
+        function triggerFinaleEnding() {
+            if (finaleEndingTriggered) return;
+            finaleEndingTriggered = true;
+
+            // 1. Wait one more loop of instrumental
+            var loopMs = baseGroove.stepMs * baseRhythmInfo.kickPattern.length;
+            setTimeout(function() {
+                // 2. Fade out music (2s)
+                var dest = Tone.getDestination();
+                var startVol = dest.volume.value;
+                dest.volume.rampTo(-60, 2);
+                setTimeout(function() {
+                    // 3. Stop transport & groove
+                    Tone.Transport.stop();
+                    if (baseGroove && baseGroove.timer) {
+                        clearTimeout(baseGroove.timer);
+                        baseGroove.timer = null;
+                    }
+                    dest.volume.value = startVol;
+
+                    // 4. Stop recorder and capture blob
+                    if (finaleRecorder) {
+                        try {
+                            finaleRecorder.stop().then(function(blob) {
+                                finaleRecordedBlob = blob;
+                            }).catch(function() {});
+                        } catch(e) {}
+                    }
+
+                    // 5. Scroll out score HUD + logo (1.5s)
+                    var scoreHud = document.getElementById('score-hud');
+                    var logo = document.getElementById('finale-score-logo');
+                    var animDur = 1500;
+                    var animStart = performance.now();
+                    function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+
+                    function scrollOutStep(now) {
+                        var t = Math.min((now - animStart) / animDur, 1);
+                        var e = easeOut(t);
+                        var offset = -e * 100;
+                        if (scoreHud) {
+                            scoreHud.style.transform = 'translate(-50%, calc(-50% + ' + offset + 'vh))';
+                        }
+                        if (logo) {
+                            logo.style.transform = 'translate(-50%, calc(-100% + ' + offset + 'vh))';
+                        }
+                        if (t < 1) {
+                            requestAnimationFrame(scrollOutStep);
+                        } else {
+                            // 6. Cleanup
+                            if (scoreHud) scoreHud.style.display = 'none';
+                            if (logo) logo.remove();
+                            // 7. Show ending screen
+                            showFinaleEndingScreen();
+                        }
+                    }
+                    requestAnimationFrame(scrollOutStep);
+                }, 2200); // slightly longer than ramp to ensure fade completes
+            }, loopMs);
+        }
+
+        function showUnlockOverlay(options) {
+            var overlay = document.createElement('div');
+            overlay.id = 'unlock-overlay';
+
+            var card = document.createElement('div');
+            card.id = 'unlock-card';
+
+            var icon = document.createElement('div');
+            icon.className = 'unlock-icon';
+            icon.textContent = '\u2728';
+
+            var title = document.createElement('p');
+            title.className = 'unlock-title';
+            title.textContent = options.title;
+
+            var bodyJp = document.createElement('p');
+            bodyJp.className = 'unlock-body';
+            bodyJp.textContent = options.bodyJp;
+
+            var bodyEn = document.createElement('p');
+            bodyEn.className = 'unlock-body-en';
+            bodyEn.textContent = options.bodyEn;
+
+            card.appendChild(icon);
+            card.appendChild(title);
+            card.appendChild(bodyJp);
+            card.appendChild(bodyEn);
+
+            if (options.imgSrc) {
+                var img = document.createElement('img');
+                img.className = 'unlock-img';
+                img.src = options.imgSrc;
+                card.appendChild(img);
+            }
+
+            var okBtn = document.createElement('button');
+            okBtn.id = 'unlock-ok-btn';
+            okBtn.textContent = 'OK';
+            okBtn.addEventListener('click', function() {
+                overlay.remove();
+                if (options.onOk) options.onOk();
+            });
+            card.appendChild(okBtn);
+
+            overlay.appendChild(card);
+            document.body.appendChild(overlay);
+        }
+
+        function showFinaleEndingScreen() {
+            // Create ending screen DOM
+            var screen = document.createElement('div');
+            screen.id = 'finale-ending-screen';
+
+            // Ornaments (same as title orbs)
+            var ornaments = document.createElement('div');
+            ornaments.id = 'finale-ending-ornaments';
+            var orbA = document.createElement('span');
+            orbA.className = 'ornament orb-a';
+            var orbB = document.createElement('span');
+            orbB.className = 'ornament orb-b';
+            ornaments.appendChild(orbA);
+            ornaments.appendChild(orbB);
+
+            // Content
+            var content = document.createElement('div');
+            content.id = 'finale-ending-content';
+
+            var msg = document.createElement('p');
+            msg.className = 'finale-thanks-msg';
+            msg.textContent = 'Thank you for playing.';
+
+            var buttons = document.createElement('div');
+            buttons.id = 'finale-ending-buttons';
+
+            var saveBtn = document.createElement('button');
+            saveBtn.id = 'finale-save-btn';
+            saveBtn.textContent = 'Save Music';
+
+            var titleBtn = document.createElement('button');
+            titleBtn.id = 'finale-title-btn';
+            titleBtn.textContent = 'Return to Title';
+
+            buttons.appendChild(saveBtn);
+            buttons.appendChild(titleBtn);
+            content.appendChild(msg);
+            content.appendChild(buttons);
+            screen.appendChild(ornaments);
+            screen.appendChild(content);
+            document.body.appendChild(screen);
+
+            // Hide Save button if recorder was not available
+            if (!finaleRecorder || !finaleRecordedBlob) {
+                // Check again after a short delay (blob may still be resolving)
+                setTimeout(function() {
+                    if (!finaleRecordedBlob) {
+                        saveBtn.style.display = 'none';
+                    }
+                }, 500);
+            }
+
+            // Animate in: fade screen, slide content from below, fade orbs
+            requestAnimationFrame(function() {
+                screen.classList.add('visible');
+            });
+
+            // Button handlers
+            saveBtn.addEventListener('click', function() {
+                if (finaleRecordedBlob) {
+                    var url = URL.createObjectURL(finaleRecordedBlob);
+                    var a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'ToneToneLife_Music.webm';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }
+            });
+
+            titleBtn.addEventListener('click', function() {
+                if (playCount === 0) {
+                    localStorage.setItem('ttl_playCount', '1');
+                    showUnlockOverlay({
+                        title: '\u65B0\u3057\u3044tone\u304C\u89E3\u653E\u3055\u308C\u307E\u3057\u305F',
+                        bodyJp: '\u300Crapid\u300D\u306Etone\u304C\u9078\u3079\u308B\u3088\u3046\u306B\u306A\u308A\u307E\u3057\u305F\u3002\u6B21\u306E\u4EBA\u751F\u3067\u306F\u3001\u65B0\u305F\u306A\u30EA\u30BA\u30E0\u3092\u523B\u3081\u307E\u3059\u3002',
+                        bodyEn: 'The "rapid" tone has been unlocked. A new rhythm awaits in your next life.',
+                        onOk: function() { location.reload(); }
+                    });
+                } else if (playCount === 1) {
+                    localStorage.setItem('ttl_playCount', '2');
+                    showUnlockOverlay({
+                        title: '\u65B0\u3057\u3044\u9078\u629E\u80A2\u304C\u89E3\u653E\u3055\u308C\u307E\u3057\u305F',
+                        bodyJp: '\u5927\u4EBA\u306E\u8857\u306B\u300C\u5A2F\u697D\u300D\u304C\u767B\u5834\u3057\u307E\u3057\u305F\u3002\u5149\u3068\u97F3\u306E\u4E16\u754C\u304C\u5F85\u3063\u3066\u3044\u307E\u3059\u3002',
+                        bodyEn: '"Entertainment" is now available in the adult city. A world of light and sound awaits.',
+                        imgSrc: 'img/pachinko.png',
+                        onOk: function() { location.reload(); }
+                    });
+                } else {
+                    localStorage.setItem('ttl_playCount', String(playCount + 1));
+                    location.reload();
+                }
+            });
         }
 
         // 画面外トーン方向インジケーター（マリカ風くの字矢印）
@@ -24898,9 +26135,14 @@
             const t = Date.now() * 0.001;
 
             const drop = adultConfirmation.drop;
-            const toneName = drop.activityName || drop.facilityName || "tone";
-            const activity = ADULT_ACTIVITIES.find(a => a.name === toneName || a.id === drop.activityId) || getThirtiesActivities(thirtiesHasMarriage).find(a => a.name === toneName || a.id === drop.activityId);
-            const toneNameEn = activity ? activity.nameEn : (drop.activityNameEn || drop.facilityName || "tone");
+            const toneName = drop.toy ? (drop.toy.nameJa || drop.toy.name)
+                : (drop.activityName || drop.facilityName || "tone");
+            const activity = ADULT_ACTIVITIES.find(a => a.name === toneName || a.id === drop.activityId)
+                || getThirtiesActivities(thirtiesHasMarriage).find(a => a.name === toneName || a.id === drop.activityId)
+                || CHILD_FACILITIES.find(a => a.id === drop.activityId)
+                || SCHOOL_ACTIVITIES.find(a => a.id === drop.activityId);
+            const toneNameEn = drop.toy ? drop.toy.name
+                : (activity ? activity.nameEn : (drop.activityNameEn || "tone"));
             const toneColor = drop.dropColor || (activity ? activity.color : palette.btnColor);
 
             // Soft frosted overlay
@@ -24944,10 +26186,21 @@
             ctx.shadowBlur = 8;
             ctx.fillStyle = "rgba(80, 75, 65, 0.85)";
             ctx.font = "500 15px 'Zen Maru Gothic', sans-serif";
-            ctx.fillText("このtoneを選びますか？", bx, centerY - 4);
+            let questionJa, questionEn;
+            if (currentScene <= SCENE.TODDLE1) {
+                questionJa = `「${toneName}」で遊びますか？`;
+                questionEn = `Play with ${toneNameEn}?`;
+            } else if (currentScene <= SCENE.CHILD2) {
+                questionJa = `「${toneName}」を選びますか？`;
+                questionEn = `Choose ${toneNameEn}?`;
+            } else {
+                questionJa = "このtoneを選びますか？";
+                questionEn = "Choose this tone?";
+            }
+            ctx.fillText(questionJa, bx, centerY - 4);
             ctx.fillStyle = "rgba(120, 115, 105, 0.6)";
             ctx.font = "400 11px 'Zen Maru Gothic', sans-serif";
-            ctx.fillText("Choose this tone?", bx, centerY + 14);
+            ctx.fillText(questionEn, bx, centerY + 14);
             ctx.restore();
 
             // Circular buttons
@@ -25005,6 +26258,19 @@
         // Render Loop
         function animate() {
             ctx.clearRect(0, 0, width, height);
+            // Track walk steps via walkCycle delta
+            // walkCycle advances ~0.12-0.35/frame when walking, ~0.03-0.05 when idle
+            // One full stride (left+right) = 2π of walkCycle = 2 steps
+            if (baby && currentScene >= SCENE.CRAWL) {
+                const wc = baby.walkCycle;
+                if (prevWalkCycle !== null && wc > prevWalkCycle) {
+                    const delta = wc - prevWalkCycle;
+                    if (delta > 0.08) {  // filter idle breathing (<=0.05)
+                        totalWalkSteps += delta / Math.PI;  // 2 steps per 2π
+                    }
+                }
+                prevWalkCycle = wc;
+            }
             // Keep pointer-linked world coordinates in sync even while camera scrolls.
             const isJobHuntSideScroll = (currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2) && jobHuntViewMode === "sidescroll";
             if (isTopDownScene && isJobHuntSideScroll) {
@@ -25050,20 +26316,48 @@
                 drawSlotLabelAnimations(ctx);
             } else if (currentScene === SCENE.FINALE) {
                 // === FINALE — score playback scene ===
-                const finGrad = ctx.createLinearGradient(0, 0, 0, height);
-                finGrad.addColorStop(0, "hsl(220, 15%, 92%)");
-                finGrad.addColorStop(1, "hsl(220, 10%, 85%)");
-                ctx.fillStyle = finGrad;
+                ctx.fillStyle = palette.bg;
                 ctx.fillRect(0, 0, width, height);
-                // Subtle floating particles
-                const ft = Date.now() * 0.001;
-                for (let fi = 0; fi < 20; fi++) {
-                    const fpx = (Math.sin(ft * 0.3 + fi * 1.7) + 1) * 0.5 * width;
-                    const fpy = (Math.cos(ft * 0.2 + fi * 2.3) + 1) * 0.5 * height;
-                    ctx.fillStyle = `rgba(180,170,160,${(0.1 + Math.sin(ft + fi) * 0.05).toFixed(3)})`;
-                    ctx.beginPath();
-                    ctx.arc(fpx, fpy, 3 + Math.sin(ft * 0.5 + fi) * 2, 0, Math.PI * 2);
-                    ctx.fill();
+                // Smooth dark mode transition during vocal phase
+                if (finaleDarkTarget > 0 && finaleBgDarkness < finaleDarkTarget) {
+                    finaleBgDarkness += (finaleDarkTarget - finaleBgDarkness) * 0.035;
+                    if (finaleBgDarkness > 0.005) {
+                        ctx.fillStyle = 'rgba(12,10,18,' + (finaleBgDarkness * 0.82) + ')';
+                        ctx.fillRect(0, 0, width, height);
+                        document.body.style.backgroundColor = 'rgb(' + Math.round(255 - finaleBgDarkness * 230) + ',' + Math.round(255 - finaleBgDarkness * 232) + ',' + Math.round(255 - finaleBgDarkness * 225) + ')';
+                    }
+                } else if (finaleBgDarkness > 0.005) {
+                    ctx.fillStyle = 'rgba(12,10,18,' + (finaleBgDarkness * 0.82) + ')';
+                    ctx.fillRect(0, 0, width, height);
+                }
+                // Floating blobs (subtle, behind DOM score HUD)
+                ctx.globalAlpha = 0.35;
+                blobs.forEach(b => { b.update(); b.draw(ctx); });
+                ctx.globalAlpha = 1;
+                // Draw baby character
+                if (baby) {
+                    if (finaleWalkToCenter) {
+                        const targetX = width / 2;
+                        baby.x += 1.5;
+                        baby.walkCycle += 0.13;
+                        if (baby.x >= targetX - 5) {
+                            baby.x = targetX;
+                            baby.walkCycle = Math.round(baby.walkCycle / Math.PI) * Math.PI;
+                            finaleWalkToCenter = false;
+                            // Character arrived — wait 2s then show poem
+                            if (triggerFinale._pendingLines) {
+                                const lines = triggerFinale._pendingLines;
+                                const onBtn = triggerFinale._onFinaleButton;
+                                triggerFinale._pendingLines = null;
+                                setTimeout(function() {
+                                    showFinaleMessage(lines, onBtn);
+                                }, 2000);
+                            }
+                        }
+                    } else {
+                        baby.walkCycle += 0.03;
+                    }
+                    baby.draw(ctx);
                 }
             } else if (isTopDownScene) {
                 // 見下ろし型2D scenes (PART_TIME, JOB_HUNT, JOB_HUNT2)
@@ -25479,6 +26773,9 @@
         const btnMiddle = document.getElementById('btn-middle');
         const btnRight = document.getElementById('btn-right');
         const btnFast = document.getElementById('btn-fast');
+        if (playCount < 1) {
+            btnFast.parentElement.style.display = 'none';
+        }
         const sceneFade = document.getElementById('scene-fade');
         const scoreHud = document.getElementById('score-hud');
         const scoreTracks = document.getElementById('score-tracks');
@@ -25675,7 +26972,8 @@
         }
 
         function updateScoreToggleUi() {
-            const available = (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY || currentScene === SCENE.FINALE) && !!baseRhythmInfo;
+            const finaleHudReady = currentScene === SCENE.FINALE && finaleMusicStarted;
+            const available = (currentScene === SCENE.CRAWL || currentScene === SCENE.CRAWL2 || currentScene === SCENE.TODDLE1 || currentScene === SCENE.CHILD1 || currentScene === SCENE.CHILD2 || currentScene === SCENE.ADULT || currentScene === SCENE.UNIVERSITY || currentScene === SCENE.PART_TIME || currentScene === SCENE.JOB_HUNT || currentScene === SCENE.JOB_HUNT2 || currentScene === SCENE.TRAVEL || currentScene === SCENE.THIRTIES || currentScene === SCENE.CITY || finaleHudReady) && !!baseRhythmInfo;
             scoreToggleBtn.classList.remove('visible');
             setScoreHudVisible(available);
             // Settings button: visible only during gameplay scenes
@@ -25858,10 +27156,19 @@
                 for (let pageIdx = 0; pageIdx < 2; pageIdx++) {
                     const pOffset = pageIdx * scoreHudState.stepsPerPage;
 
-                    // Page divider label
+                    // Page divider label (decorated with gradient lines + badge)
                     const pageLabel = document.createElement('div');
-                    pageLabel.style.cssText = 'text-align:center;font-size:11px;color:rgba(255,255,255,0.45);padding:' + (pageIdx === 0 ? '2px 0 2px' : '10px 0 2px') + ';letter-spacing:1px;';
-                    pageLabel.textContent = pageIdx === 0 ? '— Page 1 —' : '— Page 2 —';
+                    pageLabel.style.cssText = 'display:flex;align-items:center;gap:10px;padding:' + (pageIdx === 0 ? '2px 8px 4px' : '12px 8px 4px') + ';';
+                    var pageLine1 = document.createElement('div');
+                    pageLine1.style.cssText = 'flex:1;height:1px;background:linear-gradient(90deg,transparent,rgba(160,170,200,0.25) 40%,rgba(160,170,200,0.35));';
+                    var pageBadge = document.createElement('span');
+                    pageBadge.style.cssText = 'font-size:10px;letter-spacing:0.12em;color:rgba(200,195,210,0.55);text-transform:uppercase;white-space:nowrap;';
+                    pageBadge.textContent = 'Page ' + (pageIdx + 1);
+                    var pageLine2 = document.createElement('div');
+                    pageLine2.style.cssText = 'flex:1;height:1px;background:linear-gradient(90deg,rgba(160,170,200,0.35),rgba(160,170,200,0.25) 60%,transparent);';
+                    pageLabel.appendChild(pageLine1);
+                    pageLabel.appendChild(pageBadge);
+                    pageLabel.appendChild(pageLine2);
                     scoreTracks.appendChild(pageLabel);
 
                     // Chord bar labels for this page
@@ -25874,13 +27181,24 @@
                         barLabelRow.appendChild(barLabelLeft);
                         const barLabelGrid = document.createElement('div');
                         barLabelGrid.className = 'score-bar-label-grid';
-                        barLabelGrid.style.gridTemplateColumns = `repeat(${baseRhythmInfo.bars}, 1fr)`;
+                        const totalBars = baseRhythmInfo.bars * 2; // 2 pages worth
+                        barLabelGrid.style.gridTemplateColumns = `repeat(${totalBars}, 1fr)`;
                         const chordNames = inheritedChordProgression.chords;
-                        for (let ci = 0; ci < baseRhythmInfo.bars; ci++) {
+                        barLabelGrid.style.gap = '3px';
+                        for (let ci = 0; ci < totalBars; ci++) {
                             const lbl = document.createElement('div');
                             lbl.className = 'score-bar-label';
-                            const chordIdx = (pageIdx * baseRhythmInfo.bars + ci) % chordNames.length;
+                            lbl.style.borderRadius = '3px';
+                            lbl.style.color = 'rgba(190,185,210,0.8)';
+                            const chordIdx = ci % chordNames.length;
                             lbl.textContent = chordNames[chordIdx];
+                            // Highlight current page's bars, dim the other page's
+                            if (ci >= pageIdx * baseRhythmInfo.bars && ci < (pageIdx + 1) * baseRhythmInfo.bars) {
+                                lbl.style.background = 'rgba(255,255,255,0.06)';
+                            } else {
+                                lbl.style.background = 'rgba(255,255,255,0.02)';
+                                lbl.style.opacity = '0.5';
+                            }
                             barLabelGrid.appendChild(lbl);
                         }
                         barLabelRow.appendChild(barLabelGrid);
@@ -25895,6 +27213,9 @@
                         const labelEl = document.createElement('div');
                         labelEl.className = 'score-label';
                         labelEl.textContent = row.label;
+                        labelEl.style.textTransform = 'uppercase';
+                        labelEl.style.letterSpacing = '0.08em';
+                        labelEl.style.color = 'rgba(180,175,195,0.88)';
 
                         const gridEl = document.createElement('div');
                         gridEl.className = 'score-grid';
@@ -25968,13 +27289,20 @@
                 barLabelRow.appendChild(barLabelLeft);
                 const barLabelGrid = document.createElement('div');
                 barLabelGrid.className = 'score-bar-label-grid';
-                barLabelGrid.style.gridTemplateColumns = `repeat(${baseRhythmInfo.bars}, 1fr)`;
                 const chordNames = inheritedChordProgression.chords;
                 const barLabelCells = [];
-                for (let i = 0; i < baseRhythmInfo.bars; i++) {
+                const barCount = isFinale ? baseRhythmInfo.bars * 2 : baseRhythmInfo.bars;
+                barLabelGrid.style.gridTemplateColumns = `repeat(${barCount}, 1fr)`;
+                if (isFinale) barLabelGrid.style.gap = '3px';
+                for (let i = 0; i < barCount; i++) {
                     const lbl = document.createElement('div');
                     lbl.className = 'score-bar-label';
                     lbl.textContent = chordNames[i % chordNames.length];
+                    if (isFinale) {
+                        lbl.style.background = 'rgba(255,255,255,0.04)';
+                        lbl.style.borderRadius = '3px';
+                        lbl.style.color = 'rgba(190,185,210,0.8)';
+                    }
                     barLabelCells.push(lbl);
                     barLabelGrid.appendChild(lbl);
                 }
@@ -26002,6 +27330,11 @@
                 const labelEl = document.createElement('div');
                 labelEl.className = 'score-label';
                 labelEl.textContent = row.label;
+                if (isFinale) {
+                    labelEl.style.textTransform = 'uppercase';
+                    labelEl.style.letterSpacing = '0.08em';
+                    labelEl.style.color = 'rgba(180,175,195,0.88)';
+                }
 
                 const gridEl = document.createElement('div');
                 gridEl.className = 'score-grid';
@@ -26131,12 +27464,23 @@
             if (!scoreTracks || !scoreHudState._visRows) return;
             var isFinaleNow = currentScene === SCENE.FINALE;
 
-            // FINALE: fixed height — always use default sizes, never resize
+            // FINALE: dynamically size rows to fill the viewport
             if (isFinaleNow) {
-                scoreTracks.style.setProperty('--step-h', '10px');
-                scoreTracks.style.setProperty('--track-gap', '10px');
-                scoreTracks.style.setProperty('--label-fs', '0.74rem');
-                scoreTracks.style.setProperty('--bar-label-h', '16px');
+                var fVh = window.innerHeight;
+                var fMaxH = fVh - 40;       // HUD maxHeight constraint
+                var fPadH = 20 + 18;        // HUD padding top+bottom
+                var fHeadH = 56;            // score-head + separator + margin
+                var fBarH = 22;             // bar-label row
+                var fRowCount = scoreHudState._visRows || 1;
+                var fBudget = fMaxH - fPadH - fHeadH - fBarH;
+                if (fBudget < 40) fBudget = 40;
+                var fPerRow = fBudget / fRowCount;
+                var fGap = Math.max(4, Math.min(20, Math.round(fPerRow * 0.35)));
+                var fStepH = Math.max(8, Math.min(18, Math.round(fPerRow - fGap)));
+                scoreTracks.style.setProperty('--step-h', fStepH + 'px');
+                scoreTracks.style.setProperty('--track-gap', fGap + 'px');
+                scoreTracks.style.setProperty('--label-fs', '0.78rem');
+                scoreTracks.style.setProperty('--bar-label-h', '18px');
                 return;
             }
 
@@ -26271,6 +27615,7 @@
                 const barSteps = STEPS_PER_BEAT * baseRhythmInfo.beatsPerBar;
                 const effectiveStep = usePagination ? displayStep : step;
                 const currentBar = Math.floor(effectiveStep / barSteps) % baseRhythmInfo.bars;
+                const totalBar = Math.floor(effectiveStep / barSteps) % (scoreHudState.barLabelCells ? scoreHudState.barLabelCells.length : baseRhythmInfo.bars);
                 if (scoreHudState.chordCells) {
                     scoreHudState.chordCells.forEach((cell, i) => {
                         cell.classList.toggle('active', i === currentBar);
@@ -26278,7 +27623,7 @@
                 }
                 if (scoreHudState.barLabelCells) {
                     scoreHudState.barLabelCells.forEach((cell, i) => {
-                        cell.classList.toggle('active', i === currentBar);
+                        cell.classList.toggle('active', i === totalBar);
                     });
                 }
             }
@@ -26574,15 +27919,15 @@
             const leftBpm = randInt(52, 66);
             const middleBpm = randInt(62, 78);
             const rightBpm = Math.max(middleBpm + 12, randInt(84, 108));
-            const fastBpm = Math.max(rightBpm + 12, randInt(112, 138));
+            const fastBpm = playCount >= 1 ? Math.max(rightBpm + 12, randInt(112, 138)) : 0;
             const leftBank = makeAbcPatternBank(4, RHYTHM_BARS, 10);
             const middleBank = makeAbcPatternBank(4, RHYTHM_BARS, 10);
             const rightBank = makeAbcPatternBank(3, RHYTHM_BARS, 10);
-            const fastBank = makeAbcPatternBank(4, RHYTHM_BARS, 10);
+            const fastBank = playCount >= 1 ? makeAbcPatternBank(4, RHYTHM_BARS, 10) : null;
             const leftSample = makeLeftSparseSample() || pickRandom(leftBank);
             const middleSample = pickRandom(middleBank);
             const rightSample = pickRandom(rightBank);
-            const fastSample = pickRandom(fastBank);
+            const fastSample = playCount >= 1 ? pickRandom(fastBank) : null;
             choiceRhythm = {
                 left: { bpm: leftBpm, sample: leftSample },
                 middle: { bpm: middleBpm, sample: middleSample },
@@ -26594,11 +27939,13 @@
             leftTrack = createKickTrack(btnLeft, leftBpm, leftSample);
             middleTrack = createKickTrack(btnMiddle, middleBpm, middleSample);
             rightTrack = createKickTrack(btnRight, rightBpm, rightSample);
-            fastTrack = createKickTrack(btnFast, fastBpm, fastSample);
+            if (playCount >= 1) {
+                fastTrack = createKickTrack(btnFast, fastBpm, fastSample);
+                startKickTrack(fastTrack);
+            }
             startKickTrack(leftTrack);
             startKickTrack(middleTrack);
             startKickTrack(rightTrack);
-            startKickTrack(fastTrack);
         }
 
         function updateProximityAudio() {
@@ -26621,12 +27968,12 @@
             const leftInfo = getInfo(btnLeft);
             const middleInfo = getInfo(btnMiddle);
             const rightInfo = getInfo(btnRight);
-            const fastInfo = getInfo(btnFast);
+            const fastInfo = playCount >= 1 ? getInfo(btnFast) : null;
 
             if(leftTrack) leftTrack.volumeDb = leftInfo.vol;
             if(middleTrack) middleTrack.volumeDb = middleInfo.vol;
             if(rightTrack) rightTrack.volumeDb = rightInfo.vol;
-            if(fastTrack) fastTrack.volumeDb = fastInfo.vol;
+            if(fastTrack && fastInfo) fastTrack.volumeDb = fastInfo.vol;
 
             const setTrackHoverState = (track, active) => {
                 if (!track) return;
@@ -26641,14 +27988,16 @@
             setTrackHoverState(leftTrack, leftInfo.isOver);
             setTrackHoverState(middleTrack, middleInfo.isOver);
             setTrackHoverState(rightTrack, rightInfo.isOver);
-            setTrackHoverState(fastTrack, fastInfo.isOver);
+            if (playCount >= 1) setTrackHoverState(fastTrack, fastInfo.isOver);
 
             // Visual Hover: always keep exactly one button hovered (nearest one).
-            const candidates = [leftInfo, middleInfo, rightInfo, fastInfo].sort((a, b) => a.dist - b.dist);
+            const candidates = [leftInfo, middleInfo, rightInfo];
+            if (fastInfo) candidates.push(fastInfo);
+            candidates.sort((a, b) => a.dist - b.dist);
             btnLeft.classList.remove('hovered');
             btnMiddle.classList.remove('hovered');
             btnRight.classList.remove('hovered');
-            btnFast.classList.remove('hovered');
+            if (playCount >= 1) btnFast.classList.remove('hovered');
             candidates[0].btn.classList.add('hovered');
         }
 
@@ -26789,6 +28138,9 @@
             currentScene = SCENE.CRAWL;
             floorColor = pickFloorColor();
             baby = new Baby(babyColorScheme);
+            gameStartTime = Date.now();
+            totalWalkSteps = 0;
+            prevWalkCycle = null;
             selectedToys = [];
             inheritedHatPattern = null;
             inheritedHatStyleClass = 'hat';
